@@ -724,7 +724,7 @@ mod hardware_inserts {
     fn measured() -> T {
         let mut t = with_window();
         t.section("section_hardware");
-        t.app.engine.store_hardware_latency("Out 3-4", "In 3-4", 612, 48_000);
+        t.app.engine.store_hardware_latency("Out 3-4", "In 3-4", 612, 48_000, false);
         t.frames(3);
         t
     }
@@ -794,7 +794,7 @@ mod hardware_inserts {
     }
 
     fn done(frames: u32, spread: u32) -> Result<Measured, ProbeError> {
-        Ok(Measured { round_trip_frames: frames, spread_frames: spread, found: 8, sent: 8 })
+        Ok(Measured { round_trip_frames: frames, spread_frames: spread, found: 8, sent: 8, term: false })
     }
 
     #[test]

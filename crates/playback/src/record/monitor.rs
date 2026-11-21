@@ -1,7 +1,10 @@
 use super::finite;
 use crate::band_limited::{self, Frames, SincTable};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+
+mod aligned;
+pub use aligned::Coordinates;
 
 /// Lifetime monitor diagnostics. Independent fields may straddle a callback.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -48,6 +51,16 @@ struct MonitorReader {
     den: i64,
     removed_frames: u64,
     table: &'static SincTable,
+    /// The same-cycle anchor of the aligned read (ADR 0015, Amendment 2026-11-16, rules 3 and 9):
+    /// the accepted input frame count less one less the output frame it was paired with, so input
+    /// frame `k` (counted as accepted) was captured with output frame `k - anchor`. `None` until
+    /// the first aligned read that finds input, and after a capture loss until a re-anchor.
+    anchor: Option<i128>,
+    /// [`InputRing::losses`] as this reader last saw it.
+    losses_seen: u64,
+    /// The output frame of the callback in which a loss invalidated the anchor: the re-anchor waits
+    /// for another callback's pair (that callback's capture may be the one that lost frames).
+    held: Option<u64>,
 }
 
 /// The queued input as the reader sees it: the queue's front frame at index 0, zeros outside.
@@ -224,6 +237,12 @@ pub struct InputRing {
     /// The first channel of the System Audio pair (#268) the input carries after the device's
     /// own, `usize::MAX` for none. Set once, before the ring is shared.
     system_channel: AtomicUsize,
+    /// Capture losses: pushes that dropped input frames (a full FIFO, contention, a fault, a
+    /// partial frame). Each one invalidates the aligned read's anchor (rule 9's capture loss): a
+    /// count of accepted frames alone never bridges a loss.
+    losses: AtomicU64,
+    /// How the last read was made ([`InputRing::alignment`]): one Relaxed store per read.
+    alignment: AtomicU8,
 }
 
 impl InputRing {
@@ -245,7 +264,18 @@ impl InputRing {
         let (producer, queue) = rtrb::RingBuffer::new(frames * ch);
         let (producer, reader) = (
             Mutex::new(producer),
-            Mutex::new(MonitorReader { queue, ch, frame: vec![0.0; ch], units: 0, den: 1, removed_frames: 0, table: band_limited::table() }),
+            Mutex::new(MonitorReader {
+                queue,
+                ch,
+                frame: vec![0.0; ch],
+                units: 0,
+                den: 1,
+                removed_frames: 0,
+                table: band_limited::table(),
+                anchor: None,
+                losses_seen: 0,
+                held: None,
+            }),
         );
         // On macOS `std::sync::Mutex` is a lazily boxed `pthread_mutex_t`: the first lock or
         // `try_lock` allocates 64 bytes. Take each lock once here, on the control thread, so the
@@ -268,6 +298,8 @@ impl InputRing {
             system_channel: AtomicUsize::new(usize::MAX),
             aligned_backlog_blocks: if paired { ALIGNED_BACKLOG_BLOCKS_PAIRED } else { ALIGNED_BACKLOG_BLOCKS_UNPAIRED },
             counters: MonitorCounters::default(),
+            losses: AtomicU64::new(0),
+            alignment: AtomicU8::new(aligned::NONE),
         })
     }
 
@@ -287,15 +319,21 @@ impl InputRing {
     pub fn push(&self, samples: &[f32]) {
         let frames = samples.len() / self.ch;
         self.last_push_frames.store(frames, Ordering::Relaxed);
-        self.counters.incomplete.fetch_add((samples.len() % self.ch) as u64, Ordering::Relaxed);
+        let partial = samples.len() % self.ch;
+        self.counters.incomplete.fetch_add(partial as u64, Ordering::Relaxed);
+        if partial > 0 {
+            self.losses.fetch_add(1, Ordering::Release);
+        }
         let mut producer = match self.producer.try_lock() {
             Ok(p) => p,
             Err(std::sync::TryLockError::WouldBlock) => {
                 self.counters.input_contention.fetch_add(frames as u64, Ordering::Relaxed);
+                self.losses.fetch_add(1, Ordering::Release);
                 return;
             }
             Err(std::sync::TryLockError::Poisoned(_)) => {
                 self.counters.input_fault.fetch_add(frames as u64, Ordering::Relaxed);
+                self.losses.fetch_add(1, Ordering::Release);
                 return;
             }
         };
@@ -309,6 +347,7 @@ impl InputRing {
         if lost > 0 {
             self.counters.overflow.fetch_add(lost as u64, Ordering::Relaxed);
             self.overrun_pending.store(true, Ordering::Release);
+            self.losses.fetch_add(1, Ordering::Release);
         }
     }
 
@@ -340,6 +379,16 @@ impl InputRing {
     /// Fill `out` (planar, at `session_rate`) with up to `frames` frames, converting from the
     /// input rate. Missing frames are counted silence. No allocation or wait occurs here.
     pub fn pop_into(&self, out: &mut [Vec<f32>], frames: usize, session_rate: u32) {
+        if let Some((mut reader, frames)) = self.begin_read(out, frames) {
+            self.alignment.store(aligned::NONE, Ordering::Relaxed);
+            self.read_queued(&mut reader, out, frames, session_rate);
+        }
+    }
+
+    /// The start of every read: zero `out`, count what does not fit, take the reader (counting
+    /// contention or a fault and returning `None`), and apply a pending clear or overflow flush.
+    /// Returns the reader and the frames to read.
+    fn begin_read(&self, out: &mut [Vec<f32>], frames: usize) -> Option<(std::sync::MutexGuard<'_, MonitorReader>, usize)> {
         for c in out.iter_mut() {
             c.iter_mut().take(frames).for_each(|x| *x = 0.0);
         }
@@ -350,11 +399,11 @@ impl InputRing {
             Ok(r) => r,
             Err(std::sync::TryLockError::WouldBlock) => {
                 self.counters.output_contention.fetch_add(frames as u64, Ordering::Relaxed);
-                return;
+                return None;
             }
             Err(std::sync::TryLockError::Poisoned(_)) => {
                 self.counters.output_fault.fetch_add(frames as u64, Ordering::Relaxed);
-                return;
+                return None;
             }
         };
         let overrun = self.overrun_pending.swap(false, Ordering::AcqRel);
@@ -363,6 +412,13 @@ impl InputRing {
             self.counters.discarded.fetch_add(reader.clear() as u64, Ordering::Relaxed);
             self.counters.recoveries.fetch_add(u64::from(overrun), Ordering::Relaxed);
         }
+        Some((reader, frames))
+    }
+
+    /// The read without the output converter's coordinates (K22's alignment, then the converter
+    /// from where the last read stopped): unpaired devices, and a paired one while its alignment
+    /// is not valid.
+    fn read_queued(&self, reader: &mut MonitorReader, out: &mut [Vec<f32>], frames: usize, session_rate: u32) {
         let (num, den) = self.ratio(session_rate);
         // Alignment waits for a read that has room and finds input: a read before the device's
         // input runs leaves it pending rather than aligning an empty ring. It keeps the read, the
@@ -390,7 +446,14 @@ impl InputRing {
     /// unknown): the converter's position moves by `num` units of `1 / den` input frames per output
     /// frame.
     fn ratio(&self, session_rate: u32) -> (i64, i64) {
-        if self.rate == 0 || session_rate == 0 || self.rate == session_rate { (1, 1) } else { (i64::from(self.rate), i64::from(session_rate)) }
+        // In thousandths of a session frame when the rates differ: the units of the aligned read
+        // (the output converter's denominator is the device rate times 1000), so a read without
+        // coordinates continues from an aligned one at exactly the same position.
+        if self.rate == 0 || session_rate == 0 || self.rate == session_rate {
+            (1, 1)
+        } else {
+            (1000 * i64::from(self.rate), 1000 * i64::from(session_rate))
+        }
     }
 
     /// The input converter's look-ahead into a plan at `session_rate`, in input frames: what the

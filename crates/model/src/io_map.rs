@@ -97,10 +97,61 @@ pub struct HardwareLatency {
     /// recorded (rule 6). Not part of the key. See [`HardwareLatency::rate_hint`].
     #[serde(default, skip_serializing_if = "is_zero")]
     pub device_rate: u32,
+    /// Term provenance (rule 5): `Some` when the #709 converter term was in force while it was
+    /// measured (a paired device at speed 1 with the input aligned from the output converter's
+    /// coordinates), holding the normalized figure, `round_trip_frames` minus the term
+    /// [`converter_term`] of `rate` on `device_rate`; `None` otherwise and for every figure stored
+    /// before it was recorded. `round_trip_frames` stays the original measured total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_frames: Option<u32>,
 }
 
 fn is_zero(n: &u32) -> bool {
     *n == 0
+}
+
+/// The #709 converter term (ADR 0015, Amendment 2026-11-16, rule 2), in plan frames, for a plan at
+/// `session` Hz on a device at `device` Hz: T = ceil(32·max(1, S/D) − S/D) at a converted rate (34
+/// at 48 kHz on 44.1 kHz, 32 at 44.1 on 48, 62 at 96 on 48), 0 at equal rates (the converters pass
+/// samples through) and when either rate is unknown (0). Integers only: at S ≤ D it is 32, above it
+/// ceil(31·S/D).
+#[must_use]
+pub fn converter_term(session: u32, device: u32) -> u32 {
+    if session == 0 || device == 0 || session == device {
+        return 0;
+    }
+    if session < device {
+        return 32;
+    }
+    let (s, d) = (u64::from(session), u64::from(device));
+    u32::try_from((31 * s).div_ceil(d)).unwrap_or(u32::MAX)
+}
+
+/// The running input alignment as the latency lookup and the panels see it (ADR 0015, Amendment
+/// 2026-11-16, rules 1, 5 and 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Alignment {
+    /// No term can apply: no live input, or capture and render on separate streams (rule 1's
+    /// "out of scope": the figure is used as stored).
+    #[default]
+    None,
+    /// A paired device at speed 1 whose input is aligned from the output converter's coordinates:
+    /// a figure with term provenance gets the running term.
+    Valid,
+    /// A paired device whose alignment was invalidated (a speed other than 1x since the last
+    /// converter restart at 1x, rule 10, or a capture loss not yet re-anchored): the original
+    /// measured totals are used, and the panels say "timing changed".
+    Invalid,
+}
+
+/// What a panel says beside a latency figure (ADR 0015, Amendment 2026-11-16, rules 5 to 8 and 10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LatencyHint {
+    /// "measure again at this rate" (rules 5, 6 and 8, and separate streams).
+    MeasureAgain,
+    /// "timing changed: stop at 1x, then measure again" (rule 10); for a manual value, "timing
+    /// changed: stop at 1x, then check the manual latency" (rule 7).
+    TimingChanged,
 }
 
 /// Whether a measured figure taken with the device at `measured` Hz (0: not recorded) shows the
@@ -114,11 +165,56 @@ pub fn rate_hint(measured: u32, running: Option<u32>) -> bool {
     measured == 0 || running.is_some_and(|r| r != measured)
 }
 
+/// The hint of a measured figure (not a manual value) taken at device rate `measured` (0: not
+/// recorded), with term provenance `term`, used while the device runs at `running` with the input
+/// `alignment`: "timing changed" while the alignment is invalid (rule 10); else "measure again at
+/// this rate" for a figure with no device rate (rule 6), one used at another device rate (rule 8,
+/// term provenance included), and whenever the provenance and the alignment differ (rule 5: a term
+/// figure where the term is not in force, separate streams included; a figure without term
+/// provenance where it is). `None`: no hint.
+#[must_use]
+pub fn measured_hint(measured: u32, term: bool, running: Option<u32>, alignment: Alignment) -> Option<LatencyHint> {
+    if alignment == Alignment::Invalid {
+        return Some(LatencyHint::TimingChanged);
+    }
+    (rate_hint(measured, running) || term != (alignment == Alignment::Valid)).then_some(LatencyHint::MeasureAgain)
+}
+
+/// The hint of a manual value (rule 7): "timing changed: stop at 1x, then check the manual latency"
+/// while the alignment is invalid, else none. It never gets a measurement-provenance hint.
+#[must_use]
+pub fn manual_hint(alignment: Alignment) -> Option<LatencyHint> {
+    (alignment == Alignment::Invalid).then_some(LatencyHint::TimingChanged)
+}
+
+/// The figure a plan uses while the term is in force (rule 5): the normalized figure plus the term
+/// of the running pair when the measurement has term provenance and the running device rate is
+/// known, else `original` (a figure without provenance never gains the term).
+fn with_term(original: u32, normalized: Option<u32>, session: u32, running: Option<u32>) -> u32 {
+    match (normalized, running) {
+        (Some(n), Some(d)) => n.saturating_add(converter_term(session, d)),
+        _ => original,
+    }
+}
+
 impl HardwareLatency {
     /// [`rate_hint`] for this figure with the device running at `running`.
     #[must_use]
     pub fn rate_hint(&self, running: Option<u32>) -> bool {
         rate_hint(self.device_rate, running)
+    }
+
+    /// [`measured_hint`] for this figure.
+    #[must_use]
+    pub fn hint(&self, running: Option<u32>, alignment: Alignment) -> Option<LatencyHint> {
+        measured_hint(self.device_rate, self.normalized_frames.is_some(), running, alignment)
+    }
+
+    /// The round trip a plan uses while the term is in force with the device at `running`: the
+    /// normalized figure plus the running term with term provenance, else the measured total.
+    #[must_use]
+    pub fn aligned_frames(&self, running: Option<u32>) -> u32 {
+        with_term(self.round_trip_frames, self.normalized_frames, self.rate, running)
     }
 }
 
@@ -160,6 +256,10 @@ pub struct ExternalLatency {
     /// The rate the audio device ran at when it was measured (as [`HardwareLatency::device_rate`]).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub device_rate: u32,
+    /// Term provenance (as [`HardwareLatency::normalized_frames`]): `frames` minus the term of
+    /// `rate` on `device_rate` when the term was in force, in plan frames at `rate`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_frames: Option<u32>,
 }
 
 impl ExternalLatency {
@@ -167,6 +267,21 @@ impl ExternalLatency {
     #[must_use]
     pub fn rate_hint(&self, running: Option<u32>) -> bool {
         rate_hint(self.device_rate, running)
+    }
+
+    /// [`measured_hint`] for this figure.
+    #[must_use]
+    pub fn hint(&self, running: Option<u32>, alignment: Alignment) -> Option<LatencyHint> {
+        measured_hint(self.device_rate, self.normalized_frames.is_some(), running, alignment)
+    }
+
+    /// C at session `rate` while the term is in force with the device at `running`: the normalized
+    /// figure rescaled by time to `rate` plus the running term with term provenance, else
+    /// [`Self::frames_at`].
+    #[must_use]
+    pub fn aligned_frames_at(&self, rate: u32, running: Option<u32>) -> u32 {
+        let normalized = self.normalized_frames.map(|n| rescale(n, self.rate, rate));
+        with_term(self.frames_at(rate), normalized, rate, running)
     }
 
     /// Whether this measurement was made through `port`: by id when both have one, else by name.
@@ -193,12 +308,14 @@ impl ExternalLatency {
     /// is 975 at 44.1 kHz), as is otherwise.
     #[must_use]
     pub fn frames_at(&self, rate: u32) -> u32 {
-        if rate == self.rate || self.rate == 0 {
-            self.frames
-        } else {
-            (f64::from(self.frames) * f64::from(rate) / f64::from(self.rate)).round() as u32
-        }
+        rescale(self.frames, self.rate, rate)
     }
+}
+
+/// `frames` at rate `from` as frames at rate `to`, by time (as is when the rates match or `from`
+/// is unknown).
+fn rescale(frames: u32, from: u32, to: u32) -> u32 {
+    if to == from || from == 0 { frames } else { (f64::from(frames) * f64::from(to) / f64::from(from)).round() as u32 }
 }
 
 /// Where an External Instrument's latency comes from (ADR 0020 decision 4's lookup).
@@ -216,7 +333,12 @@ pub enum ExternalSource {
 /// An External Instrument's latency C in plan frames at the current rate, and where it came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExternalLookup {
+    /// C as measured (rescaled by the session rate), or the manual value: what the plan uses
+    /// while the #709 term is not in force.
     pub frames: u32,
+    /// C while the term is in force ([`ExternalLatency::aligned_frames_at`]); `frames` for a
+    /// manual value and a figure without term provenance.
+    pub aligned: u32,
     pub source: ExternalSource,
 }
 
@@ -251,6 +373,10 @@ pub struct IoMap {
     /// an External Instrument measurement's key the table cannot know by itself.
     #[serde(skip)]
     pub buffer: Option<u32>,
+    /// The rate the open device runs at (the Player sets it; not saved): the running term of a
+    /// figure with term provenance is computed from it (ADR 0015, Amendment 2026-11-16, rule 5).
+    #[serde(skip)]
+    pub device_rate: Option<u32>,
     /// The first live input channel of the System Audio pair while it runs (the Player sets it;
     /// not saved): the pair follows the device's own input channels. `None` when it is off or did
     /// not open, and a route to it is then silent.
@@ -460,6 +586,7 @@ impl IoMap {
             hardware_latency: Vec::new(),
             external_latency: Vec::new(),
             buffer: None,
+            device_rate: None,
             system_audio: None,
             input_ports: Vec::new(),
             input_baseline: Vec::new(),
@@ -684,6 +811,14 @@ impl IoMap {
         self.hardware_figure(send, ret, rate).map(|m| m.round_trip_frames)
     }
 
+    /// [`Self::hardware_latency`] and the round trip used while the #709 term is in force with the
+    /// device at [`Self::device_rate`] ([`HardwareLatency::aligned_frames`]), as `(original,
+    /// aligned)`.
+    #[must_use]
+    pub fn hardware_latencies(&self, send: &str, ret: &str, rate: u32) -> Option<(u32, u32)> {
+        self.hardware_figure(send, ret, rate).map(|m| (m.round_trip_frames, m.aligned_frames(self.device_rate)))
+    }
+
     /// The measurement [`Self::hardware_latency`] uses, for what the UI says about it (its device
     /// rate: [`HardwareLatency::rate_hint`]).
     #[must_use]
@@ -753,15 +888,16 @@ impl IoMap {
         let chain = || self.external_latency.iter().filter(|m| m.chain_is(port, ret) && self.figure_applies(&m.input_device, &m.input_ports));
         // A device that does not say its buffer is keyed 0, as it was when measured.
         let buffer = buffer.unwrap_or(0);
+        let aligned = |m: &ExternalLatency| m.aligned_frames_at(rate, self.device_rate);
         if let Some(m) = chain().rfind(|m| m.rate == rate && m.buffer == buffer) {
-            return Some(ExternalLookup { frames: m.frames, source: ExternalSource::Measured(m.clone()) });
+            return Some(ExternalLookup { frames: m.frames, aligned: aligned(m), source: ExternalSource::Measured(m.clone()) });
         }
         // The newest; on equal times the one stored last.
         let m = chain().fold(None::<&ExternalLatency>, |best, m| match best {
             Some(b) if b.measured_at > m.measured_at => Some(b),
             _ => Some(m),
         })?;
-        Some(ExternalLookup { frames: m.frames_at(rate), source: ExternalSource::Stale(m.clone()) })
+        Some(ExternalLookup { frames: m.frames_at(rate), aligned: aligned(m), source: ExternalSource::Stale(m.clone()) })
     }
 
     /// Whether `port` returning on `ret` was measured, but only through another input than the
@@ -779,7 +915,7 @@ impl IoMap {
     pub fn external_latency_of(&self, t: &Track, rate: u32) -> Option<ExternalLookup> {
         let e = t.external_instrument()?;
         if let Some(frames) = e.manual_frames(rate) {
-            return Some(ExternalLookup { frames, source: ExternalSource::Manual });
+            return Some(ExternalLookup { frames, aligned: frames, source: ExternalSource::Manual });
         }
         let MidiOutput::External { port, .. } = &t.midi_output else { return None };
         if e.ret.is_empty() {
@@ -1063,6 +1199,7 @@ mod tests {
             input_device: String::new(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         };
         m.set_hardware_latency(at(300, 48_000));
         m.set_hardware_latency(at(500, 44_100));
@@ -1092,6 +1229,7 @@ mod tests {
             input_device: String::new(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         }
     }
 
@@ -1159,7 +1297,11 @@ mod tests {
         if let Some(e) = t.instrument.as_mut().and_then(|i| i.external.as_mut()) {
             e.manual_ms = Some(20.0);
         }
-        assert_eq!(m.external_latency_of(&t, 48_000), Some(ExternalLookup { frames: 960, source: ExternalSource::Manual }), "manual wins");
+        assert_eq!(
+            m.external_latency_of(&t, 48_000),
+            Some(ExternalLookup { frames: 960, aligned: 960, source: ExternalSource::Manual }),
+            "manual wins"
+        );
         t.midi_output = MidiOutput::Internal;
         t.instrument = Some(Insert::external("In 1"));
         assert_eq!(m.external_latency_of(&t, 48_000), None, "no port, no measurement");

@@ -1258,6 +1258,11 @@ impl ab::Stream for JackStream {
         lock(&self.slot).as_ref().filter(|s| s.id == self.session).map(Session::device_lines).unwrap_or_default()
     }
 
+    /// The server's rate as its sample rate callback last published it (`None` until known).
+    fn rate(&self) -> Option<u32> {
+        Some(self.shared.sample_rate()).filter(|r| *r != engine::UNKNOWN)
+    }
+
     /// The server refused the buffer size the open asked for (`jack_set_buffer_size` failed).
     fn period_declined(&self) -> bool {
         lock(&self.slot).as_ref().is_some_and(|s| s.id == self.session && s.declined)

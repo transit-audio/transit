@@ -145,6 +145,10 @@ pub struct Measured {
     /// input frames, rounded (`None` when the plan reported none). C moves frame for frame with
     /// it (ADR 0020 decision 2).
     pub backlog: Option<u32>,
+    /// The #709 converter term was in force for every block of the run (the return aligned from
+    /// the output converter's coordinates): the figure has term provenance (ADR 0015, Amendment
+    /// 2026-11-16, rule 5; ADR 0020's amendment of the same day).
+    pub term: bool,
 }
 
 impl Measured {
@@ -175,7 +179,8 @@ pub enum MeasureError {
     DeviceLost,
     /// The input ring's backlog B changed during the run (a different input alignment): C would
     /// be off by the change. Measure again. `first` is the first measured note window's mean B,
-    /// `last` the window mean farthest from it, in input frames.
+    /// `last` the window mean farthest from it, in input frames. Also when the #709 alignment
+    /// changed during the run (some blocks aligned, some not), with `first` and `last` the run's B.
     InputAlignmentChanged { first: u32, last: u32 },
 }
 
@@ -218,6 +223,10 @@ pub struct ExtProbe {
     b_max: [AtomicU64; WINDOWS],
     /// Frames of the last plan block read: the guard's tolerance is half of it.
     b_read: AtomicU64,
+    /// A block of the run was read without the term in force, and one with it
+    /// ([`Self::note_alignment`]).
+    unaligned: std::sync::atomic::AtomicBool,
+    aligned: std::sync::atomic::AtomicBool,
 }
 
 impl std::fmt::Debug for ExtProbe {
@@ -250,6 +259,8 @@ impl ExtProbe {
             b_min: std::array::from_fn(|_| AtomicU64::new(NONE)),
             b_max: std::array::from_fn(|_| AtomicU64::new(0)),
             b_read: AtomicU64::new(0),
+            unaligned: std::sync::atomic::AtomicBool::new(false),
+            aligned: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -298,6 +309,8 @@ impl ExtProbe {
             self.b_max[w].store(0, Ordering::Relaxed);
         }
         self.b_read.store(0, Ordering::Relaxed);
+        self.unaligned.store(false, Ordering::Relaxed);
+        self.aligned.store(false, Ordering::Relaxed);
         self.state.store(ARMED, Ordering::Release);
         true
     }
@@ -364,7 +377,24 @@ impl ExtProbe {
             }
         }
         let backlog = means.first().map(|m| m.round() as u32);
-        Some(analyze(&recorded, &sent, self.rate).map(|m| Measured { backlog, ..m }))
+        let (aligned, unaligned) = (self.aligned.load(Ordering::Relaxed), self.unaligned.load(Ordering::Relaxed));
+        if aligned && unaligned {
+            // The #709 alignment changed during the run (a capture loss and its re-anchor, a speed
+            // change): the run has no single C. The backlog B need not move (the aligned read keeps
+            // from its first tap), so the windows' means say nothing here.
+            let b = backlog.unwrap_or(0);
+            return Some(Err(MeasureError::InputAlignmentChanged { first: b, last: b }));
+        }
+        let term = aligned;
+        Some(analyze(&recorded, &sent, self.rate).map(|m| Measured { backlog, term, ..m }))
+    }
+
+    /// Audio thread, for each block of a run: whether the block's return was read with the #709
+    /// term in force. One load and at most one store.
+    pub fn note_alignment(&self, aligned: bool) {
+        if self.state.load(Ordering::Acquire) == ARMED {
+            if aligned { &self.aligned } else { &self.unaligned }.store(true, Ordering::Relaxed);
+        }
     }
 
     /// The input ring's backlog B by note window, for the run that ended (or is running): window
@@ -524,7 +554,15 @@ pub fn analyze(recorded: &[f32], sent: &[u64], rate: u32) -> Result<Measured, Me
         return Err(MeasureError::NoSound { found: found as u32, sent: sent_n });
     }
     let summary = onset::summarize(&latencies).ok_or(MeasureError::NoSound { found: 0, sent: sent_n })?;
-    Ok(Measured { frames: summary.median.round() as u32, spread: summary.std_dev, found: found as u32, sent: sent_n, latencies, backlog: None })
+    Ok(Measured {
+        frames: summary.median.round() as u32,
+        spread: summary.std_dev,
+        found: found as u32,
+        sent: sent_n,
+        latencies,
+        backlog: None,
+        term: false,
+    })
 }
 
 #[cfg(test)]

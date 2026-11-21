@@ -460,7 +460,7 @@ impl MixEngine {
             _ => 0,
         };
         if !tail_eligible {
-            tables.prepare_block(s, pos, frames, sample_rate, !self.input.is_empty(), status, self.pool.as_ref());
+            tables.prepare_block(s, pos, frames, sample_rate, !self.input.is_empty(), self.input_aligned, status, self.pool.as_ref());
         }
 
         let any_solo = s.tracks.iter().any(|t| t.mixer.solo && !t.inactive);
@@ -474,6 +474,7 @@ impl MixEngine {
             no_suspend: self.no_suspend,
             frame,
             marker: self.marker.as_deref(),
+            aligned: self.input_aligned,
         };
         let mark = |phase: Phase, strip: Option<u32>| {
             if let Some(m) = live_in.marker {
@@ -501,7 +502,7 @@ impl MixEngine {
         };
         let tail_done = tail_latency.is_some();
         if tail_eligible && !tail_done {
-            tables.prepare_block(s, pos, frames, sample_rate, !self.input.is_empty(), status, self.pool.as_ref());
+            tables.prepare_block(s, pos, frames, sample_rate, !self.input.is_empty(), self.input_aligned, status, self.pool.as_ref());
         }
         let PlanTables { strips, phase1, aux_end, layers, keys, graph, busses, main, main_fmt, main_meter, sinks, pre_click, clicked, .. } = tables;
         let (phase1, aux_end) = (*phase1, *aux_end);
@@ -635,7 +636,7 @@ impl MixEngine {
         }
         mark(Phase::Mixdown, None);
         let DeviceLatency { main: main_arrival, device, .. } = tail_latency.unwrap_or_else(|| {
-            fold_latency(s, RenderPhases { p1, auxes, others, phase1 }, busses, sinks, pos, !self.input.is_empty(), &|i| {
+            fold_latency(s, RenderPhases { p1, auxes, others, phase1 }, busses, sinks, pos, (!self.input.is_empty(), self.input_aligned), &|i| {
                 self.pool.as_ref().is_some_and(|p| p.preparation_blocked(i))
             })
         });

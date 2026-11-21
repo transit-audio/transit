@@ -136,6 +136,7 @@ impl Player {
             calibration_key: None,
             calibration: None,
             plan_input: Cell::new(false),
+            plan_ring: RefCell::new(None),
             system_audio: Cell::new(None),
             device_buffer: None,
             device_buffer_declined: false,

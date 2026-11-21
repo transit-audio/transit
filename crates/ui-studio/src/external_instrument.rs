@@ -20,8 +20,9 @@ pub const MENU_LABEL: &str = "External Instrument";
 /// `live` (an audio device is open), and `port` (`None`: a port is chosen and present; else its
 /// label when missing, or an empty string when none is chosen), and whether it is a warning (a
 /// measurement of another rate or buffer in use). `rate` converts frames to ms and `buffer` is
-/// the open device's, against which a measurement is "measure again"; `device_rate` the rate the
-/// device runs at, against which a measurement is "measure again at this rate" (#709).
+/// the open device's, against which a measurement is "measure again"; `timing` the rate the device
+/// runs at and the input's alignment, against which a measurement is "measure again at this rate"
+/// or "timing changed" (#709). While the term is in force the line shows the term figure.
 #[must_use]
 pub fn state_line(
     report: Option<&ExternalReport>,
@@ -29,7 +30,7 @@ pub fn state_line(
     port: Option<&str>,
     rate: u32,
     buffer: Option<u32>,
-    device_rate: Option<u32>,
+    timing: crate::hardware_ui::Timing,
 ) -> (String, bool) {
     if !live {
         return ("No audio device".into(), false);
@@ -39,7 +40,8 @@ pub fn state_line(
         && port.is_none()
         && let (Some(frames), Some(source)) = (r.latency, r.source.as_ref())
     {
-        return crate::external_measure::latency_text(frames, source, rate, buffer, device_rate);
+        let frames = if timing.alignment == transit_model::Alignment::Valid { r.aligned_latency.unwrap_or(frames) } else { frames };
+        return crate::external_measure::latency_text(frames, source, rate, buffer, timing);
     }
     (plain_state(report, port, rate), false)
 }
@@ -96,6 +98,8 @@ impl StudioApp {
         // measurement of this key (ADR 0020 decision 5).
         let mut io = self.engine.io_map().clone();
         io.buffer = self.device_buffer();
+        // And the rate the device runs at: a figure with term provenance gets its running term.
+        io.device_rate = self.device_rate();
         #[cfg(test)]
         let duplex = self.external_measure.fake.is_some() || self.player.as_ref().is_some_and(|p| p.duplex());
         #[cfg(not(test))]
@@ -314,7 +318,7 @@ pub(crate) fn card(
         _ => None,
     };
     let report = app.external_reports().into_iter().find(|x| x.track == t);
-    let (mut state, mut stale) = state_line(report.as_ref(), live, port.as_deref(), s.sample_rate.hz(), app.device_buffer(), app.device_rate());
+    let (mut state, mut stale) = state_line(report.as_ref(), live, port.as_deref(), s.sample_rate.hz(), app.device_buffer(), app.timing());
     // A figure measured through another input is not used (ADR 0015, amendment for #431, rule 13).
     if let (Some(r), MidiOutput::External { port: p, .. }) = (report.as_ref(), &output)
         && r.state == ExternalState::Unmeasured
@@ -509,12 +513,12 @@ mod tests {
     }
 
     fn state_text(report: Option<&ExternalReport>, live: bool, port: Option<&str>, rate: u32, buffer: Option<u32>) -> String {
-        state_line(report, live, port, rate, buffer, None).0
+        state_line(report, live, port, rate, buffer, crate::hardware_ui::Timing::default()).0
     }
 
     fn report(state: ExternalState, latency: Option<u32>) -> ExternalReport {
         let source = latency.map(|_| transit_model::ExternalSource::Manual);
-        ExternalReport { track: TrackId(1), ret: "In 1".into(), state, latency, source }
+        ExternalReport { track: TrackId(1), ret: "In 1".into(), state, latency, aligned_latency: latency, source }
     }
 
     #[test]

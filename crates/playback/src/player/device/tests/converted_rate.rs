@@ -1,21 +1,23 @@
-//! #724: through a paired fake device, with capture starting into an empty ring after four
-//! callbacks without capture, the hardware probe's reading at a converted device rate exceeds the
-//! equal-rate one by an amount within a tested range per rate pair, at every callback pattern
-//! tested, and the ring reads silence only while the input converter starts and at most one frame
-//! after; at any rate a loop wrap inside a callback moves nothing. The probe adds its click after
-//! the output converter (`HwProbe::add_click` on the converted frame), so its readings are not the
-//! exact delay of a send through the converter.
+//! #709 (ADR 0015, Amendment 2026-11-16 on the converter term): through a paired fake device, with
+//! capture starting into an empty ring after four callbacks without capture, the hardware probe's
+//! reading at a converted device rate exceeds the equal-rate one by exactly the term T at every
+//! rate pair the ADR lists and every callback pattern tested (it was a tested range before, #724),
+//! the figure has term provenance, and the ring reads silence only while capture starts, within
+//! rule 9's bound, never after; at any rate a loop wrap inside a callback moves nothing. The probe's
+//! click goes through the output converter like the render (`HwProbe::add_click`).
 
 use super::*;
 
-struct Probe {
-    m: crate::hardware_probe::Measured,
+pub(super) struct Probe {
+    pub(super) m: crate::hardware_probe::Measured,
     /// Live input underrun frames while the input converter starts (from the first callback that
     /// delivered input until the first callback that read none: its look-ahead is not queued yet)
     /// and in every callback after that.
     underrun_start: u64,
     underrun_later: u64,
     discarded: u64,
+    /// How the plan's input was aligned when the result came.
+    pub(super) alignment: transit_model::Alignment,
 }
 
 /// A paired duplex fake device at `device` Hz under a session at `session` Hz whose capture is the
@@ -24,15 +26,25 @@ struct Probe {
 /// starts after `warm` callbacks with input. With `looped`, the transport plays
 /// a loop of that many session frames from 0 throughout.
 fn measure(session: u32, device: u32, delay: usize, sizes: &[usize], warm: usize, looped: Option<i64>) -> Probe {
+    measure_on(true, session, device, delay, sizes, warm, looped)
+}
+
+/// [`measure`] on a paired device (`paired`: the input delivered before each render in one
+/// callback, native ASIO or JACK) or one whose input runs on its own callback (WASAPI, cpal).
+pub(super) fn measure_on(paired: bool, session: u32, device: u32, delay: usize, sizes: &[usize], warm: usize, looped: Option<i64>) -> Probe {
     use ab::fake::{SliceSink, SliceSource};
     let widest = sizes.iter().copied().max().unwrap();
     let format = ab::Format::new(device, 2, ab::SampleFormat::F32);
-    let fake = ab::fake::FakeBackend::new(format).with_capture(2, true);
+    let fake = ab::fake::FakeBackend::new(format).with_capture(2, paired);
     let cfg = AudioConfig::default();
     let doc = Session { sample_rate: transit_time::SampleRate::new(session).unwrap(), ..Session::default() };
     let player = Player::open_native_or_cpal(Arc::new(doc), &cfg, &fake, &fake_factory(false)).unwrap();
     let recorder = player.open_input(&cfg).expect("the duplex input");
     player.set_input(Arc::clone(&recorder.monitor)).unwrap();
+    if !paired {
+        // An input that opened on its own: the app's path table names its inputs.
+        player.set_io(transit_model::IoMap::for_device("test", "fake", 2, 2)).unwrap();
+    }
     if let Some(end) = looped {
         player.play(0, None, Some(transit_time::Range { start: 0, end })).unwrap();
     }
@@ -73,7 +85,7 @@ fn measure(session: u32, device: u32, delay: usize, sizes: &[usize], warm: usize
         if let Some(r) = player.hardware_probe_result() {
             let m = r.unwrap_or_else(|e| panic!("{session} on {device}: {e}"));
             let discarded = recorder.monitor.telemetry().discarded_frames;
-            return Probe { m, underrun_start: start, underrun_later: later, discarded };
+            return Probe { m, underrun_start: start, underrun_later: later, discarded, alignment: player.input_alignment() };
         }
     }
     panic!("{session} on {device}: no result");
@@ -82,14 +94,14 @@ fn measure(session: u32, device: u32, delay: usize, sizes: &[usize], warm: usize
 /// A loopback delay of whole 10 ms periods at `device` Hz, longer than any callback of `sizes`
 /// (the fake loops back only frames already rendered), and the ideal round trip it is in plan
 /// frames at `session` Hz (exact: a 10 ms period is a whole number of frames at every rate here).
-fn delay(session: u32, device: u32, sizes: &[usize]) -> (usize, i64) {
+pub(super) fn delay(session: u32, device: u32, sizes: &[usize]) -> (usize, i64) {
     let widest = sizes.iter().copied().max().unwrap();
     let periods = widest * 100 / device as usize + 2;
     (periods * device as usize / 100, (periods * session as usize / 100) as i64)
 }
 
 /// The probe's round trip past the ideal one, and the probe.
-fn extra(session: u32, device: u32, sizes: &[usize], warm: usize, looped: Option<i64>) -> (i64, Probe) {
+pub(super) fn extra(session: u32, device: u32, sizes: &[usize], warm: usize, looped: Option<i64>) -> (i64, Probe) {
     let (delay, ideal) = delay(session, device, sizes);
     let p = measure(session, device, delay, sizes, warm, looped);
     (p.m.round_trip_frames as i64 - ideal, p)
@@ -97,42 +109,53 @@ fn extra(session: u32, device: u32, sizes: &[usize], warm: usize, looped: Option
 
 /// Callbacks with input before the probe starts: two whole periods of the 44.1/48 kHz rounding
 /// pattern (147 callbacks), so the measurement sees no settling.
-const WARM: usize = 300;
+pub(super) const WARM: usize = 300;
 
-/// Session and device rates; the low end of the range of extra plan frames the probe may read at
-/// that pair over the equal-rate reading (the test allows that figure or one more and does not
-/// assert which occurs); and the most silence the input converter's start may read. With capture
-/// starting into an empty ring, the input's place is set where its first read stops for want of
-/// queued input, and a later callback can need one input frame more, read once as one frame of
-/// silence. Which figure occurs depends on the converters' relative phase, the input history kept
-/// at alignment and the callback endpoints met afterward; the buffer influences those but does not
-/// determine it alone. One callback is never in the figure.
-const PAIRS: [(u32, u32, i64, u64); 8] = [
-    (48_000, 44_100, 34, 18),
-    (44_100, 48_000, 32, 16),
-    (48_000, 96_000, 31, 16),
-    (96_000, 48_000, 61, 31),
-    (48_000, 88_200, 32, 16),
-    (44_100, 88_200, 31, 16),
-    (48_000, 176_400, 32, 16),
-    (48_000, 192_000, 31, 16),
+/// Session and device rates, and the term T the ADR lists for the pair (rule 2): the probe reads
+/// exactly that many plan frames over the equal-rate reading.
+const PAIRS: [(u32, u32, i64); 8] = [
+    (48_000, 44_100, 34),
+    (44_100, 48_000, 32),
+    (48_000, 96_000, 32),
+    (96_000, 48_000, 62),
+    (48_000, 88_200, 32),
+    (44_100, 88_200, 32),
+    (48_000, 176_400, 32),
+    (48_000, 192_000, 32),
 ];
+
+/// Rule 9's bound on the silence read while capture starts into an empty ring, for the widest
+/// callback: the first aligned read's position `y0` is at least `-1 - (r + T)/q` input frames from
+/// the first frame kept (`r`, the first block's render frames, is at most the callback's frames
+/// times q plus the converter's reach, 16·max(1, q) + 1), so `ceil(q·(h + 1) + reach + T)` plan
+/// frames, h = halo(1/q).
+fn start_bound(session: u32, device: u32) -> u64 {
+    let q = f64::from(session) / f64::from(device);
+    let h = transit_resample::halo(1.0 / q) as f64;
+    let reach = 16.0 * q.max(1.0) + 1.0;
+    (q * (h + 1.0) + reach + f64::from(transit_model::converter_term(session, device))).ceil() as u64
+}
 
 const SIZES: [&[usize]; 11] = [&[32], &[64], &[128], &[192], &[256], &[512], &[600], &[1024], &[100, 37, 256], &[768, 64], &[600, 100]];
 
 #[test]
-fn hardware_probe_extra_delay_stays_within_the_tested_ranges() {
+fn hardware_probe_round_trip_gains_exactly_the_term_at_every_pair_and_callback_pattern() {
     for sizes in SIZES {
-        for (session, device, low, start) in PAIRS {
+        for (session, device, term) in PAIRS {
             let (extra, p) = extra(session, device, sizes, WARM, None);
             let at = format!("{session} on {device}, callbacks {sizes:?}");
-            assert!((low..=low + 1).contains(&extra), "{at}: the round trip is {extra} plan frames over the equal-rate one");
+            assert_eq!(i64::from(transit_model::converter_term(session, device)), term, "{at}: rule 2's figure");
+            assert_eq!(extra, term, "{at}: the round trip is {extra} plan frames over the equal-rate one");
             assert_eq!((p.m.found, p.m.spread_frames, p.discarded), (p.m.sent, 0, 0), "{at}");
-            assert!(p.underrun_start <= start, "{at}: {} frames of silence while the converter starts", p.underrun_start);
-            assert!(p.underrun_later <= 1, "{at}: {} frames of silence after the start", p.underrun_later);
+            assert!(p.m.term, "{at}: the term was in force for the whole run");
+            assert_eq!(p.alignment, transit_model::Alignment::Valid, "{at}");
+            let bound = start_bound(session, device);
+            assert!(p.underrun_start <= bound, "{at}: {} frames of silence while capture starts, bound {bound}", p.underrun_start);
+            assert_eq!(p.underrun_later, 0, "{at}: silence after the start");
         }
         let (extra, p) = extra(48_000, 48_000, sizes, WARM, None);
         assert_eq!((extra, p.m.spread_frames, p.underrun_start + p.underrun_later, p.discarded), (0, 0, 0, 0), "equal rates, {sizes:?}");
+        assert!(p.m.term, "equal rates: the term (0) is in force");
     }
 }
 
@@ -140,7 +163,7 @@ fn hardware_probe_extra_delay_stays_within_the_tested_ranges() {
 fn a_long_warm_up_at_a_slow_drift_settles_to_the_same_figure() {
     // 48 kHz on 44.1 kHz with a 192-frame buffer drifts by a fraction of a frame per callback.
     let (extra, p) = extra(48_000, 44_100, &[192], 4_000, None);
-    assert_eq!((extra, p.m.spread_frames, p.underrun_later, p.discarded), (35, 0, 0, 0));
+    assert_eq!((extra, p.m.spread_frames, p.underrun_later, p.discarded), (34, 0, 0, 0));
 }
 
 /// A monitored input on a paired ASIO-style fake at 48 kHz, with the transport playing a loop of

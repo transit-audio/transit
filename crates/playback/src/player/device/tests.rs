@@ -1396,7 +1396,7 @@ fn an_asio_calibration_is_keyed_and_applied_by_the_buffer_the_driver_runs() {
     let player = open_asio(&fake, &asio_config());
     let key = player.calibration_key.clone().expect("a key");
     assert_eq!((key.period, player.device_buffer), (256, Some(256)), "the run's buffer, not the request's 128");
-    let measured = crate::hardware_probe::Measured { round_trip_frames: 1_196, spread_frames: 3, found: 8, sent: 8 };
+    let measured = crate::hardware_probe::Measured { round_trip_frames: 1_196, spread_frames: 3, found: 8, sent: 8, term: false };
     let record = player.calibration_record(&measured).unwrap();
     assert_eq!(record.period, 256);
     let cfg = AudioConfig { calibrations: vec![record.clone()], ..asio_config() };
@@ -1458,6 +1458,7 @@ mod jack_settled;
 mod no_fallback;
 mod null;
 mod open;
+mod term_alignment;
 mod wide_group;
 pub(super) use open::fake_factory;
 use open::modes;

@@ -208,6 +208,10 @@ pub struct AudioDevicesState {
     /// first. With a fake probe or a fake External Instrument Measure and no value, the session's.
     #[cfg(test)]
     pub(crate) fake_device_rate: Option<u32>,
+    /// Tests: the live input's alignment the panels compare against (#709), in place of the
+    /// Player's.
+    #[cfg(test)]
+    pub(crate) fake_alignment: Option<transit_model::Alignment>,
     /// Scripted device-loop counters (output, input) standing in for the streams, so tests can
     /// render the Backend lines without a native backend.
     #[cfg(test)]

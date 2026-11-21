@@ -199,16 +199,24 @@ pub fn progress_text(p: Progress) -> String {
 /// What the card's state line says about the latency of a playing device: the manual value, the
 /// measurement of this key, or one made at another rate or buffer; `true` (a warning) for the last,
 /// and for a measurement of this key taken with the device at another rate than `device_rate` or
-/// stored before the device's rate was recorded ("measure again at this rate", #709; used as
-/// measured). A manual value never gets that hint.
+/// stored before the device's rate was recorded, or with another input timing ("measure again at
+/// this rate"), and while the input's alignment is not valid ("timing changed", #709; used as
+/// measured). A manual value gets only its own "timing changed" hint (rule 7).
 #[must_use]
-pub fn latency_text(frames: u32, source: &ExternalSource, rate: u32, buffer: Option<u32>, device_rate: Option<u32>) -> (String, bool) {
+pub fn latency_text(frames: u32, source: &ExternalSource, rate: u32, buffer: Option<u32>, timing: crate::hardware_ui::Timing) -> (String, bool) {
+    use crate::hardware_ui::{TIMING_CHANGED_MANUAL, hint_text};
     match source {
-        ExternalSource::Manual => (format!("Manual: {:.1} ms", ms(f64::from(frames), rate)), false),
-        ExternalSource::Measured(m) if m.rate_hint(device_rate) => {
-            (format!("{}: {}", measured_text(m), crate::hardware_ui::MEASURE_AGAIN_RATE), true)
+        ExternalSource::Manual => {
+            let text = format!("Manual: {:.1} ms", ms(f64::from(frames), rate));
+            match transit_model::manual_hint(timing.alignment) {
+                Some(_) => (format!("{text}: {TIMING_CHANGED_MANUAL}"), true),
+                None => (text, false),
+            }
         }
-        ExternalSource::Measured(m) => (measured_text(m), false),
+        ExternalSource::Measured(m) => match m.hint(timing.device_rate, timing.alignment) {
+            Some(hint) => (format!("{}: {}", measured_text(m), hint_text(hint)), true),
+            None => (measured_text(m), false),
+        },
         ExternalSource::Stale(m) => (stale_text(m, rate, buffer), true),
     }
 }
@@ -362,6 +370,9 @@ impl StudioApp {
                     input_device: r.input_device.clone(),
                     input_ports: Vec::new(),
                     device_rate: r.device_rate.unwrap_or(0),
+                    // Term provenance (#709, rule 5): the figure without the term of the pair it
+                    // ran at, beside the measured C, when the term was in force for the whole run.
+                    normalized_frames: m.term.then(|| m.frames.saturating_sub(transit_model::converter_term(r.rate, r.device_rate.unwrap_or(0)))),
                 };
                 let said = result_text(&m, r.rate);
                 if m.needs_keep(r.rate) {
@@ -494,6 +505,7 @@ mod tests {
             input_device: String::new(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         }
     }
 
@@ -523,7 +535,7 @@ mod tests {
         assert_eq!((rate_text(48_000), rate_text(44_100), rate_text(96_000)), ("48 kHz".into(), "44.1 kHz".into(), "96 kHz".into()));
         assert_eq!(measured_text(&record(48_000, 64, 955)), "Measured 19.9 ms on 2026-10-24 at 48 kHz/64");
         assert_eq!(stale_text(&record(48_000, 64, 955), 44_100, Some(128)), "Measured at 48 kHz / 64, now 44.1 kHz / 128: measure again");
-        let m = Measured { frames: 1061, spread: 19.2, found: 8, sent: 8, latencies: Vec::new(), backlog: None };
+        let m = Measured { frames: 1061, spread: 19.2, found: 8, sent: 8, latencies: Vec::new(), backlog: None, term: false };
         assert_eq!(result_text(&m, 48_000), "22.1 ms (1061 frames), spread 0.4 ms, 8 of 8 notes");
         assert_eq!(spread_text(1.3), "Spread 1.3 ms is high (expected under 1 ms): the synth's attack or the driver is unsteady.");
         assert_eq!(
@@ -539,7 +551,9 @@ mod tests {
             "The return clipped: lower the synth or the input gain and measure again."
         );
         assert_eq!(progress_text(Progress { note: 3, of: 8, level: 0.0 }), "Measuring\u{2026} 3/8");
-        assert_eq!(latency_text(960, &ExternalSource::Manual, 48_000, Some(64), None), ("Manual: 20.0 ms".into(), false));
-        assert!(latency_text(955, &ExternalSource::Stale(record(48_000, 64, 955)), 48_000, Some(128), Some(48_000)).1, "a warning");
+        let none = crate::hardware_ui::Timing::default();
+        assert_eq!(latency_text(960, &ExternalSource::Manual, 48_000, Some(64), none), ("Manual: 20.0 ms".into(), false));
+        let at48 = crate::hardware_ui::Timing { device_rate: Some(48_000), ..none };
+        assert!(latency_text(955, &ExternalSource::Stale(record(48_000, 64, 955)), 48_000, Some(128), at48).1, "a warning");
     }
 }

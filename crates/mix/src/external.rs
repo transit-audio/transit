@@ -46,6 +46,8 @@ pub struct ExternalReport {
     pub state: ExternalState,
     /// The latency C in plan frames the device reports when it plays.
     pub latency: Option<u32>,
+    /// C while the #709 converter term is in force (ADR 0015, Amendment 2026-11-16, rule 5).
+    pub aligned_latency: Option<u32>,
     /// Where `latency` comes from: the manual value, a measurement of this exact key, or one made
     /// at another rate or buffer (shown with "measure again").
     pub source: Option<ExternalSource>,
@@ -56,20 +58,24 @@ pub struct ExternalReport {
 pub(crate) struct ExtSpec {
     /// The device input channels of the return (empty: the strip is silent).
     pub(crate) src: Vec<u16>,
-    /// Frames of latency, 0 when none is set.
+    /// Frames of latency, 0 when none is set: C as measured (or the manual value), used while the
+    /// #709 term is not in force.
     pub(crate) latency: u32,
+    /// C while the term is in force, picked per block with that block's live input (rule 5).
+    pub(crate) aligned_latency: u32,
 }
 
 /// C for `t` at `rate`, in plan frames, by decision 4's lookup through this machine's table `io`
-/// (manual, exact measurement, newest measurement rescaled, none).
-pub(crate) fn device_latency(t: &Track, io: &IoMap, rate: u32) -> Option<u32> {
-    io.external_latency_of(t, rate).map(|l| l.frames.min(MAX_LATENCY as u32))
+/// (manual, exact measurement, newest measurement rescaled, none), as `(measured, aligned)`: the
+/// second is the figure while the #709 term is in force.
+pub(crate) fn device_latency(t: &Track, io: &IoMap, rate: u32) -> Option<(u32, u32)> {
+    io.external_latency_of(t, rate).map(|l| (l.frames.min(MAX_LATENCY as u32), l.aligned.min(MAX_LATENCY as u32)))
 }
 
 /// The latency, in frames, `t`'s External Instrument would add: an upper bound for sizing delay
 /// lines (a plan without live input adds none).
 pub(crate) fn latency_of(t: &Track, io: &IoMap, rate: u32) -> usize {
-    if t.inactive || t.freeze.is_some() { 0 } else { device_latency(t, io, rate).unwrap_or(0) as usize }
+    if t.inactive || t.freeze.is_some() { 0 } else { device_latency(t, io, rate).map_or(0, |(c, a)| c.max(a)) as usize }
 }
 
 /// Whether `t` can send its MIDI: an external port is chosen and the playback layer has not
@@ -92,8 +98,8 @@ fn return_channels(ret: &str, io: &IoMap, in_channels: u16) -> Option<Vec<u16>> 
 pub(crate) fn spec_of(t: &Track, io: &IoMap, in_channels: u16, rate: u32, no_port: &[TrackId]) -> Option<ExtSpec> {
     let e = t.external_instrument()?;
     let src = if has_port(t, no_port) { return_channels(&e.ret, io, in_channels).unwrap_or_default() } else { Vec::new() };
-    let latency = if src.is_empty() { 0 } else { device_latency(t, io, rate).unwrap_or(0) };
-    Some(ExtSpec { src, latency })
+    let (latency, aligned_latency) = if src.is_empty() { (0, 0) } else { device_latency(t, io, rate).unwrap_or((0, 0)) };
+    Some(ExtSpec { src, latency, aligned_latency })
 }
 
 /// Every External Instrument of `s` as the machine `io` sees it. `in_channels` is what the device
@@ -106,6 +112,7 @@ pub fn external_report(s: &Session, io: &IoMap, in_channels: u16, duplex: bool, 
         let Some(e) = t.external_instrument() else { continue };
         let lookup = io.external_latency_of(t, rate);
         let latency = lookup.as_ref().map(|l| l.frames.min(MAX_LATENCY as u32));
+        let aligned_latency = lookup.as_ref().map(|l| l.aligned.min(MAX_LATENCY as u32));
         let state = if !has_port(t, no_port) {
             ExternalState::NoPort
         } else if e.ret.is_empty() {
@@ -119,7 +126,7 @@ pub fn external_report(s: &Session, io: &IoMap, in_channels: u16, duplex: bool, 
         } else {
             ExternalState::Ready
         };
-        out.push(ExternalReport { track: t.id, ret: e.ret.clone(), state, latency, source: lookup.map(|l| l.source) });
+        out.push(ExternalReport { track: t.id, ret: e.ret.clone(), state, latency, aligned_latency, source: lookup.map(|l| l.source) });
     }
     out
 }
@@ -141,15 +148,21 @@ impl ExtSlot {
     #[cfg(feature = "testing")]
     pub(crate) fn record_config(&self, w: &mut transit_state_record::Writer<'_>) {
         let ExtSlot { spec } = self;
-        let ExtSpec { src, latency } = spec;
+        let ExtSpec { src, latency, aligned_latency } = spec;
         w.usize(src.len());
         src.iter().for_each(|&c| w.u16(c));
         w.u32(*latency);
+        w.u32(*aligned_latency);
     }
 
-    /// The frames this device adds when it plays (`duplex`: live input is open): C, else 0.
-    pub(crate) fn latency(&self, duplex: bool) -> usize {
-        if duplex && !self.spec.src.is_empty() { self.spec.latency as usize } else { 0 }
+    /// The frames this device adds when it plays (`duplex`: live input is open): C (the term
+    /// figure when the block's input is `aligned`), else 0.
+    pub(crate) fn latency(&self, duplex: bool, aligned: bool) -> usize {
+        match (duplex && !self.spec.src.is_empty(), aligned) {
+            (false, _) => 0,
+            (true, true) => self.spec.aligned_latency as usize,
+            (true, false) => self.spec.latency as usize,
+        }
     }
 
     /// Fill the strip's `buf` with this block's return from the live `input` (planar, device
@@ -199,16 +212,17 @@ mod tests {
         let io = IoMap::for_device("test", "duplex", 2, 2);
         let (s, t) = track("In 1", Some(20.0));
         let tr = s.track(t).unwrap();
-        assert_eq!(device_latency(tr, &io, 48_000), Some(960));
-        assert_eq!(device_latency(tr, &io, 44_100), Some(882));
+        assert_eq!(device_latency(tr, &io, 48_000), Some((960, 960)));
+        assert_eq!(device_latency(tr, &io, 44_100), Some((882, 882)));
         let spec = spec_of(tr, &io, 2, 48_000, &[]).unwrap();
-        assert_eq!(spec, ExtSpec { src: vec![0], latency: 960 });
+        assert_eq!(spec, ExtSpec { src: vec![0], latency: 960, aligned_latency: 960 });
         let slot = ExtSlot::new(spec);
-        assert_eq!(slot.latency(true), 960);
-        assert_eq!(slot.latency(false), 0, "no live input: silent, and delay compensation does not move");
+        assert_eq!(slot.latency(true, false), 960);
+        assert_eq!(slot.latency(true, true), 960, "a manual value gets no term");
+        assert_eq!(slot.latency(false, true), 0, "no live input: silent, and delay compensation does not move");
         // A missing return or a missing port reports 0.
         let (s, t) = track("In 7", Some(20.0));
-        assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap(), ExtSpec { src: Vec::new(), latency: 0 });
+        assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap(), ExtSpec { src: Vec::new(), latency: 0, aligned_latency: 0 });
         let (s, t) = track("In 1", Some(20.0));
         assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[t]).unwrap().latency, 0);
         let (mut s, t) = track("In 1", Some(20.0));
@@ -236,6 +250,7 @@ mod tests {
             input_device: String::new(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         };
         assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().latency, 0, "not measured");
         io.set_external_latency(measured);
@@ -300,14 +315,51 @@ mod tests {
 
     #[test]
     fn the_return_fills_the_strip_with_gain_and_a_mono_return_feeds_both_sides() {
-        let slot = ExtSlot::new(ExtSpec { src: vec![1], latency: 0 });
+        let slot = ExtSlot::new(ExtSpec { src: vec![1], latency: 0, aligned_latency: 0 });
         let input = vec![vec![0.0; 4], vec![0.5, -0.5, 0.25, 1.0]];
         let mut buf = vec![vec![9.0; 4]; 2];
         assert!(slot.run(&mut buf, &input, 4, 0.5, 0));
         assert_eq!(buf, vec![vec![0.25, -0.25, 0.125, 0.5]; 2]);
         let mut buf = vec![vec![0.0; 4]; 2];
         assert!(!slot.run(&mut buf, &[], 4, 1.0, 0), "no live input");
-        assert!(!ExtSlot::new(ExtSpec { src: Vec::new(), latency: 9 }).run(&mut buf, &input, 4, 1.0, 0));
+        assert!(!ExtSlot::new(ExtSpec { src: Vec::new(), latency: 9, aligned_latency: 9 }).run(&mut buf, &input, 4, 1.0, 0));
         assert_eq!(buf, vec![vec![0.0; 4]; 2]);
+    }
+
+    /// #709 (rule 5): a measurement with term provenance (C 955 at 48 kHz on a 44.1 kHz device, the
+    /// term 34, normalized 921) gives the plan the normalized C plus the running term while the term
+    /// is in force (0 on a 48 kHz device, 32 on 96 kHz), the measured C otherwise; rescaled to
+    /// another session rate both ways by time, the term then the one of the new pair.
+    #[test]
+    fn a_term_measurement_gives_the_normalized_c_plus_the_running_term_while_aligned() {
+        let mut io = IoMap::for_device("test", "duplex", 2, 2);
+        io.buffer = Some(64);
+        let (s, t) = track("In 1", None);
+        io.set_external_latency(transit_model::ExternalLatency {
+            port_id: String::new(),
+            port_name: String::new(),
+            ret: "In 1".into(),
+            rate: 48_000,
+            buffer: 64,
+            frames: 955,
+            spread_frames: 20,
+            notes: 8,
+            measured_at: 1,
+            input_device: String::new(),
+            input_ports: Vec::new(),
+            device_rate: 44_100,
+            normalized_frames: Some(921),
+        });
+        io.device_rate = Some(48_000);
+        let slot = ExtSlot::new(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap());
+        assert_eq!((slot.latency(true, false), slot.latency(true, true)), (955, 921));
+        io.device_rate = Some(96_000);
+        assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().aligned_latency, 953, "48 on 96: T = 32");
+        io.device_rate = None;
+        assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().aligned_latency, 955, "no running rate: as measured");
+        // At a 44.1 kHz session on a 48 kHz device: 955 and 921 rescaled (877, 846), plus T = 32.
+        io.device_rate = Some(48_000);
+        let r = &external_report(&s, &io, 2, true, 44_100, &[])[0];
+        assert_eq!((r.latency, r.aligned_latency), (Some(877), Some(878)));
     }
 }

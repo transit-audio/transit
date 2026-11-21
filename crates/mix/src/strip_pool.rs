@@ -82,6 +82,8 @@ struct Job {
     frame: u64,
     /// The engine had live input this block (its emptiness is all a worker strip reads of it).
     duplex: bool,
+    /// The engine's live input was aligned with the #709 term in force this block.
+    aligned: bool,
     /// A one-channel stand-in for the live input (never read: such strips render on the callback).
     no_input: Vec<Vec<f32>>,
     busses: BusTable,
@@ -119,6 +121,7 @@ impl Job {
             no_suspend: false,
             frame: 0,
             duplex: false,
+            aligned: false,
             no_input: vec![Vec::new()],
             busses: BusTable(Vec::with_capacity(1)),
             keys: KeyBank::with_room(transit_model::INSERT_SLOTS),
@@ -145,6 +148,7 @@ impl Job {
             no_suspend,
             frame,
             duplex,
+            aligned,
             no_input,
             busses,
             keys,
@@ -168,6 +172,7 @@ impl Job {
                 no_suspend: *no_suspend,
                 frame: *frame,
                 marker,
+                aligned: *aligned,
             };
             let block = StripRender { s, busses, live: &live, pos: *pos, frames: *frames, any_solo: *any_solo, keys };
             guarded(strip, |st| process_strip(t, st, &block));
@@ -1009,6 +1014,7 @@ impl StripPool {
             job.no_suspend = b.live.no_suspend;
             job.frame = b.live.frame;
             job.duplex = !b.live.input.is_empty();
+            job.aligned = b.live.aligned;
             job.graph = 0;
             job.task = 0;
         });

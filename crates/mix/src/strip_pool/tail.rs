@@ -29,7 +29,7 @@ impl TailWork<'_> {
                 self.busses,
                 self.sinks,
                 b.pos,
-                !b.live.input.is_empty(),
+                (!b.live.input.is_empty(), b.live.aligned),
                 &|i| pool.preparation_blocked(i),
             );
             if self.latency.aborted {
@@ -115,7 +115,7 @@ impl StripPool {
                 self.deliver(i, st, g, &clock, events, b.session);
             }
         }
-        tables.prepare_block(b.session, b.pos, b.frames, b.sample_rate, !b.live.input.is_empty(), status, Some(self));
+        tables.prepare_block(b.session, b.pos, b.frames, b.sample_rate, !b.live.input.is_empty(), b.live.aligned, status, Some(self));
         let PlanTables { strips, phase1, aux_end, keys, inputs, graph, busses, main, main_fmt, sinks, .. } = tables;
         let (render, others) = strips.split_at_mut(*aux_end);
         let mut host = super::graph_host::Host {

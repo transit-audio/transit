@@ -112,8 +112,21 @@ impl Phase {
 
     /// The render frame at or before the next output frame (negative: a frame of an earlier block,
     /// which [`History`] keeps).
+    #[cfg(test)]
     pub(super) fn index(self) -> isize {
         self.units.div_euclid(self.denominator) as isize
+    }
+
+    /// The render position, in units of `1 / denominator` frames from the pending block's frame 0, of
+    /// the output frame `ahead` frames after the next one at `step` (#709: the output converter's
+    /// coordinate of a callback's last output frame). `None` on overflow.
+    pub(super) fn units_after(self, ahead: usize, step: u64) -> Option<i64> {
+        i64::try_from(ahead).ok().zip(i64::try_from(step).ok()).and_then(|(a, s)| a.checked_mul(s)).and_then(|d| self.units.checked_add(d))
+    }
+
+    /// Units per render frame: the device rate times 1000.
+    pub(super) fn denominator(self) -> i64 {
+        self.denominator
     }
 
     /// The render frames from the pending block's frame 0 that the next `output` output frames read

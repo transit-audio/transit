@@ -125,7 +125,7 @@ mod hardware_inserts {
     fn the_plus_menu_adds_a_hardware_insert_through_a_picker_that_lists_measured_pairs_first() {
         let (mut app, ctx, mut time, t) = mixer_app();
         app.engine.set_io_map(IoMap::for_device("test", "test", 4, 4));
-        app.engine.store_hardware_latency("Out 3-4", "In 3-4", 612, 48_000);
+        app.engine.store_hardware_latency("Out 3-4", "In 3-4", 612, 48_000, false);
         app.focus(t);
         frames(&mut app, &ctx, 3, &mut time);
         open_add_menu(&mut app, &ctx, &mut time);

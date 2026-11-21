@@ -668,7 +668,7 @@ fn hardware_state(
             crate::hardware_ui::MEASURE_AGAIN.to_string()
         } else {
             // A figure from another device rate, or stored without one, is used with the hint (#709).
-            crate::hardware_ui::card_text(&r.state, r.latency, rate, app.hardware_rate_hint(&r.send, &r.ret))
+            crate::hardware_ui::card_text(&r.state, app.shown_latency(r.latency, r.aligned_latency), rate, app.hardware_hint(&r.send, &r.ret))
         }
     });
     let disabled = h.disabled.is_some();
@@ -680,6 +680,8 @@ fn hardware_state(
         "Make the insert again to switch it on"
     } else if text.ends_with(crate::hardware_ui::MEASURE_AGAIN_RATE) {
         crate::hardware_ui::RATE_HINT_TIP
+    } else if text.ends_with(crate::hardware_ui::TIMING_CHANGED) {
+        crate::hardware_ui::TIMING_TIP
     } else {
         "The round trip through the hardware, measured in Audio Devices"
     });

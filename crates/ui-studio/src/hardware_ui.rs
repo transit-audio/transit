@@ -7,6 +7,7 @@ use crate::mixer::MenuItem;
 use crate::theme::{SPACE, TOKENS};
 use serde_json::json;
 use transit_mix::{HardwareReport, HardwareState};
+use transit_model::{Alignment, LatencyHint};
 use transit_model::{IoDirection, IoMap, TrackId};
 
 /// A send and a return path, with the round trip measured for them at the session rate.
@@ -59,13 +60,42 @@ pub const MEASURE_AGAIN: &str = "Measure again";
 pub const MEASURE_AGAIN_RATE: &str = "measure again at this rate";
 
 /// The hover text of a card that shows [`MEASURE_AGAIN_RATE`].
-pub const RATE_HINT_TIP: &str = "The round trip was measured with the audio device at another rate, or before transit recorded the \
-     device's rate. It is used as measured; Measure again in Audio Devices at the rate the device runs now.";
+pub const RATE_HINT_TIP: &str = "The round trip was measured with the audio device at another rate or input timing, or before transit \
+     recorded the device's rate. It is used as measured; Measure again in Audio Devices at the rate the device runs now.";
 
-/// [`state_text`], with [`MEASURE_AGAIN_RATE`] after a Ready insert's latency when `rate_hint`.
-pub fn card_text(state: &HardwareState, latency: Option<u32>, rate: u32, rate_hint: bool) -> String {
+/// The hint beside a measured figure while the input's alignment is not valid: the transport ran at
+/// another speed since the last stop at 1x (ADR 0015, Amendment 2026-11-16 on the #709 converter
+/// term, rule 10). The measured total is used.
+pub const TIMING_CHANGED: &str = "timing changed: stop at 1x, then measure again";
+/// The same beside a manual latency (rule 7): it is the user's compensation, never adjusted.
+pub const TIMING_CHANGED_MANUAL: &str = "timing changed: stop at 1x, then check the manual latency";
+/// The hover text of a card that shows [`TIMING_CHANGED`] or [`TIMING_CHANGED_MANUAL`].
+pub const TIMING_TIP: &str = "The transport ran at another speed since it last stopped at 1x, so the input's timing is not the one \
+     the latency was measured with. Stop at 1x to restore it.";
+
+/// What the panels compare a latency figure against (#709): the rate the device runs at (`None`:
+/// none open) and how the live input is aligned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Timing {
+    pub device_rate: Option<u32>,
+    pub alignment: Alignment,
+}
+
+/// The words of a measured figure's hint.
+pub fn hint_text(hint: LatencyHint) -> &'static str {
+    match hint {
+        LatencyHint::MeasureAgain => MEASURE_AGAIN_RATE,
+        LatencyHint::TimingChanged => TIMING_CHANGED,
+    }
+}
+
+/// [`state_text`], with a measured figure's hint after a Ready insert's latency.
+pub fn card_text(state: &HardwareState, latency: Option<u32>, rate: u32, hint: Option<LatencyHint>) -> String {
     let text = state_text(state, latency, rate);
-    if rate_hint && *state == HardwareState::Ready { format!("{text}: {MEASURE_AGAIN_RATE}") } else { text }
+    match hint {
+        Some(hint) if *state == HardwareState::Ready => format!("{text}: {}", hint_text(hint)),
+        _ => text,
+    }
 }
 
 /// What a device card says in place of the editor button.
@@ -110,13 +140,38 @@ pub struct PickerLayout {
 impl StudioApp {
     /// Every hardware insert of the session as this machine and device see it.
     pub fn hardware_reports(&self) -> Vec<HardwareReport> {
-        let io = self.engine.io_map();
+        // The table as the plan reads it: with the rate the device runs at, which gives a figure
+        // with term provenance its running term (#709).
+        let mut io = self.engine.io_map().clone();
+        io.device_rate = self.device_rate();
         let duplex = self.player.as_ref().is_some_and(|p| p.duplex());
-        transit_mix::hardware_report(self.engine.session(), io, io.outputs, io.inputs, duplex, self.engine.session().sample_rate.hz())
+        transit_mix::hardware_report(self.engine.session(), &io, io.outputs, io.inputs, duplex, self.engine.session().sample_rate.hz())
+    }
+
+    /// How the live input is aligned now (#709): `Valid` while the term is in force, `Invalid`
+    /// after another speed until a stop at 1x, `None` without a paired input.
+    pub(crate) fn input_alignment(&self) -> Alignment {
+        #[cfg(test)]
+        if let Some(alignment) = self.audio_devices.fake_alignment {
+            return alignment;
+        }
+        self.player.as_ref().map(|p| p.input_alignment()).unwrap_or_default()
+    }
+
+    /// The device rate and input alignment the panels compare latency figures against.
+    pub(crate) fn timing(&self) -> Timing {
+        Timing { device_rate: self.device_rate(), alignment: self.input_alignment() }
+    }
+
+    /// The figure of a Ready report in use now: the term figure while the term is in force.
+    pub(crate) fn shown_latency(&self, latency: Option<u32>, aligned: Option<u32>) -> Option<u32> {
+        if self.input_alignment() == Alignment::Valid { aligned.or(latency) } else { latency }
     }
 
     /// The rate the open audio device runs at, `None` without one: what a measurement records and
-    /// what its "measure again at this rate" hint compares against.
+    /// what its "measure again at this rate" hint compares against. The backend's live figure where
+    /// it publishes one (a JACK server's rate change before the reopen), so a Measure that ends after
+    /// such a change is refused.
     pub(crate) fn device_rate(&self) -> Option<u32> {
         #[cfg(test)]
         if let Some(rate) = self.audio_devices.fake_device_rate {
@@ -126,14 +181,15 @@ impl StudioApp {
         if self.audio_devices.fake_probe.is_some() || self.external_measure.fake.is_some() {
             return Some(self.engine.session().sample_rate.hz());
         }
-        self.player.as_ref().filter(|p| !p.silent).map(|p| p.device_rate)
+        self.player.as_ref().filter(|p| !p.silent).map(|p| p.running_device_rate())
     }
 
-    /// Whether the figure the hardware insert sending on `send` and returning on `ret` uses shows
-    /// [`MEASURE_AGAIN_RATE`] (no figure: no hint).
-    pub(crate) fn hardware_rate_hint(&self, send: &str, ret: &str) -> bool {
+    /// The hint of the figure the hardware insert sending on `send` and returning on `ret` uses
+    /// (no figure: no hint): [`transit_model::measured_hint`].
+    pub(crate) fn hardware_hint(&self, send: &str, ret: &str) -> Option<LatencyHint> {
         let rate = self.engine.session().sample_rate.hz();
-        self.engine.io_map().hardware_figure(send, ret, rate).is_some_and(|m| m.rate_hint(self.device_rate()))
+        let timing = self.timing();
+        self.engine.io_map().hardware_figure(send, ret, rate).and_then(|m| m.hint(timing.device_rate, timing.alignment))
     }
 
     /// Why Measure is off right now.

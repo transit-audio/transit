@@ -152,6 +152,8 @@ pub struct Player {
     pub calibration: Option<ab::Calibration>,
     /// A live input ring feeds the plan (`set_input`): the probe has something to read.
     plan_input: Cell<bool>,
+    /// That ring, for how its reads are aligned (#709, [`Self::input_alignment`]).
+    plan_ring: RefCell<Option<Arc<record::InputRing>>>,
     /// The first live input channel of the System Audio pair (#268) the input carries, which every
     /// table handed to the plan gets ([`IoMap::system_audio`]).
     system_audio: Cell<Option<u16>>,
@@ -208,6 +210,9 @@ impl Player {
         // The buffer the device runs: part of an External Instrument measurement's key (ADR 0020
         // decision 5), so the plan picks the measurement made at this buffer.
         io.buffer = if self.silent { None } else { self.device_buffer };
+        // The rate the device runs at: the running #709 term of a figure with term provenance
+        // (ADR 0015, Amendment 2026-11-16, rule 5).
+        io.device_rate = (!self.silent && self.device_rate > 0).then_some(self.device_rate);
         // Where System Audio sits in the live input: a fact of the open input, not of the table.
         io.system_audio = self.system_audio.get();
         let io = Arc::new(io);
@@ -219,8 +224,11 @@ impl Player {
     }
     pub fn set_input(&self, input: Arc<record::InputRing>) -> Result<SessionRequestId, PlayerError> {
         let system = input.system_channel().and_then(|c| u16::try_from(c).ok());
-        let id = self.owner()?.set_input(Some(input))?;
+        let id = self.owner()?.set_input(Some(Arc::clone(&input)))?;
         self.plan_input.set(true);
+        if let Ok(mut ring) = self.plan_ring.try_borrow_mut() {
+            *ring = Some(input);
+        }
         // An input with (or without) System Audio moves where its route reads: the table follows.
         if self.system_audio.replace(system) != system {
             return self.set_io((*self.io_map()).clone());
@@ -232,6 +240,26 @@ impl Player {
     /// hardware insert's return has something to read.
     pub fn duplex(&self) -> bool {
         !self.silent && (self.plan_input.get() || self.holds_input()) && self.io_map().inputs > 0
+    }
+
+    /// How the live input feeding the plan is aligned (#709; ADR 0015, Amendment 2026-11-16, rules 1,
+    /// 5 and 10): `Valid` while a paired input is read from the output converter's coordinates with
+    /// the term in force, `Invalid` while that alignment is not valid (another speed since the last
+    /// converter restart at 1x, or a capture loss not yet re-anchored), `None` without a paired
+    /// input. A relaxed atomic read.
+    pub fn input_alignment(&self) -> transit_model::Alignment {
+        if self.silent {
+            return transit_model::Alignment::None;
+        }
+        self.plan_ring.try_borrow().ok().and_then(|r| r.as_ref().map(|r| r.alignment())).unwrap_or_default()
+    }
+
+    /// The rate the device runs at now: the backend's live figure where it publishes one (native
+    /// JACK: the server's sample rate callback, [`ab::Stream::rate`]), else the rate it opened at.
+    /// Measure compares it at the end of a run, so a server rate change that arrives before the
+    /// reopen refuses the result instead of stamping it with the old rate.
+    pub fn running_device_rate(&self) -> u32 {
+        self.stream.as_ref().and_then(|s| s.rate()).filter(|r| *r > 0).unwrap_or(self.device_rate)
     }
 
     /// Whether the player holds the input it opened with the output (native ASIO and native
@@ -1219,9 +1247,12 @@ impl DeviceOutput {
         let mut plans = plan_bridge::callback_scope();
         let mut actions = action_lane::callback_scope();
         let (access, fault, shared, channels) = (&mut self.access, &*self.fault, &*self.shared, self.channels);
-        let (probe, position) = (self.loop_probe.as_deref(), block.device_position);
+        let (probe, position, frames) = (self.loop_probe.as_deref(), block.device_position, block.frames);
         let mut offset = 0u64;
         block.render(&mut |buffer| {
+            // The live input's anchor pairs the callback's last frame, not a chunk's (#709).
+            let chunk = (buffer.len() / channels) as u64;
+            plans.set_rest(usize::try_from((frames as u64).saturating_sub(offset + chunk)).unwrap_or(0));
             render_held(access, fault, shared, buffer, channels, &mut plans, &mut actions);
             fault.telemetry.marker().enter(telemetry::Phase::DeviceIo, None);
             if let Some(probe) = probe {

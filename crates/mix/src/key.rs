@@ -190,6 +190,8 @@ pub(crate) struct KeyAlignment {
     pub pos: Samples,
     pub pdc: bool,
     pub duplex: bool,
+    /// The block's live input was aligned with the #709 term in force.
+    pub aligned: bool,
 }
 
 impl KeyBank {
@@ -391,7 +393,7 @@ impl KeyBank {
     /// `s` is the plan's session: a rack's macro lanes give the same parameter values here as in
     /// the strip's processing, so a parameter is not set twice a block.
     pub(crate) fn align(&mut self, s: &Session, t: &Track, st: &mut Strip, alignment: KeyAlignment, source: &dyn Fn(&KeySpec) -> usize) -> usize {
-        let KeyAlignment { at, arrive, pos, pdc, duplex } = alignment;
+        let KeyAlignment { at, arrive, pos, pdc, duplex, aligned } = alignment;
         for k in st.key_in.iter_mut() {
             k.want = 0;
         }
@@ -400,11 +402,11 @@ impl KeyBank {
         }
         // A frozen track reports the latency of the chain its render replaces (`frozen_latency`): the
         // forward pass reads `st.latency`, so dropping it here made a frozen key source arrive early.
-        let mut own = crate::head_latency(t, st, duplex);
+        let mut own = crate::head_latency(t, st, duplex, aligned);
         let mut short = 0usize;
         for (i, ins) in t.mixer.inserts.iter().enumerate() {
             // A hardware insert has no plug-in: its round trip is the latency before the next slot.
-            if let Some(l) = crate::hardware::slot_latency(ins, &st.hw, i, duplex) {
+            if let Some(l) = crate::hardware::slot_latency(ins, &st.hw, i, duplex, aligned) {
                 own = own.saturating_add(l);
                 continue;
             }

@@ -200,8 +200,11 @@ fn measure_excludes_input_queued_before_the_plan_read_it() {
 #[test]
 fn a_backlog_that_changes_mid_run_refuses_and_the_note_is_released() {
     // C moves frame for frame with the input ring's backlog B (ADR 0020 decision 2): a run whose
-    // B changed has no single C. One more device block queues ahead of the plan reader mid-run.
-    let rig = rig(false, 0);
+    // B changed has no single C. One more device block queues ahead of the plan reader mid-run. On
+    // an unpaired ring (its own capture callback) the reader continues where it stopped, so B
+    // moves by that block for good. (A paired ring re-anchors instead, #709: see
+    // `an_alignment_that_changes_mid_run_refuses_on_a_paired_device`.)
+    let rig = rig_with(false, 0, false);
     let blocks = (rig.player.external_measure_duration().as_secs_f64() * 48_000.0 / BLOCK as f64) as usize + ARM_AT + 50;
     let run = pump_with(&rig, blocks, Some(ARM_AT + 2_000), |_, _| false);
     let Some(Err(MeasureError::InputAlignmentChanged { first, last })) = run.result else {
@@ -213,6 +216,34 @@ fn a_backlog_that_changes_mid_run_refuses_and_the_note_is_released() {
     assert!(rig.player.external_measure_result().is_none(), "the result is taken once");
     // The run still ended through its normal exit: the note is released.
     until("All Notes Off", || released(&messages(&rig)));
+}
+
+/// #709: on a paired device the extra capture block moves the capture count off the output count,
+/// which invalidates the aligned read's anchor for that callback; the next callback re-anchors, so B
+/// does not move, but the run had blocks with and without the term in force and is refused all the
+/// same (nothing stored), and the note is released.
+#[test]
+fn an_alignment_that_changes_mid_run_refuses_on_a_paired_device() {
+    let rig = rig(false, 0);
+    let blocks = (rig.player.external_measure_duration().as_secs_f64() * 48_000.0 / BLOCK as f64) as usize + ARM_AT + 50;
+    let run = pump_with(&rig, blocks, Some(ARM_AT + 2_000), |_, _| false);
+    let Some(Err(MeasureError::InputAlignmentChanged { first, last })) = run.result else {
+        panic!("expected the alignment refusal: {:?}", run.result)
+    };
+    assert_eq!(first, last, "B did not move: the paired ring re-anchored");
+    assert_eq!(rig.player.input_alignment(), transit_model::Alignment::Valid, "re-anchored");
+    assert!(!rig.player.external_measure_running());
+    until("All Notes Off", || released(&messages(&rig)));
+}
+
+/// #709: a run whose every block was read with the term in force has term provenance.
+#[test]
+fn a_paired_run_has_term_provenance() {
+    let rig = rig(false, 0);
+    let blocks = (rig.player.external_measure_duration().as_secs_f64() * 48_000.0 / BLOCK as f64) as usize + ARM_AT + 50;
+    let m = pump(&rig, blocks, |_, _| false).result.expect("finished").expect("every note came back");
+    assert!(m.term, "{m:?}");
+    assert_eq!(m.frames, C as u32);
 }
 
 #[test]

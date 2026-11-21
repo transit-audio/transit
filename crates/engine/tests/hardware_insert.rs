@@ -172,7 +172,7 @@ fn measuring_is_refused_for_unknown_paths_a_running_transport_and_without_a_live
 fn a_stored_measurement_is_per_machine_clears_by_command_and_leaves_the_session_clean() {
     let mut e = engine(&[("audio", "Gtr")]);
     let (revision, dirty, undo) = (e.io_revision(), e.is_dirty(), e.undo_history().len());
-    e.store_hardware_latency("Out 3-4", "In 3-4", 612, 48_000);
+    e.store_hardware_latency("Out 3-4", "In 3-4", 612, 48_000, false);
     assert_eq!(e.io_map().hardware_latency("out 3-4", "in 3-4", e.session().sample_rate.hz()), Some(612), "at the session rate");
     assert!(e.io_revision() > revision);
     assert_eq!((e.is_dirty(), e.undo_history().len()), (dirty, undo), "no undo step, document untouched");

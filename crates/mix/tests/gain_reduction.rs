@@ -570,6 +570,7 @@ fn a_hardware_insert_ahead_of_the_keyed_insert() {
         input_device: String::new(),
         input_ports: Vec::new(),
         device_rate: 0,
+        normalized_frames: None,
     });
     let mut s = latent(0, 0, 0, 0.0);
     let c = track(&s, "Carrier");

@@ -275,7 +275,7 @@ impl StudioApp {
         let (send, ret, rate) = (&pending.send, &pending.ret, pending.rate);
         match outcome {
             Ok(m) => {
-                if !self.engine.store_hardware_latency(send, ret, m.round_trip_frames, pending.device_rate.unwrap_or(0)) {
+                if !self.engine.store_hardware_latency(send, ret, m.round_trip_frames, pending.device_rate.unwrap_or(0), m.term) {
                     return Err(transit_engine::NO_INPUT_IDENTITY.into());
                 }
                 self.sync_io();
@@ -284,6 +284,7 @@ impl StudioApp {
                 Ok(json!({"round_trip_frames": m.round_trip_frames, "spread_frames": m.spread_frames, "ms": ms}))
             }
             Err(ProbeError::NoSignal { .. }) => Err(format!("no signal returned on {ret}: check the cable and input gain")),
+            Err(e @ ProbeError::AlignmentChanged) => Err(e.to_string()),
         }
     }
 
@@ -298,6 +299,7 @@ impl StudioApp {
                     pending.send, pending.ret
                 ));
             }
+            Err(e @ ProbeError::AlignmentChanged) => return Err(e.to_string()),
         };
         let key = self.loop_key().ok_or("the audio device changed while measuring: nothing stored")?;
         let record = key.record(measured.round_trip_frames, measured.spread_frames.saturating_add(1), &transit_playback::devices::utc_today());

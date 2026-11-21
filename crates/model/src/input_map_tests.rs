@@ -186,6 +186,7 @@ fn hw(input_device: &str, frames: u32) -> HardwareLatency {
         input_device: input_device.into(),
         input_ports: Vec::new(),
         device_rate: 0,
+        normalized_frames: None,
     }
 }
 
@@ -233,6 +234,7 @@ fn an_external_instrument_figure_applies_only_through_its_input() {
         input_device: "group-a".into(),
         input_ports: Vec::new(),
         device_rate: 0,
+        normalized_frames: None,
     };
     let mut out = IoMap::for_device("JACK", "Headset", 0, 2);
     out.set_external_latency(fig);

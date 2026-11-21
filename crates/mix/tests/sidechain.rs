@@ -485,6 +485,7 @@ fn a_key_after_a_hardware_insert_is_aligned() {
         input_device: String::new(),
         input_ports: Vec::new(),
         device_rate: 0,
+        normalized_frames: None,
     });
     let reference = latent_kick_to_bass(0, 0, 0, Tap::Post, 0.0);
     let (base, base_latency) = render_latent(&reference);

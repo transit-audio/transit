@@ -979,4 +979,4 @@ mod loss;
 mod tests;
 
 mod monitor;
-pub use monitor::{ALIGNED_BACKLOG_BLOCKS_PAIRED, ALIGNED_BACKLOG_BLOCKS_UNPAIRED, InputRing, MonitorTelemetry};
+pub use monitor::{ALIGNED_BACKLOG_BLOCKS_PAIRED, ALIGNED_BACKLOG_BLOCKS_UNPAIRED, Coordinates, InputRing, MonitorTelemetry};

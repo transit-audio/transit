@@ -56,6 +56,9 @@ struct State {
     latch_opens: u32,
     /// The display-only lines every stream reports ([`Stream::device_lines`]).
     device_lines: Vec<String>,
+    /// The live rate every device stream reports ([`Stream::rate`]), as native JACK's sample rate
+    /// callback publishes the server's; `None`: the opened rate holds.
+    live_rate: Option<u32>,
 }
 
 /// One more input device of a JACK-like client: its ports in order, and whether it is a virtual
@@ -253,6 +256,11 @@ impl FakeBackend {
     /// ([`Stream::period`]; `None`: `Achieved` holds), as native JACK's active client.
     pub fn set_started_period(&self, period: Option<u32>) {
         self.lock().started_period = period;
+    }
+    /// From now on every device stream reports `rate` as the rate the device runs at now
+    /// ([`Stream::rate`]), as a JACK server whose rate changed before the reopen.
+    pub fn set_live_rate(&self, rate: Option<u32>) {
+        self.lock().live_rate = rate;
     }
     /// From now on every stream reports that it latched a rebuild ([`Stream::needs_rebuild`]): the
     /// running rate is not the one the caller prepared for.
@@ -554,6 +562,9 @@ impl Stream for FakeStream {
     }
     fn period_declined(&self) -> bool {
         !self.loopback && self.lock().period_declined
+    }
+    fn rate(&self) -> Option<u32> {
+        if self.loopback { None } else { self.lock().live_rate }
     }
     fn device_lines(&self) -> Vec<String> {
         if self.loopback { Vec::new() } else { self.lock().device_lines.clone() }

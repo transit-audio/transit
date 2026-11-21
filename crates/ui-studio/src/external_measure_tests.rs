@@ -78,7 +78,7 @@ fn rig() -> T {
 }
 
 fn measured(frames: u32, spread: f64) -> Result<Measured, MeasureError> {
-    Ok(Measured { frames, spread, found: 8, sent: 8, latencies: vec![u64::from(frames); 8], backlog: None })
+    Ok(Measured { frames, spread, found: 8, sent: 8, latencies: vec![u64::from(frames); 8], backlog: None, term: false })
 }
 
 #[test]
@@ -344,6 +344,7 @@ fn a_result_waiting_for_keep_is_never_kept_for_another_input() {
         input_device: "Input B".into(),
         input_ports: Vec::new(),
         device_rate: 0,
+        normalized_frames: None,
     };
     let mut io = transit_model::IoMap::for_device("ASIO", "Focusrite USB ASIO", 0, 2);
     io.external_latency.push(b.clone());
@@ -422,4 +423,45 @@ fn measure_records_the_device_rate_and_the_card_says_measure_again_at_another_ra
     t.frames(3);
     assert!(t.stored().is_empty());
     assert_eq!(t.app.status, crate::external_measure::DEVICE_CHANGED);
+}
+
+/// #709 (rules 5, 7 and 10): a run with the term in force stores the normalized C beside the
+/// measured one; used with the term in force at another device rate the card shows the normalized
+/// C plus the running term and says "measure again at this rate" (rule 8); while the alignment is
+/// invalid the measured C is shown with "timing changed: stop at 1x, then measure again"; and a
+/// manual value shows only its own "timing changed" hint then, never adjusted.
+#[test]
+fn a_term_run_stores_both_figures_and_the_card_follows_the_alignment() {
+    use crate::hardware_ui::{MEASURE_AGAIN_RATE, TIMING_CHANGED, TIMING_CHANGED_MANUAL};
+    use transit_model::Alignment;
+    let mut t = rig();
+    t.app.audio_devices.fake_device_rate = Some(44_100);
+    t.app.audio_devices.fake_alignment = Some(Alignment::Valid);
+    t.click(t.card().external_measure);
+    t.fake().result = Some(Ok(Measured { term: true, ..measured(955, 19.0).unwrap() }));
+    t.frames(3);
+    // T = 34 at 48 kHz on 44.1 kHz.
+    assert_eq!((t.stored()[0].frames, t.stored()[0].normalized_frames), (955, Some(921)));
+    let today = transit_playback::devices::utc_today();
+    assert_eq!(t.card().external_state, format!("Measured 19.9 ms on {today} at 48 kHz/64"), "the pair it ran at: no hint");
+    // At 48 kHz with the term in force: 921 + 0 frames (19.2 ms), and rule 8's hint.
+    t.app.audio_devices.fake_device_rate = Some(48_000);
+    t.frames(2);
+    assert_eq!(t.report().aligned_latency, Some(921));
+    assert_eq!(t.card().external_state, format!("Measured 19.9 ms on {today} at 48 kHz/64: {MEASURE_AGAIN_RATE}"));
+    // Timing changed: the measured C and rule 10's hint.
+    t.app.audio_devices.fake_device_rate = Some(44_100);
+    t.app.audio_devices.fake_alignment = Some(Alignment::Invalid);
+    t.frames(2);
+    assert_eq!(t.card().external_state, format!("Measured 19.9 ms on {today} at 48 kHz/64: {TIMING_CHANGED}"));
+    assert_eq!(t.report().latency, Some(955));
+    // A manual value: its own hint while the timing changed, none otherwise, the value as set.
+    t.app.run("instrument.external", json!({"track": t.track.0, "manual_ms": 20.0})).unwrap();
+    t.frames(2);
+    assert_eq!(t.card().external_state, format!("Manual: 20.0 ms: {TIMING_CHANGED_MANUAL}"));
+    assert_eq!(t.report().latency, Some(960));
+    t.app.audio_devices.fake_alignment = Some(Alignment::Valid);
+    t.frames(2);
+    assert_eq!(t.card().external_state, "Manual: 20.0 ms");
+    assert_eq!((t.report().latency, t.report().aligned_latency), (Some(960), Some(960)), "no automatic term");
 }

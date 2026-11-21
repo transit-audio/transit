@@ -16,6 +16,7 @@ mod phase;
 const MIN_SPEED: u32 = 100;
 const MAX_SPEED: u32 = 4000;
 use phase::{HOLD_CHANNELS, History, Phase};
+mod align;
 mod external;
 #[cfg(test)]
 pub(in crate::player) use external::FRAME_CLOCK_BASE;
@@ -145,6 +146,10 @@ struct Transport {
     /// frame presenting it ([`Phase::realign`]), so equal rates pass samples through again after a
     /// fraction left by another speed (#725).
     realign: bool,
+    /// The output converter's alignment for the #709 term is valid (ADR 0015, Amendment
+    /// 2026-11-16, rule 10): leaving speed 1 invalidates it, and only a converter restart at speed 1
+    /// restores it ([`Audio::restart_converter`]).
+    aligned: bool,
 }
 
 /// See [`Transport::hold`].
@@ -217,6 +222,9 @@ impl Transport {
         self.epoch = epoch;
         live.set_transport_epoch(transit_mix::TransportEpoch(epoch));
         self.speed = speed;
+        // Rule 10: the converter phase and the input alignment stay as they were at the old speed;
+        // returning to 1x alone does not restore the term.
+        self.aligned = false;
         Ok(())
     }
 
@@ -622,6 +630,11 @@ pub(super) struct Audio {
     layout: u64,
     sample_rate: u32,
     device_rate: u32,
+    /// Output frames this Audio's callbacks consumed since the stream started: the output side of
+    /// the live input's same-cycle anchor (#709).
+    output_ordinal: u64,
+    /// The #709 converter term of this session and device rate, in plan frames.
+    term: u32,
     faulted: bool,
     /// An escaped panic may own a heap payload. Retain it with the audio holder
     /// until main reclaims that holder; do not destroy it during error handling.
@@ -730,6 +743,8 @@ impl Audio {
                 layout: 0,
                 sample_rate: target.sample_rate,
                 device_rate,
+                output_ordinal: 0,
+                term: transit_model::converter_term(target.sample_rate, device_rate),
                 faulted: false,
                 panic_payload: RetainedPanic(None),
                 clock_reader: None,
@@ -759,6 +774,7 @@ impl Audio {
                     wait_frames: u64::from(device_rate),
                     hold: None,
                     realign: false,
+                    aligned: true,
                 },
             },
             record_control,
@@ -851,6 +867,9 @@ impl Audio {
         self.pending = 0;
         self.read.reset();
         self.history.reset();
+        // Rule 10: a restart at speed 1 restores the #709 alignment; the live input is then read
+        // from the new coordinates.
+        self.transport.aligned = self.transport.speed == 1000;
     }
 
     /// After commands or a start at a block boundary: restart the converter when one asked for it
@@ -1131,11 +1150,14 @@ impl Audio {
         // An External Instrument Measure records the return the plan read for this block and
         // sends the notes due at its first frame, stamped with that frame's presentation time.
         if let (Some(probe), Some(external), Some(block)) = (&self.ext_probe, &mut self.external, external_block) {
-            external.measure(probe, &block, self.plans.input(), frames, self.plans.input_backlog());
+            external.measure(probe, &block, self.plans.input(), frames, self.plans.input_backlog(), self.plans.input_aligned());
         }
         // The hardware probe records the return of this block; the click for it is added as the
         // block plays (`fill_inner`).
-        self.probe_block = self.probe.as_ref().and_then(|p| p.record_block(self.plans.input(), frames));
+        self.probe_block = self.probe.as_ref().and_then(|p| {
+            p.note_alignment(self.plans.input_aligned());
+            p.record_block(self.plans.input(), frames)
+        });
         self.pending = frames;
         if let Some(c) = &mut state.count_in {
             c.left -= frames as i64;
@@ -1256,6 +1278,11 @@ impl Audio {
         self.follow_speed()?;
         let mut step = u64::from(self.sample_rate) * u64::from(self.transport.speed);
         let callback_frames = out.len() / channels;
+        // The device callback's last output frame, counted from the stream's start (#709): this
+        // chunk's frames and those of the callback after it (`rest`).
+        let rest = plans.rest();
+        let last = self.output_ordinal.wrapping_add((callback_frames + rest) as u64).wrapping_sub(1);
+        self.output_ordinal = self.output_ordinal.wrapping_add(callback_frames as u64);
         let mut consumed = 0;
         'frames: for (at, frame) in out.chunks_exact_mut(channels).enumerate() {
             // The next block is rendered as soon as this output frame's taps reach into it (#525,
@@ -1280,6 +1307,8 @@ impl Audio {
                 // last frame, never a whole callback started mid-callback, so the block ends with
                 // the callback and its live input is not held one callback late.
                 let quantum = self.read.reach(callback_frames - at, step, self.plans.engine().max_block())?;
+                let coordinates = self.input_coordinates(last, callback_frames - at - 1 + rest, step);
+                self.plans.set_input_coordinates(coordinates);
                 self.render_next(quantum, actions)?;
                 // A new plan with another channel layout: the kept frames are the old layout's.
                 let layout = self.layout_key();
@@ -1289,7 +1318,6 @@ impl Audio {
                 }
             }
             let output = self.plans.output();
-            let index = self.read.index();
             // Equal rates at speed 1 and a whole position: the frame itself, as before #601.
             let whole = self.read.whole(step).filter(|i| *i < self.pending);
             let width = output.len().min(HOLD_CHANNELS);
@@ -1340,9 +1368,11 @@ impl Audio {
                     }
                 }
             }
-            // Index -1 is the previous block's last frame, the plan frame before this block's first.
-            if let (Some(probe), Some(at)) = (&self.probe, self.probe_block.and_then(|block| block.checked_add_signed(index as i64))) {
-                probe.add_click(frame, at);
+            // The click is read through the output converter like the render (#709): the block's
+            // frame itself where the converter passes frames through, else its reader at `x`.
+            if let (Some(probe), Some(origin)) = (&self.probe, self.probe_block) {
+                let (x, q) = self.read.position(step);
+                probe.add_click(frame, origin, whole, x, q);
                 for out in frame.iter_mut() {
                     *out = out.clamp(-1.0, 1.0);
                 }

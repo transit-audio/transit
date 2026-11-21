@@ -693,6 +693,7 @@ mod tests {
             input_device: input.into(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         };
         let mut table = IoMap::for_device("ASIO", "x", 4, 4);
         table.hardware_latency.push(hw(600, ""));
@@ -718,6 +719,7 @@ mod tests {
             input_device: String::new(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         });
         assert!(e.execute("setup.io_map", &json!({"action": "set", "map": external})).is_err(), "nor an External Instrument figure");
         assert_eq!((e.io_map().clone(), e.io_revision()), before, "the table is left as it was");
@@ -746,6 +748,7 @@ mod tests {
             input_device: "Mic".into(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         };
         assert!(!e.store_external_latency(named));
         assert!(e.io_map().external_latency.is_empty());

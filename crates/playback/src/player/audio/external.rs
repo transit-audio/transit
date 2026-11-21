@@ -135,7 +135,9 @@ impl External {
         input: &[Vec<f32>],
         frames: usize,
         backlog: Option<usize>,
+        aligned: bool,
     ) {
+        probe.note_alignment(aligned);
         probe.note_backlog(backlog, frames);
         let at_ns = block.host_for(true).unwrap_or(0);
         let out = &mut self.out;
@@ -356,7 +358,7 @@ mod tests {
                 ns_per_frame: ns,
                 plan: PlanGeneration::from_raw(1),
             };
-            external.measure(&probe, &block, &input, 64, None);
+            external.measure(&probe, &block, &input, 64, None, false);
             while let Ok(e) = rx.pop() {
                 if e.kind == Kind::Message && e.bytes[0] & 0xF0 == 0x90 {
                     ons.push((e.track, e.at_ns, block.host_for(true).unwrap()));

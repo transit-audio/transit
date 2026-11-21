@@ -41,6 +41,9 @@ pub(crate) struct LiveInput<'a> {
     pub(crate) no_suspend: bool,
     /// The block's first render frame (plan mode: instrument events are due against it).
     pub(crate) frame: u64,
+    /// [`MixEngine::input_aligned`]: the block's live input was aligned with the #709 converter
+    /// term in force, so hardware inserts and External Instruments report their term figures.
+    pub(crate) aligned: bool,
     /// The callback's phase marker (#162), when the engine has one: strips say which they are in.
     pub(crate) marker: Option<&'a transit_rt::phase_marker::PhaseMarker>,
 }
@@ -243,7 +246,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
     // A latent instrument delays its track like an insert does (G8), and so does an External
     // Instrument that plays (ADR 0020 decision 6).
     // A frozen track reports the latency of the chain its render replaces.
-    let mut latency = head_latency(t, strip, !live.input.is_empty());
+    let mut latency = head_latency(t, strip, !live.input.is_empty(), live.aligned);
     strip.key_in.iter_mut().for_each(|k| k.ran = false);
     strip.hw.iter_mut().for_each(hardware::HwSlot::rest);
     // What the track's instrument accepted this block, for the inserts that read notes (#242,
@@ -515,11 +518,12 @@ fn contain_failure(slot: &mut PluginSlot, buf: &mut [Vec<f32>], frames: usize) -
 
 /// Record insert latency without processing audio, so this block can compensate for it.
 /// The latency at the head of a strip, before its inserts: a frozen track's chain, a latent
-/// instrument's, and an External Instrument's when it plays (`duplex`: live input is open).
-pub(crate) fn head_latency(t: &Track, strip: &Strip, duplex: bool) -> usize {
+/// instrument's, and an External Instrument's when it plays (`duplex`: live input is open; `aligned`:
+/// with the #709 term in force).
+pub(crate) fn head_latency(t: &Track, strip: &Strip, duplex: bool, aligned: bool) -> usize {
     frozen_latency(t)
         .saturating_add(strip.instrument.as_ref().filter(|i| !i.failed).map_or(0, |i| i.plugin.latency()))
-        .saturating_add(strip.ext.as_ref().map_or(0, |x| x.latency(duplex)))
+        .saturating_add(strip.ext.as_ref().map_or(0, |x| x.latency(duplex, aligned)))
 }
 
 /// The latency in samples a frozen track reports (0 for any other).
@@ -527,11 +531,11 @@ pub(crate) fn frozen_latency(t: &Track) -> usize {
     t.freeze.as_ref().map_or(0, |f| f.latency as usize)
 }
 
-pub(crate) fn note_insert_latency(t: &Track, strip: &mut Strip, pos: Samples, duplex: bool) {
+pub(crate) fn note_insert_latency(t: &Track, strip: &mut Strip, pos: Samples, duplex: bool, aligned: bool) {
     let mut latency = frozen_latency(t);
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
         // As `process_strip`: a hardware insert that runs (live input, resolved paths) adds its round trip.
-        if let Some(l) = hardware::slot_latency(ins, &strip.hw, i, duplex) {
+        if let Some(l) = hardware::slot_latency(ins, &strip.hw, i, duplex, aligned) {
             latency = latency.saturating_add(l);
             continue;
         }

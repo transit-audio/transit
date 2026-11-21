@@ -899,6 +899,11 @@ pub struct MixEngine {
     main_arrival: usize,
     /// Live input for the next block (planar), set by the audio host for input monitoring.
     pub input: Vec<Vec<f32>>,
+    /// The live input of the next block was read aligned from the output converter's coordinates
+    /// with the #709 converter term in force (ADR 0015, Amendment 2026-11-16, rules 3 and 5), set by
+    /// the audio host with `input`: hardware inserts and External Instruments then report their term
+    /// figures in that same block, so a latency and its alignment are adopted together.
+    pub input_aligned: bool,
     /// Transport stopped: only monitored inputs sound (no clips).
     pub monitor_only: bool,
     /// Recording: record-armed tracks hear their input (auto input).
@@ -971,6 +976,7 @@ impl MixEngine {
             latency: 0,
             main_arrival: 0,
             input: Vec::new(),
+            input_aligned: false,
             monitor_only: false,
             recording: false,
             monitor_armed: true,

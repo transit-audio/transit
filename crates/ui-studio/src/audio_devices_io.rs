@@ -440,7 +440,7 @@ pub fn section(
 pub fn hardware_section(
     ui: &mut egui::Ui,
     io: &IoMap,
-    (rate, device_rate): (u32, Option<u32>),
+    (rate, timing): (u32, crate::hardware_ui::Timing),
     blocked: Option<&str>,
     progress: Option<(u32, u32)>,
     ed: &mut IoEditor,
@@ -536,7 +536,7 @@ pub fn hardware_section(
                 let figure = if io.figure_applies(&m.input_device, &m.input_ports) {
                     // Used as measured; with the hint when the device's rate differs or is not
                     // recorded (ADR 0015, Amendment 2026-11-16 on the #709 converter term).
-                    match rate_row(m.device_rate, device_rate) {
+                    match rate_row(m, timing) {
                         Some(why) => format!("{}, {why}", frames_text(m.round_trip_frames, rate)),
                         None => frames_text(m.round_trip_frames, rate),
                     }
@@ -578,18 +578,20 @@ pub const MEASURE_AGAIN_UNKNOWN: &str = "through an unknown input: measure again
 /// The same, for a figure through a JACK virtual input whose ports changed since (rule 13).
 pub const MEASURE_AGAIN_PORTS: &str = "through other ports of this input: measure again";
 
-/// Beside a listed round trip that applies, measured with the device at `measured` Hz (0: not
-/// recorded) while it runs at `running`: why it says "measure again at this rate", `None` when it
-/// does not ([`transit_model::rate_hint`]).
-pub fn rate_row(measured: u32, running: Option<u32>) -> Option<String> {
-    use crate::hardware_ui::MEASURE_AGAIN_RATE;
-    if !transit_model::rate_hint(measured, running) {
-        return None;
-    }
-    Some(if measured == 0 {
+/// Beside a listed round trip that applies, used with the device and input `timing`: why it says
+/// "measure again at this rate" or "timing changed", `None` when it says neither
+/// ([`transit_model::measured_hint`]).
+pub fn rate_row(m: &transit_model::HardwareLatency, timing: crate::hardware_ui::Timing) -> Option<String> {
+    use crate::hardware_ui::{MEASURE_AGAIN_RATE, TIMING_CHANGED};
+    let hint = m.hint(timing.device_rate, timing.alignment)?;
+    Some(if hint == transit_model::LatencyHint::TimingChanged {
+        TIMING_CHANGED.to_string()
+    } else if m.device_rate == 0 {
         format!("device rate not recorded: {MEASURE_AGAIN_RATE}")
+    } else if timing.device_rate.is_some_and(|r| r != m.device_rate) {
+        format!("measured with the device at {}: {MEASURE_AGAIN_RATE}", crate::external_measure::rate_text(m.device_rate))
     } else {
-        format!("measured with the device at {}: {MEASURE_AGAIN_RATE}", crate::external_measure::rate_text(measured))
+        format!("measured with another input timing: {MEASURE_AGAIN_RATE}")
     })
 }
 

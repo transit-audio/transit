@@ -251,12 +251,27 @@ pub struct StatusReport {
 pub struct CallbackBudget {
     serviced: bool,
     deferral_counted: bool,
+    /// Frames of the device callback after the conversion chunk being filled (0 when the callback
+    /// is one chunk): the live input's anchor pairs the callback's last frame (#709).
+    rest: usize,
+}
+
+impl CallbackBudget {
+    /// The device adapter, before each conversion chunk: the callback's frames after it.
+    pub(super) fn set_rest(&mut self, frames: usize) {
+        self.rest = frames;
+    }
+
+    /// Frames of the device callback after the chunk being filled.
+    pub(crate) fn rest(&self) -> usize {
+        self.rest
+    }
 }
 
 // Only the parent device adapter can mint production tokens. Tests are inside this
 // module so no public constructor or Default implementation is needed for fixtures.
 pub(super) fn callback_scope() -> CallbackBudget {
-    CallbackBudget { serviced: false, deferral_counted: false }
+    CallbackBudget { serviced: false, deferral_counted: false, rest: 0 }
 }
 
 #[derive(Default)]
@@ -338,6 +353,9 @@ pub struct Audio {
     counters: Arc<Counters>,
     deferred_age: u64,
     maximum_age: u64,
+    /// The output converter's coordinates for the next render's live input (#709), from the player;
+    /// taken by that render.
+    coordinates: Option<crate::record::Coordinates>,
 }
 
 /// Prepare an empty fixed-target engine and one publication/return credit on control.
@@ -390,7 +408,7 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
             strip_faults,
             measurement,
         },
-        Audio { port: audio_port, mix, buffers, status_tx, counters, deferred_age: 0, maximum_age: 0 },
+        Audio { port: audio_port, mix, buffers, status_tx, counters, deferred_age: 0, maximum_age: 0, coordinates: None },
     )
 }
 
@@ -846,6 +864,15 @@ impl Audio {
     pub fn input(&self) -> &[Vec<f32>] {
         &self.mix.input
     }
+    /// The live input of the last render was aligned from the output converter's coordinates with
+    /// the #709 term in force ([`crate::record::InputRing::pop_aligned`]).
+    pub fn input_aligned(&self) -> bool {
+        self.mix.input_aligned
+    }
+    /// The output converter's coordinates for the next render's live input (#709). A plain store.
+    pub(crate) fn set_input_coordinates(&mut self, at: Option<crate::record::Coordinates>) {
+        self.coordinates = at;
+    }
     /// The live input ring's backlog after the last pop, in frames (`None` without a ring). Atomic loads only.
     pub fn input_backlog(&self) -> Option<usize> {
         self.buffers.input.as_ref().map(|ring| ring.buffered_input_frames())
@@ -881,9 +908,18 @@ impl Audio {
         }
         let target = self.mix.active().target;
         let frames = frames.min(target.max_block as usize);
-        if let Some(input) = &self.buffers.input {
-            input.pop_into(&mut self.mix.input, frames, target.sample_rate);
-        }
+        // With the output converter's coordinates a paired ring reads the input at the positions the
+        // #709 term prescribes, and the block's hardware inserts and External Instruments report
+        // their term figures in this same block (ADR 0015, Amendment 2026-11-16, rules 3 and 5).
+        let coordinates = self.coordinates.take();
+        self.mix.input_aligned = match (&self.buffers.input, coordinates) {
+            (Some(input), Some(at)) => input.pop_aligned(&mut self.mix.input, frames, target.sample_rate, at),
+            (Some(input), None) => {
+                input.pop_into(&mut self.mix.input, frames, target.sample_rate);
+                false
+            }
+            (None, _) => false,
+        };
         self.mix.render_active(position, frames, &mut self.buffers.output);
         self.buffers.meters.publish(&self.mix);
         // Full means an older report still awaits control. The next render tries its current

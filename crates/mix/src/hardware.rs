@@ -45,6 +45,10 @@ pub struct HardwareReport {
     pub state: HardwareState,
     /// The measured round trip in frames, when there is one.
     pub latency: Option<u32>,
+    /// The round trip the slot reports while the #709 converter term is in force (ADR 0015,
+    /// Amendment 2026-11-16, rule 5): the normalized figure plus the running term for a figure with
+    /// term provenance, else `latency`.
+    pub aligned_latency: Option<u32>,
 }
 
 /// A hardware insert in a plan: where it sends, what it reads, and its latency.
@@ -58,8 +62,13 @@ pub(crate) struct HwSpec {
     pub(crate) sink_width: u16,
     /// The device input channel each return channel reads (empty: the return is unresolved).
     pub(crate) src: Vec<u16>,
-    /// Frames of round trip, 0 when unmeasured.
+    /// Frames of round trip, 0 when unmeasured: the measured total, used while the #709 term is
+    /// not in force.
     pub(crate) latency: u32,
+    /// Frames of round trip while the term is in force (the block's live input was aligned from the
+    /// output converter's coordinates, rule 5): picked per block with that block's input, so a
+    /// latency and its alignment are always adopted together.
+    pub(crate) aligned_latency: u32,
     pub(crate) measured: bool,
 }
 
@@ -79,18 +88,19 @@ pub(crate) fn latency_of(t: &Track, io: &IoMap, rate: u32) -> usize {
         .filter(|i| i.active && !i.bypass)
         .filter_map(|i| i.hardware.as_ref())
         .filter(|h| h.disabled.is_none())
-        .fold(0usize, |a, h| a.saturating_add(io.hardware_latency(&h.send, &h.ret, rate).unwrap_or(0) as usize))
+        .fold(0usize, |a, h| a.saturating_add(io.hardware_latencies(&h.send, &h.ret, rate).map_or(0, |(o, t)| o.max(t)) as usize))
         .min(MAX_LATENCY)
 }
 
 /// The round trip, in frames, that the insert in slot `slot` adds to its strip: `None` when it is
 /// not a hardware insert (the caller handles it as a plug-in), `Some(0)` when it is one that passes
 /// the signal through dry (inactive, bypassed, no live input `duplex`, or an unresolved path).
+/// `aligned`: the block's live input was aligned with the #709 term in force.
 /// `process_strip`, `note_insert_latency` and `KeyBank::align` all read the latency here.
-pub(crate) fn slot_latency(ins: &Option<Insert>, hw: &[HwSlot], slot: usize, duplex: bool) -> Option<usize> {
+pub(crate) fn slot_latency(ins: &Option<Insert>, hw: &[HwSlot], slot: usize, duplex: bool, aligned: bool) -> Option<usize> {
     let ins = ins.as_ref().filter(|x| x.hardware.is_some())?;
     let h = hw.iter().find(|h| usize::from(h.spec.slot) == slot);
-    Some(h.filter(|_| duplex && ins.active && !ins.bypass).map_or(0, HwSlot::round_trip))
+    Some(h.filter(|_| duplex && ins.active && !ins.bypass).map_or(0, |h| h.round_trip(aligned)))
 }
 
 /// The shared ordinary-track/master hardware branch. Hardware slots return their added latency
@@ -109,7 +119,7 @@ pub(crate) fn run_slot(
         && let Some(h) = hw.iter_mut().find(|h| usize::from(h.spec.slot) == slot)
         && h.run(buf, live.input, frames, live.input_offset)
     {
-        return Some(h.round_trip());
+        return Some(h.round_trip(live.aligned));
     }
     Some(0)
 }
@@ -129,13 +139,14 @@ pub(crate) fn specs_of(t: &Track, io: &IoMap, sinks: &[SinkSpec], in_channels: u
             .filter(|p| p.channels.iter().all(|&c| in_channels == 0 || c < in_channels))
             .map(|p| p.channels.clone())
             .unwrap_or_default();
-        let measured = io.hardware_latency(&h.send, &h.ret, rate);
+        let measured = io.hardware_latencies(&h.send, &h.ret, rate);
         out.push(HwSpec {
             slot,
             sink: sink.and_then(|k| u16::try_from(k).ok()),
             sink_width: sink.and_then(|k| sinks.get(k)).map_or(0, |k| u16::try_from(k.dest.len()).unwrap_or(u16::MAX)),
             src,
-            latency: measured.unwrap_or(0),
+            latency: measured.map_or(0, |(o, _)| o),
+            aligned_latency: measured.map_or(0, |(_, t)| t),
             measured: measured.is_some(),
         });
     }
@@ -164,9 +175,10 @@ pub fn hardware_report(s: &Session, io: &IoMap, out_channels: u16, in_channels: 
                     (true, false, true, true) => HardwareState::Ready,
                     (true, false, true, false) => HardwareState::Unmeasured,
                 };
-                (state, spec.measured.then_some(spec.latency))
+                (state, spec.measured.then_some((spec.latency, spec.aligned_latency)))
             };
-            out.push(HardwareReport { track: t.id, slot, send: h.send.clone(), ret: h.ret.clone(), state, latency });
+            let (latency, aligned_latency) = (latency.map(|l| l.0), latency.map(|l| l.1));
+            out.push(HardwareReport { track: t.id, slot, send: h.send.clone(), ret: h.ret.clone(), state, latency, aligned_latency });
         }
     }
     out
@@ -187,9 +199,14 @@ impl HwSlot {
         HwSlot { spec, send, live: false }
     }
 
-    /// The frames this slot adds when it runs: its measured round trip, 0 while a path is unresolved.
-    pub(crate) fn round_trip(&self) -> usize {
-        if self.spec.runs() { self.spec.latency as usize } else { 0 }
+    /// The frames this slot adds when it runs: its measured round trip (the term figure when the
+    /// block's input is `aligned`), 0 while a path is unresolved.
+    pub(crate) fn round_trip(&self, aligned: bool) -> usize {
+        match (self.spec.runs(), aligned) {
+            (false, _) => 0,
+            (true, true) => self.spec.aligned_latency as usize,
+            (true, false) => self.spec.latency as usize,
+        }
     }
 
     pub(crate) fn rest(&mut self) {
@@ -249,13 +266,14 @@ impl HwSlot {
     #[cfg(feature = "testing")]
     pub(crate) fn record_config(&self, w: &mut transit_state_record::Writer<'_>) {
         let HwSlot { spec, send, live: _ } = self;
-        let HwSpec { slot, sink, sink_width, src, latency, measured } = spec;
+        let HwSpec { slot, sink, sink_width, src, latency, aligned_latency, measured } = spec;
         w.u16(*slot);
         w.present(*sink, |w, k| w.u16(k));
         w.u16(*sink_width);
         w.usize(src.len());
         src.iter().for_each(|&c| w.u16(c));
         w.u32(*latency);
+        w.u32(*aligned_latency);
         w.bool(*measured);
         w.usize(send.len());
         send.iter().for_each(|s| w.usize(s.len()));

@@ -219,7 +219,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let cal_result = app.audio_devices.calibration_result.clone();
     let mut cal_action = None;
     let rate = app.engine.session().sample_rate.hz();
-    let device_rate = app.device_rate();
+    let timing = app.timing();
     // The output transit plays to when none is chosen (the JACK monitor label, amendment for #431,
     // rule 13), and whether Use the current ports may run (rule 5).
     let running_output = app.player.as_ref().filter(|p| !p.silent).map(|p| p.device_name.clone());
@@ -698,7 +698,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                             (hw_action, hw_layout) = crate::audio_devices_io::hardware_section(
                                                 ui,
                                                 &io,
-                                                (rate, device_rate),
+                                                (rate, timing),
                                                 blocker,
                                                 progress,
                                                 &mut editor,

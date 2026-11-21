@@ -587,6 +587,12 @@ pub trait Stream {
     fn needs_rebuild(&self) -> bool {
         false
     }
+    /// The rate the device runs at now, where the backend publishes a live figure (native JACK: the
+    /// server's sample rate callback, which can change it before the stream is reopened). A relaxed
+    /// read on a control thread. `None` (the default): the rate the stream opened at holds.
+    fn rate(&self) -> Option<u32> {
+        None
+    }
     /// Whether the device refused the buffer size the open asked for (native JACK under PipeWire:
     /// `jack_set_buffer_size` returned an error), as distinct from a request whose result has not
     /// arrived. False by default.

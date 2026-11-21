@@ -331,6 +331,7 @@ mod tests {
             input_device: String::new(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         };
         e.store_external_latency(m.clone());
         e.store_external_latency(m.clone());

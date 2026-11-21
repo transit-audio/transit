@@ -117,7 +117,7 @@ fn two_paired_capture_endpoints_under_one_output_are_two_input_tables() {
     assert_eq!(app.engine.io_map().input_device, "{capture-a}");
     assert_eq!(app.io_input.as_ref().map(|i| i.name.as_str()), Some("Microphone (Interface)"));
     app.engine.execute("setup.io_map", &serde_json::json!({"action": "rename_path", "name": "In 2", "new_name": "Vox"})).unwrap();
-    app.engine.store_hardware_latency("Out 1-2", "Vox", 1_234, 48_000);
+    app.engine.store_hardware_latency("Out 1-2", "Vox", 1_234, 48_000, false);
     app.sync_io();
     endpoint.pair_capture(Some(("{capture-b}", "Line In (Interface)")));
     reopen(&mut app, Player::open_fake_native_wasapi(Arc::clone(&session), &cfg, &endpoint).unwrap());
@@ -160,6 +160,7 @@ fn an_older_asio_table_loads_with_its_paths_and_keeps_its_input_half_on_disk() {
         input_device: String::new(),
         input_ports: Vec::new(),
         device_rate: 0,
+        normalized_frames: None,
     });
     let read = serde_json::to_string(&old).unwrap();
     let driver = asio(2);
@@ -319,7 +320,7 @@ fn an_input_without_an_identity_saves_nothing_and_takes_no_measurement() {
     });
     app.sync_io();
     assert_eq!(inputs(app.engine.io_map()), ["In 1", "In 2", "In 1-2"], "this open's defaults, not a saved empty record");
-    assert!(!app.engine.store_hardware_latency("Out 1-2", "In 1", 500, 48_000), "nothing is stored without an identity");
+    assert!(!app.engine.store_hardware_latency("Out 1-2", "In 1", 500, 48_000, false), "nothing is stored without an identity");
     app.sync_io();
     assert_eq!(app.engine.io_map().hardware_latency("Out 1-2", "In 1", 48_000), None, "no measurement applies without an identity");
     assert_eq!(app.ui.input_maps.len(), 1, "nothing written for it");
@@ -348,6 +349,7 @@ fn no_measurement_is_stored_through_an_input_without_an_identity() {
         input_device: "Other Mic".into(),
         input_ports: Vec::new(),
         device_rate: 0,
+        normalized_frames: None,
     };
     app.ui.io_maps.push({
         let mut record = IoMap::for_device("WASAPI", "USB Audio", 0, 2);
@@ -358,7 +360,7 @@ fn no_measurement_is_stored_through_an_input_without_an_identity() {
     assert!(app.engine.io_map().input_device.is_empty(), "two inputs of one name: no identity");
     let refused = app.engine.hardware_measurement("Out 1-2", "In 1");
     assert!(matches!(&refused, Err(transit_engine::EngineError::BadParams(_, why)) if why == transit_engine::NO_INPUT_IDENTITY), "{refused:?}");
-    assert!(!app.engine.store_hardware_latency("Out 1-2", "In 1", 500, 48_000));
+    assert!(!app.engine.store_hardware_latency("Out 1-2", "In 1", 500, 48_000, false));
     app.sync_io();
     assert_eq!(app.engine.io_map().hardware_latency, std::slice::from_ref(&other), "the existing figure is not replaced");
     assert_eq!(app.ui.io_maps[0].hardware_latency, [other], "nor in the saved record");

@@ -133,6 +133,7 @@ impl PlanTables {
         frames: usize,
         rate: u32,
         duplex: bool,
+        aligned: bool,
         status: &mut PlanStatus,
         pool: Option<&strip_pool::StripPool>,
     ) {
@@ -146,11 +147,13 @@ impl PlanTables {
                 guarded(st, |st| strip::service_idle_states(s, t, st, pos));
             }
         }
-        self.align_keys(s, pos, duplex, status, &|i| pool.is_some_and(|p| p.preparation_blocked(i)));
+        self.align_keys(s, pos, (duplex, aligned), status, &|i| pool.is_some_and(|p| p.preparation_blocked(i)));
     }
     /// `away`: the strip at that table index is held by a render worker (its keys and its
-    /// chain are in its cell): its delays stay as they were until it is home.
-    pub(super) fn align_keys(&mut self, s: &Session, pos: Samples, duplex: bool, status: &mut PlanStatus, away: &dyn Fn(usize) -> bool) {
+    /// chain are in its cell): its delays stay as they were until it is home. `live`: the block
+    /// has live input, and it is aligned with the #709 term in force.
+    pub(super) fn align_keys(&mut self, s: &Session, pos: Samples, input: (bool, bool), status: &mut PlanStatus, away: &dyn Fn(usize) -> bool) {
+        let (duplex, aligned) = input;
         let PlanTables { strips, phase1, aux_end, keys, busses, sinks, .. } = self;
         let (phase1, aux_end) = (*phase1, *aux_end);
         let track = |st: &Strip| s.tracks.get(usize::from(st.track));
@@ -187,7 +190,7 @@ impl PlanTables {
                         }
                     };
                     let mut short = 0;
-                    guarded(st, |st| short = keys.align(s, t, st, key::KeyAlignment { at, arrive, pos, pdc, duplex }, &from));
+                    guarded(st, |st| short = keys.align(s, t, st, key::KeyAlignment { at, arrive, pos, pdc, duplex, aligned }, &from));
                     status.note_capacity(short, st);
                 }
                 pdc_visit(t, st, at, alive, PdcWalk { busses, sinks, main_arrival: &mut walked, pdc });
@@ -223,9 +226,10 @@ pub(super) fn fold_latency(
     busses: &mut BusTable,
     sinks: &mut [Sink],
     pos: Samples,
-    duplex: bool,
+    input: (bool, bool),
     blocked: &dyn Fn(usize) -> bool,
 ) -> DeviceLatency {
+    let (duplex, aligned) = input;
     let RenderPhases { p1, auxes, others, phase1 } = phases;
     let track = |st: &Strip| s.tracks.get(usize::from(st.track));
     let pdc = s.edit.delay_compensation;
@@ -234,7 +238,7 @@ pub(super) fn fold_latency(
             if !blocked(phase1 + k)
                 && let Some(t) = track(st).filter(|t| !t.inactive)
             {
-                guarded(st, |st| note_insert_latency(t, st, pos, duplex));
+                guarded(st, |st| note_insert_latency(t, st, pos, duplex, aligned));
             }
         }
     }
@@ -242,7 +246,7 @@ pub(super) fn fold_latency(
     if pdc {
         for st in others.iter_mut() {
             if let Some(t) = track(st).filter(|t| t.kind == TrackKind::Master && !t.inactive) {
-                guarded(st, |st| note_insert_latency(t, st, pos, duplex));
+                guarded(st, |st| note_insert_latency(t, st, pos, duplex, aligned));
                 lmax_m = lmax_m.saturating_add(st.latency);
             }
         }

@@ -2,10 +2,14 @@
 //!
 //! A click train goes out the device channels of a send path and the probe records the device
 //! channels of a return path. Both are counted on the plan's own timeline, the frames the plan
-//! has rendered since the probe armed: a click is added to the output at plan frame `t`, and the
-//! live input block the plan reads while rendering frame `t` is recorded at `t`. That is the
-//! delay a hardware insert on the pair adds to its strip, which is what delay compensation needs
-//! (it includes the device buffers, the converters and the input ring's backlog as they are now).
+//! has rendered since the probe armed: the click is a signal in render coordinates (plan frame `t`
+//! holds the click's sample `t`), which the player reads through the output converter at each
+//! output frame's position, exactly as it reads the plan's own render (#709: [`HwProbe::add_click`]),
+//! and the live input block the plan reads while rendering frame `t` is recorded at `t`. That is
+//! the delay a hardware insert on the pair adds to its strip, which is what delay compensation needs
+//! (it includes the device buffers, the converters and the input's alignment as they are now). The
+//! result says whether the #709 converter term was in force for the whole run (term provenance,
+//! ADR 0015, Amendment 2026-11-16, rule 5).
 //!
 //! The click is the one `tools/audio-bench` uses: an impulse followed by a 1 ms raised-cosine
 //! 3 kHz burst (a tone, so an AC-coupled input still passes it). The control side finds it again
@@ -15,8 +19,9 @@
 //! `f32` bits into a buffer allocated with the Player, and bumps two counters. It never allocates
 //! or locks; the analysis runs on the control thread after the probe is done.
 
+use crate::band_limited::{self, Frames, SincTable};
 use std::f32::consts::TAU;
-use std::sync::atomic::{AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU16, AtomicU32, AtomicU64, Ordering};
 
 /// Channels a send or a return may span (device channels of the two paths).
 pub const MAX_PROBE_CHANNELS: usize = 16;
@@ -73,6 +78,9 @@ pub struct Measured {
     /// Clicks found of the clicks sent.
     pub found: usize,
     pub sent: usize,
+    /// The #709 converter term was in force for every block of the run (the live input aligned
+    /// from the output converter's coordinates): the figure has term provenance.
+    pub term: bool,
 }
 
 /// Why a measurement failed.
@@ -80,12 +88,17 @@ pub struct Measured {
 pub enum ProbeError {
     /// The click did not come back loud and clean enough, on enough clicks.
     NoSignal { found: usize, sent: usize },
+    /// The #709 input alignment changed during the run (a capture loss and its re-anchor, a
+    /// speed change): some blocks were read with the term in force and some without, so the run
+    /// has no single round trip. Nothing is stored.
+    AlignmentChanged,
 }
 
 impl std::fmt::Display for ProbeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::NoSignal { found, sent } => write!(f, "the click came back on {found} of {sent} tries"),
+            Self::AlignmentChanged => write!(f, "input alignment changed during the measurement: measure again"),
         }
     }
 }
@@ -103,6 +116,31 @@ pub struct HwProbe {
     send: [AtomicU16; MAX_PROBE_CHANNELS],
     ret_n: AtomicU8,
     ret: [AtomicU16; MAX_PROBE_CHANNELS],
+    /// A block of the run was read without the term in force, and one with it
+    /// ([`Self::note_alignment`]).
+    unaligned: AtomicBool,
+    aligned: AtomicBool,
+    /// The band-limited reader's table, taken on the control thread.
+    table: &'static SincTable,
+}
+
+/// The click train as a signal in render coordinates from `origin`, the plan frame of the pending
+/// block's frame 0 (negative indices: frames of earlier blocks), for the output converter's reader.
+struct Clicks<'a> {
+    probe: &'a HwProbe,
+    origin: u64,
+}
+
+impl Frames for Clicks<'_> {
+    fn channels(&self) -> usize {
+        1
+    }
+
+    #[inline]
+    fn sample(&self, _channel: usize, frame: i64) -> f32 {
+        let t = i128::from(self.origin) + i128::from(frame);
+        u64::try_from(t).map_or(0.0, |t| self.probe.click_at(t))
+    }
 }
 
 impl HwProbe {
@@ -121,6 +159,9 @@ impl HwProbe {
             send: std::array::from_fn(|_| AtomicU16::new(0)),
             ret_n: AtomicU8::new(0),
             ret: std::array::from_fn(|_| AtomicU16::new(0)),
+            unaligned: AtomicBool::new(false),
+            aligned: AtomicBool::new(false),
+            table: band_limited::table(),
         }
     }
 
@@ -149,6 +190,8 @@ impl HwProbe {
         self.send_n.store(send.len() as u8, Ordering::Relaxed);
         self.ret_n.store(ret.len() as u8, Ordering::Relaxed);
         self.frame.store(0, Ordering::Relaxed);
+        self.unaligned.store(false, Ordering::Relaxed);
+        self.aligned.store(false, Ordering::Relaxed);
         self.state.store(ARMED, Ordering::Release);
         true
     }
@@ -186,7 +229,19 @@ impl HwProbe {
         }
         let total = usize::try_from(Self::total_for(self.rate)).unwrap_or(0);
         let recorded: Vec<f32> = self.capture.iter().take(total).map(|s| f32::from_bits(s.load(Ordering::Relaxed))).collect();
-        Some(analyze(&recorded, self.rate))
+        let (aligned, unaligned) = (self.aligned.load(Ordering::Relaxed), self.unaligned.load(Ordering::Relaxed));
+        if aligned && unaligned {
+            return Some(Err(ProbeError::AlignmentChanged));
+        }
+        Some(analyze(&recorded, self.rate).map(|m| Measured { term: aligned, ..m }))
+    }
+
+    /// Audio thread, for each block of a run before [`Self::record_block`]: whether the block's
+    /// live input was aligned with the #709 term in force. One load and at most one store.
+    pub fn note_alignment(&self, aligned: bool) {
+        if self.state.load(Ordering::Acquire) == ARMED {
+            if aligned { &self.aligned } else { &self.unaligned }.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Audio thread: the plan rendered a block of `frames` with this live `input` (planar device
@@ -216,15 +271,38 @@ impl HwProbe {
         Some(start)
     }
 
-    /// Audio thread: add the click, when plan frame `t` falls inside one, to the send channels of
-    /// the device frame `out`. Only those channels are touched, so no other sink hears it.
-    pub fn add_click(&self, out: &mut [f32], t: u64) {
+    /// The click train's sample at plan frame `t` since arming (0 outside a click).
+    fn click_at(&self, t: u64) -> f32 {
         let first = frames_of(self.rate, START_MS);
         if t < first || t >= frames_of(self.rate, DURATION_MS) {
-            return;
+            return 0.0;
         }
         let offset = (t - first) % frames_of(self.rate, INTERVAL_MS).max(1);
-        let Some(&x) = usize::try_from(offset).ok().and_then(|o| self.template.get(o)) else { return };
+        usize::try_from(offset).ok().and_then(|o| self.template.get(o)).copied().unwrap_or(0.0)
+    }
+
+    /// Audio thread: add the click train, read through the output converter, to the send channels
+    /// of the device frame `out` (#709; ADR 0015, Amendment 2026-11-16, the build list): `origin` is
+    /// the plan frame of the pending block's frame 0, and the converter reads that block's frame
+    /// `whole` (equal rates at speed 1 and a whole position: the frame itself, as before) or the
+    /// band-limited reader at position `x` and rate `q` over the train, its frames before the block
+    /// included. Only the send channels are touched, so no other sink hears it. At most one read of
+    /// the reader's taps; no allocation.
+    pub fn add_click(&self, out: &mut [f32], origin: u64, whole: Option<usize>, x: f64, q: f64) {
+        let x = match whole {
+            Some(i) => {
+                let t = origin.checked_add(i as u64);
+                t.map_or(0.0, |t| self.click_at(t))
+            }
+            None => {
+                let mut one = [0.0f32];
+                band_limited::frame(self.table, &Clicks { probe: self, origin }, x, q, &mut one);
+                one[0]
+            }
+        };
+        if x == 0.0 {
+            return;
+        }
         let n = usize::from(self.send_n.load(Ordering::Relaxed)).min(MAX_PROBE_CHANNELS);
         for ch in self.send.iter().take(n) {
             if let Some(o) = out.get_mut(usize::from(ch.load(Ordering::Relaxed))) {
@@ -276,6 +354,7 @@ pub fn analyze(recorded: &[f32], rate: u32) -> Result<Measured, ProbeError> {
         spread_frames: u32::try_from(spread).unwrap_or(u32::MAX),
         found: lags.len(),
         sent,
+        term: false,
     })
 }
 
@@ -374,10 +453,10 @@ mod tests {
         assert!(p.arm(&[2, 3], &[1, 0]));
         assert!(!p.arm(&[0], &[0]), "one measurement at a time");
         let mut frame = [0.0f32; 6];
-        p.add_click(&mut frame, frames_of(RATE, START_MS));
+        p.add_click(&mut frame, frames_of(RATE, START_MS), Some(0), 0.0, 1.0);
         assert_eq!(frame, [0.0, 0.0, CLICK_LEVEL, CLICK_LEVEL, 0.0, 0.0]);
         let mut quiet = [0.0f32; 6];
-        p.add_click(&mut quiet, frames_of(RATE, START_MS) + 5_000);
+        p.add_click(&mut quiet, frames_of(RATE, START_MS) + 5_000, Some(0), 0.0, 1.0);
         assert_eq!(quiet, [0.0; 6]);
         let input = vec![vec![0.25f32; 4], vec![0.5; 4]];
         assert_eq!(p.record_block(&input, 4), Some(0));

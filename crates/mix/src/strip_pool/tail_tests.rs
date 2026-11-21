@@ -48,6 +48,7 @@ fn claimed_aux_before_cell_entry_keeps_snapshot_across_render_boundary() {
         no_suspend: true,
         frame: N as u64,
         marker: None,
+        aligned: false,
     };
     let b = PoolBlock {
         session: &plan.session,
@@ -188,6 +189,7 @@ fn host<R>(rig: &mut PlanRig, f: impl FnOnce(&mut Host<'_, '_>, usize, usize) ->
         no_suspend: true,
         frame: 0,
         marker: None,
+        aligned: false,
     };
     let empty = BusTable::default();
     let deadline = Instant::now() + FAR;

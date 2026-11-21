@@ -193,6 +193,7 @@ fn hw(input_ports: &[&str]) -> HardwareLatency {
         input_device: "Firefox".into(),
         input_ports: ports(input_ports),
         device_rate: 0,
+        normalized_frames: None,
     }
 }
 
@@ -225,6 +226,7 @@ fn a_measurement_through_a_virtual_input_applies_only_over_its_ports() {
         input_device: "Firefox".into(),
         input_ports: ports(input_ports),
         device_rate: 0,
+        normalized_frames: None,
     };
     map.set_external_latency(fig(&["output_FL", "output_FR"]));
     assert_eq!(map.external_measurement(&port, "In 1", 48_000, Some(256)).map(|l| l.frames), Some(955));

@@ -442,8 +442,9 @@ impl Engine {
     /// stored, and `false` returned, when the open input has no identity ([`NO_INPUT_IDENTITY`]):
     /// an empty identity on a figure means "stored before inputs were recorded", never "unknown".
     /// `device_rate` is the rate the audio device ran at while measuring (ADR 0015, Amendment
-    /// 2026-11-16 on the #709 converter term, rule 5).
-    pub fn store_hardware_latency(&mut self, send: &str, ret: &str, round_trip_frames: u32, device_rate: u32) -> bool {
+    /// 2026-11-16 on the #709 converter term, rule 5); `term`, whether the term was in force for the
+    /// whole measurement, which stores the normalized figure beside the measured total.
+    pub fn store_hardware_latency(&mut self, send: &str, ret: &str, round_trip_frames: u32, device_rate: u32, term: bool) -> bool {
         if self.io.input_device.is_empty() {
             return false;
         }
@@ -460,6 +461,7 @@ impl Engine {
             // And over which ports, for a virtual input (rule 13).
             input_ports: self.io.input_ports.clone(),
             device_rate,
+            normalized_frames: term.then(|| round_trip_frames.saturating_sub(transit_model::converter_term(self.doc.sample_rate.hz(), device_rate))),
         });
         self.set_io_map(io);
         true

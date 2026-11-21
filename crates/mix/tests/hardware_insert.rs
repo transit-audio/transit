@@ -64,6 +64,7 @@ fn io(measured: Option<usize>) -> IoMap {
             input_device: String::new(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         });
     }
     io
@@ -73,6 +74,8 @@ struct Rendered {
     /// Main's first channel from sample 0 of the render.
     main: Vec<f32>,
     latency: usize,
+    /// The main mix's compensation after each block.
+    latencies: Vec<usize>,
     /// What the device played on its channel 2 (the first channel of "Out 3-4").
     sent: Vec<f32>,
 }
@@ -90,6 +93,21 @@ fn render_on(s: &Session, io: &IoMap, duplex: bool, delay: usize, sent: usize, c
 }
 
 fn render_on_mode(s: &Session, io: &IoMap, duplex: bool, delay: usize, sent: usize, cable: impl Fn(usize) -> Option<usize>, mode: bool) -> Rendered {
+    render_full(s, io, (duplex, &|_| false), delay, sent, cable, mode)
+}
+
+/// [`render_on_mode`] with each block's live input marked aligned with the #709 term in force
+/// when `live.1` says so for the block's index.
+fn render_full(
+    s: &Session,
+    io: &IoMap,
+    live: (bool, &dyn Fn(usize) -> bool),
+    delay: usize,
+    sent: usize,
+    cable: impl Fn(usize) -> Option<usize>,
+    mode: bool,
+) -> Rendered {
+    let (duplex, aligned) = live;
     let (outs, ins) = (usize::from(io.outputs), usize::from(io.inputs));
     MixEngine::force_serial(true);
     let mut mix = MixEngine::realtime(target(io));
@@ -109,8 +127,9 @@ fn render_on_mode(s: &Session, io: &IoMap, duplex: bool, delay: usize, sent: usi
     let mut out = vec![vec![0.0f32; BLOCK]; main_w + sinks.channels()];
     // The device's output stream, per device channel, from sample 0.
     let mut device: Vec<Vec<f32>> = vec![Vec::new(); outs];
-    let (mut main, mut pos, mut latency) = (Vec::new(), 0usize, 0usize);
+    let (mut main, mut pos, mut latency, mut latencies) = (Vec::new(), 0usize, 0usize, Vec::new());
     while main.len() < LEN + latency + 2 * D {
+        mix.input_aligned = aligned(pos / BLOCK);
         mix.input = if duplex {
             (0..ins)
                 .map(|c| (0..BLOCK).map(|i| (pos + i).checked_sub(delay).and_then(|k| device[cable(c)?].get(k)).copied().unwrap_or(0.0)).collect())
@@ -121,6 +140,7 @@ fn render_on_mode(s: &Session, io: &IoMap, duplex: bool, delay: usize, sent: usi
         let (_, allocations) = measure(|| mix.render_active(pos as i64, BLOCK, &mut out));
         assert_eq!(allocations, AllocStats::default(), "hardware rendering allocates and frees nothing");
         latency = mix.latency;
+        latencies.push(latency);
         main.extend_from_slice(&out[0]);
         for c in &mut device {
             c.extend(std::iter::repeat_n(0.0, BLOCK));
@@ -133,7 +153,7 @@ fn render_on_mode(s: &Session, io: &IoMap, duplex: bool, delay: usize, sent: usi
         pos += BLOCK;
     }
     assert_eq!(mix.status().capacity_exceeded, 0, "the plan's delay lines hold the round trip");
-    Rendered { main, latency, sent: device.swap_remove(sent) }
+    Rendered { main, latency, latencies, sent: device.swap_remove(sent) }
 }
 
 fn hits(x: &[f32]) -> Vec<usize> {
@@ -203,6 +223,40 @@ fn the_device_rate_of_a_figure_changes_neither_its_latency_nor_the_output() {
         let report = hardware_report(&s, &map, 4, 4, true, SR);
         assert_eq!((report[0].state.clone(), report[0].latency), (HardwareState::Ready, Some(D as u32)));
     }
+}
+
+/// #709 (ADR 0015, Amendment 2026-11-16, rule 5 and the acceptance list): a figure with term
+/// provenance (measured at 48 kHz on a 44.1 kHz device: the total 700 with the term 34, normalized
+/// 666) is used with the running term (0 on a 48 kHz device) in exactly the blocks whose live input
+/// was aligned with the term in force, and as measured in every other block: a latency and its
+/// alignment are adopted together. A loop of 666 frames lines up with the dry track while aligned.
+#[test]
+fn a_term_figure_is_used_in_exactly_the_aligned_blocks_and_the_measured_total_elsewhere() {
+    let mut s = session();
+    impulse_track(&mut s, "Dry");
+    let t = impulse_track(&mut s, "Outboard");
+    s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::hardware(SEND, RET));
+    let mut map = io(None);
+    let normalized = D as u32 - transit_model::converter_term(SR, 44_100);
+    assert_eq!(normalized, 666);
+    map.set_hardware_latency(HardwareLatency { device_rate: 44_100, normalized_frames: Some(normalized), ..io(Some(D)).hardware_latency[0].clone() });
+    map.device_rate = Some(SR);
+    let aligned = render_full(&s, &map, (true, &|_| true), 666, 2, Some, false);
+    assert_eq!((aligned.latency, hits(&aligned.main)), (666, vec![AT + 666]), "the term figure, lined up");
+    let measured = render_full(&s, &map, (true, &|_| false), D, 2, Some, false);
+    assert_eq!((measured.latency, hits(&measured.main)), (D, vec![AT + D]), "not aligned: the measured total");
+    // Changing every few blocks: each block's compensation follows that block's input.
+    let mixed = render_full(&s, &map, (true, &|b| b % 5 < 2), 666, 2, Some, false);
+    for (b, l) in mixed.latencies.iter().enumerate() {
+        assert_eq!(*l, if b % 5 < 2 { 666 } else { D }, "block {b}");
+    }
+    let report = hardware_report(&s, &map, 4, 4, true, SR);
+    assert_eq!((report[0].latency, report[0].aligned_latency), (Some(D as u32), Some(666)));
+    // A figure without term provenance never gains the term, aligned or not.
+    let mut plain = io(Some(D));
+    plain.device_rate = Some(44_100);
+    let r = render_full(&s, &plain, (true, &|_| true), D, 2, Some, false);
+    assert_eq!((r.latency, hits(&r.main)), (D, vec![AT + D]));
 }
 
 #[test]
@@ -294,6 +348,7 @@ fn an_insert_on_the_last_channels_of_a_12_in_10_out_device_sends_and_returns_the
         input_device: String::new(),
         input_ports: Vec::new(),
         device_rate: 0,
+        normalized_frames: None,
     });
     let mut s = session();
     let dry = impulse_track(&mut s, "Dry");

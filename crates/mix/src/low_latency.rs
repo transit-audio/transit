@@ -308,6 +308,7 @@ mod tests {
             input_device: String::new(),
             input_ports: Vec::new(),
             device_rate: 0,
+            normalized_frames: None,
         });
         let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 64, out_channels: 6, in_channels: 4 };
         let raw = SlotLatencies::from([((frozen, 1), 192), ((inactive, 0), 999), ((master, 0), 300)]);
