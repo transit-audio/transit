@@ -666,7 +666,7 @@ impl StudioApp {
     /// device layouts. An editor window on top at `pos` comes first and takes the drop whole:
     /// `audio` (the payload holds an audio file) lands on a Sampler pad or an empty Sampler view's
     /// well, anything else over a window is no target (nothing behind a window is reached).
-    fn drop_target(&self, ctx: &egui::Context, pos: Pos2, snap: bool, audio: bool) -> Option<(Target, R4)> {
+    pub(crate) fn drop_target(&self, ctx: &egui::Context, pos: Pos2, snap: bool, audio: bool) -> Option<(Target, R4)> {
         if let Some(key) = self.editor_window_at(ctx, pos) {
             return if audio { self.editor_target(key, pos) } else { None };
         }

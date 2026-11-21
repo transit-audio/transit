@@ -8,12 +8,14 @@
 //! frame or a later one). A `PointerGone` does not route it blind: the drop stays held, and only
 //! after [`GONE_GRACE_FRAMES`] frames with no position does it go to the arrangement. Then the
 //! editor window on top at that position (egui's own layer order) claims it, or the arrangement
-//! imports it. Exactly one claimant takes a drop; a held drop never vanishes (a second drop while
+//! imports it: on the audio track under the pointer or below the tracks, as a browser drag lands,
+//! else at the cursor. Exactly one claimant takes a drop; a held drop never vanishes (a second drop while
 //! one is held routes with it).
 
 use crate::StudioApp;
 use std::path::PathBuf;
 use transit_model::TrackId;
+use transit_time::Samples;
 
 /// Files offered to a claimant, and where they were dropped (`None`: the pointer left the window).
 #[derive(Debug, Clone)]
@@ -110,8 +112,22 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
         r.offer = Some((key, offer));
         return;
     }
+    let snap = !ctx.input(|i| i.modifiers.shift);
+    let at = offer.pos.and_then(|p| arrangement_target(app, ctx, p, snap));
     for p in &offer.paths {
-        open_path(app, &p.to_string_lossy());
+        open_path_at(app, &p.to_string_lossy(), at);
+    }
+}
+
+/// Where a file-manager drop at `pos` lands in the arrangement, as a browser drag does: the audio
+/// track whose lane (at the pointer's time) or header is under the pointer, or a new track when it
+/// is below the tracks. `None` elsewhere: the drop imports at the cursor, as before.
+fn arrangement_target(app: &StudioApp, ctx: &egui::Context, pos: egui::Pos2, snap: bool) -> Option<(Option<TrackId>, Option<Samples>)> {
+    let audio = |t: TrackId| app.engine.session().track(t).is_some_and(|t| t.kind == transit_model::TrackKind::Audio);
+    match app.drop_target(ctx, pos, snap, true)?.0 {
+        crate::browser::Target::Track { track, at } if audio(track) => Some((Some(track), at)),
+        crate::browser::Target::Below { at } => Some((None, at)),
+        _ => None,
     }
 }
 
@@ -131,6 +147,12 @@ pub(crate) fn take(app: &mut StudioApp, key: (TrackId, usize)) -> Option<DropOff
 /// imports, any other file imports as audio at the cursor (on the cursor's track). Also used for
 /// files named on the command line.
 pub fn open_path(app: &mut StudioApp, p: &str) {
+    open_path_at(app, p, None);
+}
+
+/// [`open_path`], with an audio file landing on `at`'s track (none: a new track) at its time (none:
+/// the cursor) when `at` is given, where [`arrangement_target`] put a drop.
+fn open_path_at(app: &mut StudioApp, p: &str, at: Option<(Option<TrackId>, Option<Samples>)>) {
     let lower = p.to_ascii_lowercase();
     if lower.ends_with(".transit") || lower.ends_with(".dawproject") {
         app.run_or_ask("session.open", serde_json::json!({"path": p}));
@@ -139,9 +161,12 @@ pub fn open_path(app: &mut StudioApp, p: &str) {
     let r = if lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf") {
         app.run("file.import_midi", serde_json::json!({"path": p}))
     } else {
-        let at = app.cursor();
-        let mut params = serde_json::json!({"path": p, "at": at});
-        if let Some(t) = app.cursor_track() {
+        let (track, time) = match at {
+            Some((track, time)) => (track, time.unwrap_or_else(|| app.cursor())),
+            None => (app.cursor_track(), app.cursor()),
+        };
+        let mut params = serde_json::json!({"path": p, "at": time});
+        if let Some(t) = track {
             params["track"] = serde_json::json!(t.0);
         }
         app.run("file.import_audio", params)

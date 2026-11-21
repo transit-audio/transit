@@ -157,3 +157,29 @@ fn the_gone_rule_holds_where_the_old_rule_imported() {
         assert_eq!(placement(None, false, &mut count), Placement::Hold);
     }
 }
+
+/// A file-manager drop lands where it is let go, as a browser drag does: a stereo file on a mono
+/// track's lane with a mono track below splits there, rather than going to the cursor's track (a
+/// new stereo track when the cursor has none).
+#[test]
+fn a_stereo_file_dropped_on_a_mono_lane_splits_onto_that_track_and_the_one_below() {
+    let mut t = T::new();
+    let mono = |t: &mut T| t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let (a, b) = (mono(&mut t), mono(&mut t));
+    t.frames(3);
+    let mut wav = Vec::new();
+    for v in [0x4646_4952u32, 36 + 4_800 * 4, 0x4556_4157, 0x2074_6d66, 16, 0x0002_0001, 48_000, 48_000 * 4, 0x0010_0004, 0x6174_6164, 4_800 * 4] {
+        wav.extend(v.to_le_bytes());
+    }
+    for _ in 0..4_800 {
+        wav.extend([0x00, 0x40, 0x00, 0xe0]); // 0.5 left, -0.25 right
+    }
+    let path = t.dir.join("Mics.wav");
+    std::fs::write(&path, wav).unwrap();
+    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == a).unwrap().lane;
+    t.drop_file(&path, mid(lane));
+    let s = t.app.engine.session();
+    let names = |id: u64| s.track(TrackId(id)).unwrap().clips().iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+    assert_eq!(s.tracks.len(), 2, "no new track");
+    assert_eq!((names(a), names(b)), (vec!["Mics.L".to_string()], vec!["Mics.R".to_string()]));
+}
