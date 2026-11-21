@@ -3,7 +3,10 @@
 //! client drops every link of its ports (jack.h, `jack_deactivate`: "disconnect all ports belonging
 //! to it"), and every reopen closes the client. So one reopen operation reads the links of the old
 //! client's ports before the first deactivation ([`take`]), holds the snapshot while the old
-//! client closes, and restores it once on the replacement client after it started ([`restore`]).
+//! client closes, and restores it once on the replacement client ([`restore`]). Under PipeWire the
+//! replacement restores it in its start, after its own links and before its settling window, so a
+//! restored link that moves the node to another quantum is part of the baseline (#760); the
+//! reopen's own restore after the start then reports that restore instead of making links again.
 //!
 //! - **Ends.** A transit end is stored as direction plus local port index ([`Local`]) and mapped to
 //!   the replacement client's actual port names, so a client the server renamed (`transit-02`)
@@ -121,9 +124,30 @@ pub(crate) struct Snapshot {
     /// The originating session's callback state: its shutdown flag, set by the server's shutdown
     /// callback whenever it comes, discards the snapshot at the restore.
     pub(crate) origin: Arc<Shared>,
+    /// Held by the snapshot the reopen operation owns; the early copy ([`Snapshot::early`]) holds
+    /// only a weak reference, so it is used only while that operation still holds its snapshot.
+    pub(crate) alive: Option<Arc<()>>,
 }
 
 impl Snapshot {
+    /// A copy for the replacement's start to restore before its settling window (#760, second
+    /// round), and the weak reference that says whether the reopen still holds this snapshot. The
+    /// snapshot itself is marked held here if it was not yet.
+    pub(crate) fn early(&mut self) -> (Snapshot, std::sync::Weak<()>) {
+        let alive = self.alive.get_or_insert_with(|| Arc::new(()));
+        let weak = Arc::downgrade(alive);
+        let copy = Snapshot {
+            from: self.from,
+            links: self.links.clone(),
+            unsaved: self.unsaved.clone(),
+            inputs: self.inputs.clone(),
+            outputs: self.outputs.clone(),
+            origin: Arc::clone(&self.origin),
+            alive: None,
+        };
+        (copy, weak)
+    }
+
     fn meaning(&self, input: bool) -> Option<&Meaning> {
         if input { self.inputs.as_ref() } else { self.outputs.as_ref() }
     }
@@ -166,7 +190,7 @@ pub(crate) fn take(client: &dyn JackClient, sides: &[Ports], from: u64, origin: 
         }
     }
     let meaning = |input: bool| sides.iter().find(|s| s.input == input).map(|s| s.meaning.clone());
-    Snapshot { from, links, unsaved, inputs: meaning(true), outputs: meaning(false), origin }
+    Snapshot { from, links, unsaved, inputs: meaning(true), outputs: meaning(false), origin, alive: None }
 }
 
 /// A `jack_get_ports` name pattern (a POSIX extended regular expression, under JACK 2 and

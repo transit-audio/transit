@@ -141,6 +141,15 @@ pub(crate) struct PipeWireMode {
     /// the given number of graph steps (the report's round whose first cycle ran 2048 and the
     /// change to 1024 came after it).
     pub(crate) moves_each: Option<(u32, u32, u32)>,
+    /// Every activation: an unlinked client reads the first rate; the graph runs the second once
+    /// the client's first link is made (a rate that depends on the links).
+    pub(crate) rate_each: Option<(u32, u32)>,
+    /// The graph's quantum follows one outside port: the first figure while any link has an end on
+    /// that port, the second otherwise (an outside link that moves transit's node to another
+    /// driver), evaluated at each activation and after each link is made.
+    pub(crate) link_quantum: Option<(String, u32, u32)>,
+    /// A global force pins the graph's quantum: a client's own request is accepted and never runs.
+    pub(crate) pinned: Option<u32>,
 }
 
 /// Something the fake's graph does after some graph steps.
@@ -528,7 +537,26 @@ impl FakeServer {
 
     /// Another client (a patchbay) links `source` to `destination`. Panics on a link the server
     /// would refuse, so a test cannot script an impossible graph.
+    /// The quantum [`PipeWireMode::link_quantum`] gives for the links the graph holds now.
+    fn link_quantum(&self) -> Option<u32> {
+        let state = self.lock();
+        let (port, with, without) = state.pipewire.as_ref()?.link_quantum.clone()?;
+        Some(if state.links.iter().any(|(a, b)| *a == port || *b == port) { with } else { without })
+    }
+
+    /// After a link was made: the graph's figures that depend on the links follow.
+    fn links_changed(&self) {
+        if let Some(frames) = self.link_quantum().filter(|f| *f != self.lock().buffer) {
+            self.set_buffer_size(frames);
+        }
+    }
+
     pub(crate) fn outside_link(&self, source: &str, destination: &str) {
+        self.outside_link_only(source, destination);
+        self.links_changed();
+    }
+
+    fn outside_link_only(&self, source: &str, destination: &str) {
         let mut state = self.lock();
         let (from, to) = (state.port(source), state.port(destination));
         assert!(matches!((from, to), (Some((true, a)), Some((false, b))) if a == b), "{source} -> {destination} is not a link the server makes");
@@ -716,12 +744,51 @@ impl FakeClient {
 
     /// PipeWire: the force this client holds arrives at the graph, now or after the mode's delay.
     fn force_arrives(&self, frames: u32) {
+        if self.server.lock().pipewire.as_ref().is_some_and(|m| m.pinned.is_some()) {
+            return;
+        }
         let delay = self.server.lock().pipewire.as_ref().map_or(0, |m| m.force_delay);
         if delay == 0 {
             self.server.set_buffer_size(frames);
         } else {
             self.server.schedule(delay, Event::Quantum(frames));
         }
+    }
+
+    fn connect_only(&mut self, source: &str, destination: &str) -> Result<(), String> {
+        let mut state = self.server.lock();
+        let link = (source.to_owned(), destination.to_owned());
+        state.connects.push(link.clone());
+        if state.race.as_ref() == Some(&link) {
+            state.race = None;
+            if !state.holds(&link) {
+                state.links.push(link.clone());
+            }
+        }
+        if !state.clients[self.index].active {
+            return Err("connect needs an active client".into());
+        }
+        match (state.port(source), state.port(destination)) {
+            (Some((true, a)), Some((false, b))) if a == b => {}
+            (None, _) | (_, None) => return Err("jack_connect returned -1 (no such port)".into()),
+            _ => return Err("jack_connect returned -1 (wrong direction or type)".into()),
+        }
+        // Every connect a transit client makes has one end on its own port.
+        match state.self_connect {
+            SelfConnect::Allow => {}
+            SelfConnect::Ignore => return Ok(()),
+            SelfConnect::Fail => return Err("jack_connect returned 1".into()),
+        }
+        if state.duplicates || !state.holds(&link) {
+            if state.link_delay > 0 {
+                let delay = state.link_delay;
+                state.unseen.push((link.clone(), delay));
+            } else {
+                state.links.push(link.clone());
+            }
+            state.clients[self.index].connections.push(link);
+        }
+        Ok(())
     }
 
     /// PipeWire: the client stops forcing (it deactivated or closed): the driver picks its own.
@@ -802,17 +869,27 @@ impl JackClient for FakeClient {
                 (mode.stale, mode.activation_buffer) = (Some(stale), Some(stale.1));
                 self.server.script_pipewire(|m| m.stale = Some(stale));
             }
+            if let Some((unlinked, _)) = mode.rate_each {
+                self.server.lock().rate = unlinked;
+                shared.on_sample_rate(unlinked);
+            }
+            if mode.link_quantum.is_some() {
+                let quantum = self.server.link_quantum();
+                if let Some(frames) = quantum {
+                    self.server.lock().buffer = frames;
+                }
+            }
             if let Some((first, steps, then)) = mode.moves_each {
                 self.server.lock().buffer = first;
                 self.server.schedule(steps, Event::Quantum(then));
             }
             let delay = mode.force_delay;
-            if let Some(frames) = force.filter(|_| delay == 0) {
+            if let Some(frames) = force.filter(|_| delay == 0 && mode.pinned.is_none()) {
                 self.server.lock().buffer = frames;
             }
             let buffer = self.server.lock().buffer;
             shared.on_buffer_size(mode.activation_buffer.unwrap_or(buffer));
-            if let Some(frames) = force.filter(|_| delay > 0) {
+            if let Some(frames) = force.filter(|_| delay > 0 && mode.pinned.is_none()) {
                 self.server.schedule(delay, Event::Quantum(frames));
             }
         }
@@ -823,38 +900,13 @@ impl JackClient for FakeClient {
     /// exists is fine (`EEXIST`, mapped to success as `crate::ffi` does) and is not made twice,
     /// unless the server duplicates links (PipeWire's libjack).
     fn connect(&mut self, source: &str, destination: &str) -> Result<(), String> {
-        let mut state = self.server.lock();
-        let link = (source.to_owned(), destination.to_owned());
-        state.connects.push(link.clone());
-        if state.race.as_ref() == Some(&link) {
-            state.race = None;
-            if !state.holds(&link) {
-                state.links.push(link.clone());
-            }
+        let first = self.record(|c, _| c.connections.is_empty());
+        self.connect_only(source, destination)?;
+        let linked_rate = self.server.lock().pipewire.as_ref().and_then(|m| m.rate_each).map(|(_, linked)| linked);
+        if let Some(rate) = linked_rate.filter(|_| first) {
+            self.server.set_sample_rate(rate);
         }
-        if !state.clients[self.index].active {
-            return Err("connect needs an active client".into());
-        }
-        match (state.port(source), state.port(destination)) {
-            (Some((true, a)), Some((false, b))) if a == b => {}
-            (None, _) | (_, None) => return Err("jack_connect returned -1 (no such port)".into()),
-            _ => return Err("jack_connect returned -1 (wrong direction or type)".into()),
-        }
-        // Every connect a transit client makes has one end on its own port.
-        match state.self_connect {
-            SelfConnect::Allow => {}
-            SelfConnect::Ignore => return Ok(()),
-            SelfConnect::Fail => return Err("jack_connect returned 1".into()),
-        }
-        if state.duplicates || !state.holds(&link) {
-            if state.link_delay > 0 {
-                let delay = state.link_delay;
-                state.unseen.push((link.clone(), delay));
-            } else {
-                state.links.push(link.clone());
-            }
-            state.clients[self.index].connections.push(link);
-        }
+        self.server.links_changed();
         Ok(())
     }
 

@@ -23,8 +23,9 @@
 //!   [`ab::Stream::snapshot_links`]). A stop is for good (it returns once no process
 //!   callback is inside that direction); when no direction runs, the client is deactivated.
 //!   Dropping the last stream deactivates and closes it, and only then frees the engine. Under
-//!   another rate the start latches a rebuild instead: neither direction starts, no port connects,
-//!   and the stream says so ([`ab::Stream::needs_rebuild`]); the caller reopens. Under PipeWire the
+//!   another rate the start latches a rebuild instead: neither direction starts, no further port
+//!   connects (under PipeWire the links made before the window stay with the client the reopen
+//!   replaces), and the stream says so ([`ab::Stream::needs_rebuild`]); the caller reopens. Under PipeWire the
 //!   backend remembers the last rate and buffer size an active session observed ([`Hints`]): the
 //!   next open plans at the rate, and its settling window waits for the buffer size, so a reopen
 //!   for a buffer size the graph moved to does not reopen again when it finds the same one (a
@@ -111,30 +112,47 @@ pub struct JackBackend {
 }
 
 /// What an active session last observed under PipeWire (0: nothing): the rate the next plan opens
-/// at (rule 1) and the buffer size the next start's settling window waits for (`crate::settle`).
-/// Hints: a server shutdown clears both.
-#[derive(Debug, Default)]
+/// at (rule 1) and the buffer size the next start's settling window waits for (`crate::settle`),
+/// with the request that buffer size was observed under. Hints: a server shutdown clears them.
+/// Also the early copy of the link snapshot a reopen holds, for the replacement's start to restore
+/// before its settling window (`links::Snapshot::early`).
+#[derive(Default)]
 pub(crate) struct Hints {
     rate: AtomicU32,
     period: AtomicU32,
+    /// The request (frames) the period was observed under; 0: none.
+    under: AtomicU32,
+    early: Mutex<Option<(links::Snapshot, Weak<()>)>>,
 }
 
 impl Hints {
-    fn keep(&self, rate: u32, period: u32) {
-        for (hint, value) in [(&self.rate, rate), (&self.period, period)] {
-            if value != engine::UNKNOWN {
-                hint.store(value, Ordering::Relaxed);
-            }
+    fn keep(&self, rate: u32, period: u32, under: Option<u32>) {
+        if rate != engine::UNKNOWN {
+            self.rate.store(rate, Ordering::Relaxed);
+        }
+        if period != engine::UNKNOWN {
+            self.period.store(period, Ordering::Relaxed);
+            self.under.store(under.unwrap_or(0), Ordering::Relaxed);
         }
     }
 
     fn clear(&self) {
         self.rate.store(0, Ordering::Relaxed);
         self.period.store(0, Ordering::Relaxed);
+        self.under.store(0, Ordering::Relaxed);
     }
 
-    fn period(&self) -> Option<u32> {
-        Some(self.period.load(Ordering::Relaxed)).filter(|p| *p != 0)
+    fn period(&self) -> Option<(u32, Option<u32>)> {
+        let under = Some(self.under.load(Ordering::Relaxed)).filter(|u| *u != 0);
+        Some(self.period.load(Ordering::Relaxed)).filter(|p| *p != 0).map(|p| (p, under))
+    }
+
+    fn rate(&self) -> Option<u32> {
+        Some(self.rate.load(Ordering::Relaxed)).filter(|r| *r != 0)
+    }
+
+    fn early(&self) -> MutexGuard<'_, Option<(links::Snapshot, Weak<()>)>> {
+        self.early.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }
 
@@ -195,7 +213,7 @@ impl JackBackend {
     /// The buffer size the backend remembers (tests).
     #[cfg(test)]
     pub(crate) fn remembered_period(&self) -> Option<u32> {
-        self.remembered.period()
+        self.remembered.period().map(|(frames, _)| frames)
     }
 
     /// This backend without the automatic connections: transit's ports are registered and left for
@@ -689,6 +707,11 @@ pub(crate) struct Session {
     first_cycle_logged: bool,
     /// Under the latch: the link snapshot a restore handed this client, for the rebuilt one.
     held: Option<links::Snapshot>,
+    /// What the start's early restore of a reopen's snapshot did (PipeWire), by the snapshot's
+    /// session: the reopen's own restore reports it instead of making links again.
+    early_restored: Option<(u64, links::Restored)>,
+    /// An accepted buffer-size request is not what the graph runs at the commit (said as declined).
+    not_kept: bool,
     /// The startup check's lines (#760 rules 3 and 6): asked links not observed, and the latency
     /// reported at startup (read once, when every direction has started and been checked).
     link_lines: Vec<String>,
@@ -723,6 +746,8 @@ impl Session {
             remembered,
             first_cycle_logged: false,
             held: None,
+            early_restored: None,
+            not_kept: false,
             link_lines: Vec::new(),
             latency_line: None,
             listing: None,
@@ -898,15 +923,24 @@ impl Session {
             declined: self.declined,
             prepared_rate: self.prepared_rate,
             hint: self.remembered.period(),
+            rate_hint: self.remembered.rate(),
             init: timing.init,
         };
         let mut clock = settle::Clock::new(api, timing.window_step, timing.window);
         let Some(client) = self.client.as_ref() else { return Err(ab::OpenError::DeviceNotAvailable(crate::SERVER_NOT_RUNNING.into())) };
         let name = client.name();
         let observed = settle::observe(&self.shared, &mut clock, &ask, || (client.sample_rate(), client.buffer_size()));
-        let linked = (observed.is_ok() && self.pipewire && self.shared.sample_rate() == self.prepared_rate).then(|| {
+        // Under PipeWire at the prepared rate (or a rate that may reach it once linked): every
+        // direction's own links, then the reopen's outside links, before the window.
+        let at_rate = self.shared.sample_rate() == self.prepared_rate || ask.waits_for_rate();
+        let linked = (observed.is_ok() && self.pipewire && at_rate).then(|| {
             let generations: Vec<u64> = self.sides.iter().map(|s| s.generation).collect();
             generations.into_iter().for_each(|generation| self.connect(generation));
+            // Outside links only on a client at the prepared rate: one that may still latch a
+            // rebuild restores nothing (#431, rule 6), the rebuilt client does.
+            if self.shared.sample_rate() == self.prepared_rate {
+                self.restore_early();
+            }
             self.shared.cycles()
         });
         let settled = match observed.and_then(|()| settle::wait(&self.shared, &mut clock, &ask, linked)) {
@@ -916,10 +950,10 @@ impl Session {
                 return Err(e);
             }
         };
-        (self.rate, self.buffer, self.settled) = (settled.rate, settled.buffer, true);
+        (self.rate, self.buffer, self.settled, self.not_kept) = (settled.rate, settled.buffer, true, settled.not_kept);
         self.reset_for = (settled.rate, settled.buffer);
         if self.pipewire {
-            self.remembered.keep(settled.rate, settled.buffer);
+            self.remembered.keep(settled.rate, settled.buffer, self.requested);
         }
         log::info!("JACK: client \"{name}\" active at {} Hz, quantum {}", self.rate, self.buffer);
         if settled.rebuild {
@@ -1000,7 +1034,11 @@ impl Session {
         // The figures of the first process cycle, once, for the tester's sitting (rule 9's Q1).
         if !self.first_cycle_logged && self.shared.cycles() > 0 {
             self.first_cycle_logged = true;
-            log::info!("JACK: the first process cycle ran {} frames at {} Hz", self.shared.last_frames(), self.shared.sample_rate());
+            log::info!(
+                "JACK: process cycles run; the latest when the watcher first looked ran {} frames at {} Hz",
+                self.shared.last_frames(),
+                self.shared.sample_rate()
+            );
         }
         let now = (self.shared.sample_rate(), self.shared.buffer_size());
         if self.settled && now != (self.rate, self.buffer) && now != self.reset_for {
@@ -1008,7 +1046,7 @@ impl Session {
             // An active session observed these figures: the reopen plans at the rate and settles
             // for the buffer size (PipeWire's hints).
             if self.pipewire {
-                self.remembered.keep(now.0, now.1);
+                self.remembered.keep(now.0, now.1, self.requested);
             }
             reports.extend(self.errors(ab::StreamError::ResetRequested));
         }
@@ -1096,7 +1134,8 @@ impl Session {
     /// links with it.
     ///
     /// A client that latched a rebuild holds the snapshot a restore handed it instead of its own
-    /// links (it made none and restored none): the rebuilt client restores that one.
+    /// links (its links, if its start made any before the rate moved, are not saved): the rebuilt
+    /// client restores that one.
     fn snapshot(&mut self) -> Option<links::Snapshot> {
         if self.rebuild {
             return self.held.take();
@@ -1108,8 +1147,23 @@ impl Session {
         Some(links::take(client.as_ref(), &self.ports(), self.id, Arc::clone(&self.shared)))
     }
 
+    /// Under PipeWire, in the start before the settling window: restores the early copy of the
+    /// snapshot a reopen holds, once, if that reopen still holds it (an operation that ended early
+    /// dropped its snapshot, and nothing of it is restored) and it comes from an earlier session.
+    fn restore_early(&mut self) {
+        let Some((snapshot, alive)) = self.remembered.early().take() else { return };
+        if alive.upgrade().is_none() || snapshot.from >= self.id {
+            return;
+        }
+        let ports = self.ports();
+        let Some(client) = self.client.as_mut() else { return };
+        log::info!("JACK: restoring {} links made outside transit before settling", snapshot.links.len());
+        self.early_restored = Some((snapshot.from, links::restore(client.as_mut(), &ports, &snapshot)));
+    }
+
     /// Restores `snapshot`, taken from an earlier session, on this started client: what it did,
-    /// with the links the server accepted and does not show yet left to [`Session::confirm`].
+    /// with the links the server accepted and does not show yet left to [`Session::confirm`]. When
+    /// the start already restored it ([`Session::restore_early`]), that restore is the answer.
     fn restore(&mut self, snapshot: &links::Snapshot) -> Option<links::Restored> {
         if snapshot.from >= self.id {
             log::warn!("JACK: a link snapshot is restored only on a later client; discarded");
@@ -1118,6 +1172,11 @@ impl Session {
         if !self.active || self.shared.shutdown() {
             log::warn!("JACK: the client did not start; {} links made outside transit are not restored", snapshot.links.len());
             return None;
+        }
+        if let Some((from, done)) = self.early_restored.take()
+            && from == snapshot.from
+        {
+            return Some(done);
         }
         let ports = self.ports();
         let client = self.client.as_mut()?;
@@ -1323,7 +1382,7 @@ impl ab::Stream for JackStream {
 
     /// The server refused the buffer size the open asked for (`jack_set_buffer_size` failed).
     fn period_declined(&self) -> bool {
-        lock(&self.slot).as_ref().is_some_and(|s| s.id == self.session && s.declined)
+        lock(&self.slot).as_ref().is_some_and(|s| s.id == self.session && (s.declined || s.not_kept))
     }
 
     /// The process thread and its priority are the server's.
@@ -1342,7 +1401,11 @@ impl ab::Stream for JackStream {
     /// the reopen stops or drops anything; never a JACK callback or an error callback.
     fn snapshot_links(&self) -> Option<ab::LinkSnapshot> {
         let mut guard = lock(&self.slot);
-        let snapshot = guard.as_mut().filter(|s| s.id == self.session)?.snapshot()?;
+        let session = guard.as_mut().filter(|s| s.id == self.session)?;
+        let mut snapshot = session.snapshot()?;
+        if session.pipewire {
+            *session.remembered.early() = Some(snapshot.early());
+        }
         Some(Box::new(snapshot))
     }
 
