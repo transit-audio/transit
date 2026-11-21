@@ -166,6 +166,9 @@ pub struct Player {
     /// input, no MIDI ports; also set on its silent fallback, so no path of this Player reaches a
     /// system audio backend.
     null_device: bool,
+    /// Tests: the open's output and input lines, as logged.
+    #[cfg(test)]
+    pub(super) open_lines: Vec<String>,
 }
 
 impl Player {
@@ -1122,7 +1125,8 @@ fn check_input_rate(input: u32, session: u32) -> Result<(), String> {
 }
 
 /// The INFO line for an input that opened beside the output (same rate, buffer and mode) or alone.
-fn log_input_open(recorder: &record::Recorder, native: bool, system: &str, asked_period: ab::Period, mode: ab::Mode) {
+/// Logs the input's open line, and returns it.
+fn log_input_open(recorder: &record::Recorder, native: bool, system: &str, asked_period: ab::Period, mode: ab::Mode) -> String {
     let sample = recorder.sample_format.unwrap_or(ab::SampleFormat::F32);
     let channels = u16::try_from(recorder.channels).unwrap_or(u16::MAX);
     let format = ab::Format::new(recorder.sample_rate, channels, sample);
@@ -1131,17 +1135,16 @@ fn log_input_open(recorder: &record::Recorder, native: bool, system: &str, asked
         latency: recorder.latency,
         ..ab::Achieved::requested(format, recorder.buffer_frames.map_or(ab::Period::Default, ab::Period::Frames))
     };
-    log::info!(
-        "{}",
-        crate::open_log::describe(&crate::open_log::OpenReport {
-            direction: "input",
-            backend: if native { "native" } else { "cpal" },
-            host: system,
-            device: &recorder.device_name,
-            asked,
-            got,
-        })
-    );
+    let line = crate::open_log::describe(&crate::open_log::OpenReport {
+        direction: "input",
+        backend: if native { "native" } else { "cpal" },
+        host: system,
+        device: &recorder.device_name,
+        asked,
+        got,
+    });
+    log::info!("{line}");
+    line
 }
 
 impl Drop for Player {

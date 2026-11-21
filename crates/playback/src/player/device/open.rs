@@ -142,6 +142,8 @@ impl Player {
             device_buffer_declined: false,
             silent: true,
             null_device: false,
+            #[cfg(test)]
+            open_lines: Vec::new(),
         }
     }
 
@@ -650,28 +652,39 @@ impl Player {
                     recorder.buffer_frames = Some(frames);
                 }
             }
-            log::info!(
-                "{}",
-                crate::open_log::describe(&crate::open_log::OpenReport {
-                    direction: "output",
-                    backend: if step.native {
-                        "native"
-                    } else if system == crate::backend::null::SYSTEM {
-                        "none"
-                    } else {
-                        "cpal"
-                    },
-                    host: &system,
-                    device: &name,
-                    asked: request,
-                    got: achieved,
-                })
-            );
+            // One open, one buffer size (#760): on JACK the output's line gives the settled buffer, as
+            // the input's line and the device report do, not the open's provisional figure (the
+            // listing's, read through an inactive probe client).
+            let got = match settled.filter(|_| jack) {
+                Some(frames) => ab::Achieved { period: ab::Period::Frames(frames), buffer_frames: Some(frames), ..achieved },
+                None => achieved,
+            };
+            let output_line = crate::open_log::describe(&crate::open_log::OpenReport {
+                direction: "output",
+                backend: if step.native {
+                    "native"
+                } else if system == crate::backend::null::SYSTEM {
+                    "none"
+                } else {
+                    "cpal"
+                },
+                host: &system,
+                device: &name,
+                asked: request,
+                got,
+            });
+            log::info!("{output_line}");
+            #[cfg(test)]
+            player.open_lines.push(output_line);
             if wide != achieved.format.channels {
                 log::info!("audio output: asked for {wide} channels, opened with {}", achieved.format.channels);
             }
             if let HeldInput::Held(Some(recorder)) = player.input.get_mut() {
-                log_input_open(recorder, step.native, &system, request.period, request.mode);
+                let input_line = log_input_open(recorder, step.native, &system, request.period, request.mode);
+                #[cfg(test)]
+                player.open_lines.push(input_line);
+                #[cfg(not(test))]
+                drop(input_line);
             }
             // The default table's input half is the input that opened (ADR 0015, amendment for
             // #431, rule 8): its identity as the backend reported it, or none when it did not open.

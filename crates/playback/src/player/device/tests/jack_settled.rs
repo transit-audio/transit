@@ -105,3 +105,20 @@ fn a_declined_buffer_request_is_kept_for_the_page() {
     jack.set_period_declined(true);
     assert!(open(&jack, Some(256), &[]).device_buffer_declined);
 }
+
+/// The `buffer=N` of an open line.
+fn buffer_of(line: &str) -> Option<&str> {
+    line.split_whitespace().find_map(|word| word.strip_prefix("buffer="))
+}
+
+#[test]
+fn one_open_reports_one_buffer_size_for_output_and_input() {
+    // The open's provisional figure is the request (256); the started client settled on 1024
+    // (#760: the output line said 1024 and the input line 2048 in one open).
+    let jack = client(1024);
+    let player = open(&jack, Some(256), &[]);
+    let [output, input] = player.open_lines.as_slice() else { panic!("an output and an input line: {:?}", player.open_lines) };
+    assert!(output.contains("audio output opened") && input.contains("audio input opened"), "{output} / {input}");
+    assert_eq!((buffer_of(output), buffer_of(input)), (Some("1024"), Some("1024")), "{output} / {input}");
+    assert_eq!(player.device_buffer, Some(1024));
+}
