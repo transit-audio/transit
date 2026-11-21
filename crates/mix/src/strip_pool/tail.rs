@@ -54,7 +54,7 @@ impl TailWork<'_> {
             return;
         }
         let Some(t) = b.session.tracks.get(usize::from(st.track)).filter(|t| live(t)) else { return };
-        st.meter.measure(&st.buf, b.frames, st.gr, self.host_frame);
+        crate::input_meter::measure_strip(t, st, b.live, b.frames, self.host_frame);
         st.meter.plugin_failures = st.failures;
         let need = route_into(
             t,

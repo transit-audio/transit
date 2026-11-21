@@ -77,27 +77,35 @@ pub(crate) fn process_strip(t: &Track, strip: &mut Strip, block: &StripRender<'_
     process_strip_fader(t, strip, block);
 }
 
+/// Whether audio track `t` hears its live input this block instead of its clips: Input Monitoring,
+/// or record arm while stopped or recording when Monitor Armed Tracks is on (#730).
+pub(crate) fn hears_input(t: &Track, live: &LiveInput<'_>) -> bool {
+    !live.input.is_empty() && (t.mixer.input_monitor || (live.monitor_armed && t.mixer.record_arm && (live.monitor_only || live.recording)))
+}
+
+/// The live input channel strip channel `k` of `t` reads (of `n_in`), or `None` when it reads
+/// none: `route` is the strip's compiled input route ([`input_route`]).
+pub(crate) fn input_channel(t: &Track, route: Option<&[Option<u16>]>, k: usize, n_in: usize) -> Option<usize> {
+    match (&t.mixer.input, route) {
+        (Route::Hardware(_), Some(route)) => route.get(k).copied().flatten().map(usize::from),
+        (Route::Hardware(_), None) => None,
+        _ => Some(k % n_in),
+    }
+}
+
 fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, transport: &Transport) {
     let StripRender { s, busses, live, pos, frames, .. } = *block;
     for c in strip.buf.iter_mut() {
         c.iter_mut().take(frames).for_each(|x| *x = 0.0);
     }
     match t.kind {
-        TrackKind::Audio
-            if !live.input.is_empty()
-                && (t.mixer.input_monitor || (live.monitor_armed && t.mixer.record_arm && (live.monitor_only || live.recording))) =>
-        {
+        TrackKind::Audio if hears_input(t, live) => {
             // Input monitoring: the track hears its hardware input instead of its clips. A named
             // input route reads the channels the compiler resolved (no name lookup here); an
             // unavailable one, or System Audio that does not run, is silent, never another input.
             let n_in = live.input.len().max(1);
             for (k, dst) in strip.buf.iter_mut().enumerate() {
-                let channel = match (&t.mixer.input, &strip.input_route) {
-                    (Route::Hardware(_), Some(route)) => route.get(k).copied().flatten().map(usize::from),
-                    (Route::Hardware(_), None) => None,
-                    _ => Some(k % n_in),
-                };
-                if let Some(src) = channel.and_then(|c| live.input.get(c)) {
+                if let Some(src) = input_channel(t, strip.input_route.as_deref(), k, n_in).and_then(|c| live.input.get(c)) {
                     for (d, x) in dst.iter_mut().zip(src.iter().skip(live.input_offset)).take(frames) {
                         *d = *x;
                     }

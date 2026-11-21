@@ -192,3 +192,31 @@ fn recording_with_the_option_off_plays_the_clip_and_not_the_input() {
     assert!(on > 0.05, "option on: the input replaces the clip ({on})");
     assert!((off / on - 2.0).abs() < 0.05, "option off: the clip plays at twice the input's level (on {on}, off {off})");
 }
+
+/// The input meter (#730): with the option off, the armed track's published meter reads its input
+/// while stopped and while recording, though the output does not carry the input; while playing
+/// it reads the track's own material.
+#[test]
+fn with_the_option_off_the_published_meter_reads_the_input_stopped_and_recording() {
+    let mut r = rig(false, true);
+    let meter = |r: &Rig| r.player.meters().unwrap().tracks.get(&r.track).map_or(0.0, |m| m.peak[0]);
+    assert_eq!(r.blocks(24, Some(0.25)), 0.0, "stopped: the input is not heard");
+    assert!((meter(&r) - 0.25).abs() < 1e-6, "stopped: the meter reads the input ({})", meter(&r));
+    r.player.play(0, None, None).unwrap();
+    r.blocks(20, Some(0.25));
+    assert!((meter(&r) - 0.5).abs() < 1e-6, "playing: the meter reads the clip ({})", meter(&r));
+    r.player.stop().unwrap();
+    r.blocks(4, Some(0.25));
+    let dir = transit_test_support::TestDir::new("monitor-armed-meter");
+    std::fs::create_dir_all(&dir).unwrap();
+    r.player.prepare_recording(&mut r.recorder, vec![(r.track, vec![0], dir.join("take.wav"))]).unwrap();
+    r.player.record(&r.recorder, Some(0), None, None).unwrap();
+    r.blocks(20, Some(0.25));
+    let heard = r.blocks(20, Some(0.25));
+    assert!((meter(&r) - 0.25).abs() < 1e-6, "recording: the meter reads the input ({})", meter(&r));
+    assert!((heard - 0.5 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3, "recording: the output is the clip, not the input ({heard})");
+    r.player.stop().unwrap();
+    r.blocks(4, Some(0.25));
+    let _ = r.recorder.finish();
+    let _ = std::fs::remove_dir_all(&dir);
+}

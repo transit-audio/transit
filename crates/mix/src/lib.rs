@@ -96,6 +96,9 @@ mod graph;
 #[cfg(test)]
 mod grid_end_tests;
 mod hardware;
+mod input_meter;
+#[cfg(test)]
+mod input_meter_tests;
 mod instance;
 mod key;
 #[cfg(test)]
@@ -350,15 +353,21 @@ impl StripMeter {
     }
 
     fn measure(&mut self, bufs: &[Vec<f32>], frames: usize, gr: f32, host_frame: u64) {
+        self.measure_slices(bufs.iter().map(|b| b.get(..frames).unwrap_or(&[])), gr, host_frame);
+    }
+
+    /// [`Self::measure`] over one slice per channel (the block's frames of each), so a reading can
+    /// come from buffers other than the strip's own (#730, `input_meter`). Allocation-free.
+    fn measure_slices<'a>(&mut self, chans: impl Iterator<Item = &'a [f32]> + Clone, gr: f32, host_frame: u64) {
         let append = self.host_frame == Some(host_frame);
         self.host_frame = Some(host_frame);
-        for (p, b) in self.peaks.iter_mut().zip(bufs.iter()) {
-            let value = peak(b.get(..frames).unwrap_or(&[]));
+        for (p, b) in self.peaks.iter_mut().zip(chans.clone()) {
+            let value = peak(b);
             *p = if append { p.max(value) } else { value };
         }
         // Every sub-block is new frames, so each one goes into the window (no append rule).
-        for ((r, w), b) in self.rms_channels.iter_mut().zip(self.rms_window.iter_mut()).zip(bufs.iter()) {
-            w.push(b.get(..frames).unwrap_or(&[]));
+        for ((r, w), b) in self.rms_channels.iter_mut().zip(self.rms_window.iter_mut()).zip(chans) {
+            w.push(b);
             *r = w.rms();
         }
         let last = self.peaks.len().saturating_sub(1);

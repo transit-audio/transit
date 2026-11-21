@@ -60,7 +60,7 @@ impl TailCtx<'_, '_> {
             if self.mutes.silent(i) {
                 continue;
             }
-            st.meter.measure(&st.buf, frames, st.gr, host_frame);
+            crate::input_meter::measure_strip(t, st, live_in, frames, host_frame);
             st.meter.plugin_failures = st.failures;
             let need = route_into(t, st, pos, frames, MixOut { busses, main, main_fmt, sinks, law, main_arrival });
             status.note_capacity(need, st);
@@ -114,7 +114,7 @@ impl TailCtx<'_, '_> {
             if self.mutes.silent(at) {
                 continue;
             }
-            st.meter.measure(&st.buf, frames, st.gr, host_frame);
+            crate::input_meter::measure_strip(t, st, live_in, frames, host_frame);
             st.meter.plugin_failures = st.failures;
             let need = route_into(t, st, pos, frames, MixOut { busses, main, main_fmt, sinks, law, main_arrival });
             status.note_capacity(need, st);
