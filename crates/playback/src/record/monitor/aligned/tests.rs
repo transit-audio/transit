@@ -268,6 +268,25 @@ fn a_capture_loss_invalidates_the_anchor_until_the_next_callback_re_anchors() {
     assert_eq!(two.losses.load(std::sync::atomic::Ordering::Relaxed), 1, "a partial frame counts as a loss");
 }
 
+/// A counted loss invalidates the anchor even when the frame counts still agree (a push dropped by
+/// contention, then the cycle's own push): the callback that saw it is not aligned, and the next
+/// one re-anchors.
+#[test]
+fn a_counted_loss_invalidates_the_anchor_even_when_the_counts_agree() {
+    let mut sim = Sim::new(48_000, 44_100, 0, 512);
+    sim.ring.align_on_next_read();
+    for _ in 0..10 {
+        sim.callback(128, true, true, true);
+    }
+    {
+        let _held = sim.ring.producer.lock().unwrap();
+        sim.ring.push(&[0.5; 64]);
+    }
+    assert!(sim.callback(128, true, true, true).iter().all(|r| !r.aligned), "the callback that saw the loss");
+    assert_eq!(sim.ring.alignment(), transit_model::Alignment::Invalid);
+    assert!(sim.callback(128, true, true, true).iter().all(|r| r.aligned), "re-anchored at the next pair");
+}
+
 /// Rule 10 at the ring: coordinates whose alignment is not valid read as before (the ring reports
 /// Invalid and the block is not aligned); once valid again the read is the reference at once,
 /// whatever the ordinary reads left queued (a new alignment from coordinates). A clear re-anchors at
