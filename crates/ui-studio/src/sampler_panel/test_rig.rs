@@ -161,7 +161,12 @@ impl T {
 
     /// Drops `path` at `at` (the next frame sees it), then runs a few frames.
     pub fn drop_file(&mut self, path: &Path, at: (f32, f32)) {
-        self.drop = Some((vec![path.to_path_buf()], Some(egui::pos2(at.0, at.1))));
+        self.drop_files(vec![path.to_path_buf()], at);
+    }
+
+    /// Drops `paths` together at `at`, as [`T::drop_file`] drops one.
+    pub fn drop_files(&mut self, paths: Vec<PathBuf>, at: (f32, f32)) {
+        self.drop = Some((paths, Some(egui::pos2(at.0, at.1))));
         self.frames(3);
     }
 

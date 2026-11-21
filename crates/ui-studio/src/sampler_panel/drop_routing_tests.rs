@@ -183,3 +183,44 @@ fn a_stereo_file_dropped_on_a_mono_lane_splits_onto_that_track_and_the_one_below
     assert_eq!(s.tracks.len(), 2, "no new track");
     assert_eq!((names(a), names(b)), (vec!["Mics.L".to_string()], vec!["Mics.R".to_string()]));
 }
+
+/// Several files dropped on a lane follow each other on its track, as a browser drag's do: each
+/// lands where the one before ends, so none erases another.
+#[test]
+fn files_dropped_together_on_a_lane_follow_each_other_on_its_track() {
+    let mut t = T::new();
+    let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    t.frames(3);
+    let (one, two) = (t.sample("One.wav", 4_800), t.sample("Two.wav", 4_800));
+    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == a).unwrap().lane;
+    t.drop_files(vec![one, two], mid(lane));
+    let clips: Vec<(String, i64)> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| (c.name.clone(), c.start)).collect();
+    assert_eq!(clips.len(), 2, "both files are on the track: {clips:?}");
+    assert_eq!(clips[1].1 - clips[0].1, 4_800, "Two starts where One ends: {clips:?}");
+}
+
+/// A drop that opens a session lands none of its files by the pointer: the track it was over
+/// belongs to the document the session replaced, and its id may name another track (here a MIDI
+/// track) in the new one.
+#[test]
+fn a_drop_that_opens_a_session_puts_no_audio_on_the_new_sessions_track_of_the_same_id() {
+    let mut t = T::new();
+    let mut other = transit_engine::Engine::default();
+    other.execute("track.new", &serde_json::json!({"kind": "audio", "name": "Drums"})).unwrap();
+    let synth = other.execute("track.new", &serde_json::json!({"kind": "midi", "name": "Synth"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let b = t.dir.join("B.transit");
+    other.execute("session.save", &serde_json::json!({"path": b.to_string_lossy()})).unwrap();
+    for _ in 0..2 {
+        t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap();
+    }
+    t.app.run("session.save", serde_json::json!({"path": t.dir.join("A.transit").to_string_lossy()})).unwrap();
+    t.frames(3);
+    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == synth).expect("A has a track of Synth's id").lane;
+    let kick = t.sample("Kick.wav", 2_400);
+    t.drop_files(vec![b, kick], mid(lane));
+    let s = t.app.engine.session();
+    assert!(s.tracks.iter().any(|tr| tr.name == "Synth"), "B is open");
+    assert!(s.track(TrackId(synth)).unwrap().clips().is_empty(), "no audio on the MIDI track");
+    let kick_on_audio = s.tracks.iter().any(|tr| tr.kind == transit_model::TrackKind::Audio && tr.clips().iter().any(|c| c.name == "Kick"));
+    assert!(kick_on_audio, "Kick is imported, on an audio track");
+}

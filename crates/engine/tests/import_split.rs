@@ -219,3 +219,16 @@ fn the_new_tracks_sit_right_below_the_clips_track_with_a_master_above_it() {
     let per_track: Vec<usize> = e.session().tracks[2..4].iter().map(|t| t.clips().len()).collect();
     assert_eq!(per_track, [1, 1], "a clip named twice splits once");
 }
+
+#[test]
+fn audio_is_never_imported_onto_a_midi_track() {
+    let d = transit_test_support::TestDir::new("import-onto-midi");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("Kick.wav");
+    std::fs::write(&wav, stereo_wav(480, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    let midi = e.execute("track.new", &json!({"kind": "midi", "name": "Synth"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let r = e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": midi}));
+    assert!(r.as_ref().is_err_and(|err| err.to_string().contains("Synth is not an audio track")), "{r:?}");
+    assert!(e.session().track(TrackId(midi)).unwrap().clips().is_empty() && e.session().sources.is_empty());
+}

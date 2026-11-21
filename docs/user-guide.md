@@ -898,9 +898,10 @@ view has content it takes no drag. On an Instrument key map with zones, a file d
 no zone plays shows, dashed, the keys it will cover, and letting go makes a zone there (see below). A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
 drop, so nothing behind it is reached. Anywhere else, a browser drag lands on the track lane,
 header, mixer strip or device chain where you let go. A file from the file manager lands the same
-way on an audio track's lane or header, or below the tracks on a new track; anywhere else it is
-imported into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as the
-session, a MIDI file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
+way on an audio track's lane, header, mixer strip or device chain, or below the tracks on a new
+track, and several files follow each other on that track; anywhere else, or when the drop also
+opens a session, it is imported into the arrangement at the cursor (a `.transit` or `.dawproject`
+file opens as the session, a MIDI file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
 platforms it lands as soon as the pointer moves after you let go (see the known issues). A stereo
 or wider file that lands on a mono audio track with as many mono tracks below it (in the Edit
 window's order, none frozen and none holding a clip where the file goes) splits across them in

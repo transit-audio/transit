@@ -113,15 +113,32 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
         return;
     }
     let snap = !ctx.input(|i| i.modifiers.shift);
-    let at = offer.pos.and_then(|p| arrangement_target(app, ctx, p, snap));
+    // A drop that opens a session replaces the document the pointer was over: none of it lands
+    // by the pointer, so no file can reach a track of the new session by an old track's id.
+    let opens = offer.paths.iter().any(|p| opens_session(&p.to_string_lossy()));
+    let mut at = offer.pos.filter(|_| !opens).and_then(|p| arrangement_target(app, ctx, p, snap));
+    if let Some((_, time)) = at.as_mut() {
+        *time = Some(time.unwrap_or_else(|| app.cursor()));
+    }
     for p in &offer.paths {
-        open_path_at(app, &p.to_string_lossy(), at);
+        let placed = open_path_at(app, &p.to_string_lossy(), at);
+        // The files of one drop follow each other on one track, as a browser drag's do.
+        if let (Some(at), Some((track, end))) = (at.as_mut(), placed) {
+            *at = (Some(track), Some(end));
+        }
     }
 }
 
+/// Whether dropping `p` opens it as the session.
+fn opens_session(p: &str) -> bool {
+    let lower = p.to_ascii_lowercase();
+    lower.ends_with(".transit") || lower.ends_with(".dawproject")
+}
+
 /// Where a file-manager drop at `pos` lands in the arrangement, as a browser drag does: the audio
-/// track whose lane (at the pointer's time) or header is under the pointer, or a new track when it
-/// is below the tracks. `None` elsewhere: the drop imports at the cursor, as before.
+/// track whose lane (at the pointer's time), header, mixer strip or device chain is under the
+/// pointer, or a new track when it is below the tracks. `None` elsewhere: the drop imports at the
+/// cursor, as before.
 fn arrangement_target(app: &StudioApp, ctx: &egui::Context, pos: egui::Pos2, snap: bool) -> Option<(Option<TrackId>, Option<Samples>)> {
     let audio = |t: TrackId| app.engine.session().track(t).is_some_and(|t| t.kind == transit_model::TrackKind::Audio);
     match app.drop_target(ctx, pos, snap, true)?.0 {
@@ -151,27 +168,38 @@ pub fn open_path(app: &mut StudioApp, p: &str) {
 }
 
 /// [`open_path`], with an audio file landing on `at`'s track (none: a new track) at its time (none:
-/// the cursor) when `at` is given, where [`arrangement_target`] put a drop.
-fn open_path_at(app: &mut StudioApp, p: &str, at: Option<(Option<TrackId>, Option<Samples>)>) {
+/// the cursor) when `at` is given, where [`arrangement_target`] put a drop. Returns the track an
+/// audio file landed on and where it ends there.
+fn open_path_at(app: &mut StudioApp, p: &str, at: Option<(Option<TrackId>, Option<Samples>)>) -> Option<(TrackId, Samples)> {
     let lower = p.to_ascii_lowercase();
-    if lower.ends_with(".transit") || lower.ends_with(".dawproject") {
+    if opens_session(p) {
         app.run_or_ask("session.open", serde_json::json!({"path": p}));
-        return;
+        return None;
     }
     let r = if lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf") {
         app.run("file.import_midi", serde_json::json!({"path": p}))
     } else {
+        // The cursor's track only when it holds audio; else a new track.
+        let audio = |t: &TrackId| app.engine.session().track(*t).is_some_and(|t| t.kind == transit_model::TrackKind::Audio);
         let (track, time) = match at {
             Some((track, time)) => (track, time.unwrap_or_else(|| app.cursor())),
-            None => (app.cursor_track(), app.cursor()),
+            None => (app.cursor_track().filter(audio), app.cursor()),
         };
         let mut params = serde_json::json!({"path": p, "at": time});
         if let Some(t) = track {
             params["track"] = serde_json::json!(t.0);
         }
-        app.run("file.import_audio", params)
+        let r = app.run("file.import_audio", params);
+        if let Ok(v) = &r {
+            let one = &v["imported"][0];
+            if let (Some(t), Some(len)) = (one["track"].as_u64(), one["frames"].as_i64()) {
+                return Some((TrackId(t), time.saturating_add(len)));
+            }
+        }
+        r
     };
     if let Err(e) = r {
         log::warn!("{p}: {e}");
     }
+    None
 }

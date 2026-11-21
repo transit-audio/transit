@@ -361,6 +361,10 @@ fn commit_import(e: &mut Engine, p: &Value) -> Result<Value> {
 /// audio track or errors when none is selected.
 fn import_audio_target(e: &Engine, p: &Value) -> Result<Option<TrackId>> {
     if let Some(t) = track_param(e, "file.import_audio", p, "track")? {
+        // As `file.commit_import`: audio never lands on a MIDI, instrument or other track.
+        if let Some(tr) = e.session().track(t).filter(|tr| tr.kind != TrackKind::Audio) {
+            return Err(bad("file.import_audio", format!("{} is not an audio track", tr.name)));
+        }
         return Ok(Some(t));
     }
     if bool_or(p, "new_tracks", true) {
