@@ -799,6 +799,8 @@ mod midi_pickup_tests;
 #[cfg(test)]
 mod midi_record_tests;
 #[cfg(test)]
+mod midi_reopen_tests;
+#[cfg(test)]
 mod modal_voice_panel_tests;
 #[cfg(test)]
 mod modulator_panel_tests;

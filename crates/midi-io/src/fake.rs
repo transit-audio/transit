@@ -24,7 +24,8 @@
 //! (identity falls back to name plus ordinal); [`Fake::remove_input`] / [`Fake::remove_output`]
 //! unplug (an open connection keeps its now silent sink until dropped); [`Fake::input_port`]
 //! gives the [`FakeInputPort`] whose [`deliver`](FakeInputPort::deliver) plays the backend
-//! callback (it stays usable after the unplug, like a dying driver thread); [`Fake::sent`]
+//! callback (it stays usable after the unplug, like a dying driver thread); [`Fake::input_opens`]
+//! counts the opens of an input; [`Fake::sent`]
 //! returns what was sent to an output ([`Fake::sends`] with instants and threads); [`Fake::key`] builds an id-less key.
 
 use crate::backend::{Backend, InputConnection, OutputConnection};
@@ -58,6 +59,8 @@ struct State {
     inputs: Vec<Port<Slot>>,
     outputs: Vec<Port<Sent>>,
     next_id: u64,
+    /// Every input open the backend served, by the port's full key, in order.
+    input_opens: Vec<PortKey>,
 }
 
 impl State {
@@ -215,6 +218,14 @@ impl Fake {
         Some((key_at(&state.inputs, at), Arc::clone(&state.inputs.get(at)?.data)))
     }
 
+    /// How many times the input `key` names was opened (each close and reopen counts once more).
+    #[must_use]
+    pub fn input_opens(&self, key: &PortKey) -> usize {
+        let state = lock(&self.state);
+        let Some(full) = resolve(&raws(&state.inputs), key).map(|at| key_at(&state.inputs, at)) else { return 0 };
+        state.input_opens.iter().filter(|opened| **opened == full).count()
+    }
+
     /// Everything sent to the output `key` names.
     #[must_use]
     pub fn sent(&self, key: &PortKey) -> Vec<Vec<u8>> {
@@ -267,6 +278,7 @@ impl Backend for Fake {
         }
         *held = Some(sink);
         drop(held);
+        lock(&self.state).input_opens.push(full.clone());
         Ok((full, Box::new(FakeInput(slot))))
     }
 

@@ -41,6 +41,7 @@ struct Fixture {
     owner: Owner,
     ports: AudioPorts<Command, ActionResult>,
     midi: action_lane::Audio<ingress::Packet, ActionResult>,
+    epoch: EngineEpoch,
 }
 
 impl Fixture {
@@ -51,19 +52,25 @@ impl Fixture {
     /// A fixture whose worker parks for `idle` between wakes: far above any bound, only a wake on
     /// data can make it pop in time.
     fn with_idle(session: Session, io: MidiIo, idle: Duration) -> Self {
-        let target = RenderTarget { device: DeviceGeneration(EPOCH.0), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 };
+        Self::on(session, io, idle, EPOCH, |native| native)
+    }
+
+    /// A fixture of engine `epoch` whose enabled, not yet serviced Native goes through `install`
+    /// first (a replacement Player adopting the MIDI side of the one it replaced, #760).
+    fn on(session: Session, io: MidiIo, idle: Duration, epoch: EngineEpoch, install: impl FnOnce(Native) -> Native) -> Self {
+        let target = RenderTarget { device: DeviceGeneration(epoch.0), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 };
         let (owner, ports) = Owner::new(Arc::new(session), None, target, PlanLimits::default()).unwrap();
         let (lane, midi) = owner.midi_lane().unwrap();
         let mut native = Native::new_with_idle(lane, HostOrigin::default(), idle).unwrap();
         native.enable(io);
-        Self { native, owner, ports, midi }
+        Self { native: install(native), owner, ports, midi, epoch }
     }
 
     fn tick(&mut self) {
         self.owner.service();
         self.ports.plans.service(&mut plan_bridge::callback_scope(), true);
         self.owner.service();
-        self.native.service(&mut self.owner, EPOCH);
+        self.native.service(&mut self.owner, self.epoch);
     }
 
     #[track_caller]
@@ -104,7 +111,7 @@ impl Fixture {
 
     #[track_caller]
     fn finish(self) {
-        let Self { native, owner, ports, midi } = self;
+        let Self { native, owner, ports, midi, .. } = self;
         let finished = Arc::clone(&native.io.as_ref().unwrap().finished);
         drop(native);
         until(|| finished.load(Ordering::Acquire));
@@ -576,7 +583,7 @@ fn shutdown_invalidates_immediately_and_device_owner_closes_the_connection() {
     let io = f.native.io.as_ref().unwrap();
     assert_ne!(io.thread.thread().id(), std::thread::current().id());
     let finished = Arc::clone(&io.finished);
-    let Fixture { native, owner, ports, midi } = f;
+    let Fixture { native, owner, ports, midi, .. } = f;
     drop(native); // does not join: device handles are lexical locals of IoThread's closure
     assert!(!permit.admits());
     until(|| finished.load(Ordering::Acquire));
@@ -661,3 +668,4 @@ fn the_timing_label_names_the_calibration_bound_only_for_a_measured_clock() {
 }
 
 mod feedback;
+mod handoff;

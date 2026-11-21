@@ -309,6 +309,9 @@ enum Update {
     },
     /// The MIDI Learn mappings in force (ADR 0028).
     Maps(Arc<Snapshot>),
+    /// The action lane of the runtime the worker feeds now: its first, or the replacement's after an
+    /// audio device reopen (the inputs, their consumers and this thread outlive the reopen, #760).
+    Lane(Box<action_lane::Control<Packet, ActionResult>>),
 }
 
 /// Control-side handle. Drop closes admission immediately and wakes the worker;
@@ -332,6 +335,16 @@ impl Worker {
     /// [`Worker::start`] with the idle park timeout chosen by the caller. Tests set it far above
     /// any assertion bound so only a wake on data, never the timer, can make the worker pop (E49, #110).
     pub(super) fn start_with_idle(lane: action_lane::Control<Packet, ActionResult>, idle: Duration) -> std::io::Result<Self> {
+        Self::start_on(Some(lane), idle)
+    }
+
+    /// A worker that feeds no runtime until [`Worker::set_lane`]. It routes nothing before then
+    /// (routes are only sent after the lane).
+    pub(super) fn start_unbound(idle: Duration) -> std::io::Result<Self> {
+        Self::start_on(None, idle)
+    }
+
+    fn start_on(lane: Option<action_lane::Control<Packet, ActionResult>>, idle: Duration) -> std::io::Result<Self> {
         let (attach, receive) = mpsc::sync_channel(sources::PORTS);
         let shared = Arc::new(Shared::default());
         let (tap, tap_receive) = rtrb::RingBuffer::new(TAP_CAPACITY);
@@ -466,6 +479,15 @@ impl Worker {
         Ok(applied)
     }
 
+    /// Points the worker at a runtime's action lane: the first, or a replacement Player's after an
+    /// audio device reopen (#760). Packets still in the old lane belonged to the old runtime and go
+    /// with it; Main sends the new routes after this, so nothing is routed to the old lane again.
+    pub(super) fn set_lane(&mut self, lane: action_lane::Control<Packet, ActionResult>) -> Result<(), &'static str> {
+        self.attach.try_send(Update::Lane(Box::new(lane))).map_err(|_| "MIDI lane queue unavailable")?;
+        self.thread.thread().unpark();
+        Ok(())
+    }
+
     /// Hands the worker the output thread's echo producer (#61).
     pub(super) fn set_echo(&mut self, echo: super::midi_out::Producer) -> Result<(), &'static str> {
         self.attach.try_send(Update::Echo(echo)).map_err(|_| "MIDI echo queue unavailable")?;
@@ -522,6 +544,11 @@ impl Worker {
 
     pub(super) fn learn_armed(&self) -> bool {
         self.shared.learn.load(Ordering::Acquire)
+    }
+
+    /// The worker thread has ended: nothing it holds can be carried to another runtime.
+    pub(super) fn finished(&self) -> bool {
+        self.shared.finished.load(Ordering::Acquire)
     }
 
     /// Press and candidate events lost to a full ring (sweeps are coalesced and never lost).
@@ -603,7 +630,8 @@ impl Drop for Worker {
 
 struct Pump {
     transport_out: transport::Sender,
-    lane: action_lane::Control<Packet, ActionResult>,
+    /// None until Main hands over the runtime's lane ([`Worker::set_lane`]).
+    lane: Option<action_lane::Control<Packet, ActionResult>>,
     receive: Receiver<Update>,
     inputs: Vec<Input>,
     cursor: usize,
@@ -685,8 +713,19 @@ impl Pump {
                     }
                 }
                 Ok(Update::Echo(echo)) => self.echo = Some(echo),
-                Ok(Update::Monitor(tap)) => self.monitor = Some(tap),
+                Ok(Update::Monitor(tap)) => {
+                    // A replacement monitor (the Player's after a reopen, #760): every input held
+                    // across it publishes its rates into the new one's slots.
+                    for input in &mut self.inputs {
+                        if let Some((shared, slot)) = input.mon.slot.take() {
+                            shared.release(slot);
+                        }
+                        input.mon.slot = tap.shared().claim(input.id).map(|slot| (Arc::clone(tap.shared()), slot));
+                    }
+                    self.monitor = Some(tap);
+                }
                 Ok(Update::Maps(maps)) => self.maps = Some(maps),
+                Ok(Update::Lane(lane)) => self.lane = Some(*lane),
                 Ok(Update::Routes { id, routes, applied }) => {
                     if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) {
                         for (old, old_route) in &input.routes {
@@ -752,7 +791,7 @@ impl Pump {
             input.live = now;
         }
         for _ in 0..action_lane::NOTE_CAPACITY {
-            let Some(receipt) = self.lane.reclaim() else { break };
+            let Some(receipt) = self.lane.as_mut().and_then(action_lane::Control::reclaim) else { break };
             let accepted = receipt.outcome == Outcome::Applied
                 && matches!(
                     receipt.handler_result,
@@ -993,7 +1032,7 @@ impl Pump {
                     }
                 }
                 let release = raw.is_release();
-                let credits = self.lane.note_credits();
+                let credits = self.lane.as_ref().map_or(0, action_lane::Control::note_credits);
                 if credits == 0 || (!release && credits <= RELEASE_RESERVE) {
                     self.shared.shed.fetch_add(1, Ordering::Relaxed);
                     if release {
@@ -1012,7 +1051,7 @@ impl Pump {
                     lookahead: route.lookahead,
                     deliver: route.deliver,
                 };
-                if self.lane.send_note(packet, if release { NoteKind::Off } else { NoteKind::On }).is_ok() {
+                if self.lane.as_mut().is_some_and(|lane| lane.send_note(packet, if release { NoteKind::Off } else { NoteKind::On }).is_ok()) {
                     self.shared.admitted.fetch_add(1, Ordering::Relaxed);
                 } else {
                     self.shared.shed.fetch_add(1, Ordering::Relaxed);
@@ -1047,6 +1086,7 @@ impl Drop for Pump {
                 Ok(Update::Monitor(tap)) => drop(tap),
                 Ok(Update::Maps(maps)) => drop(maps),
                 Ok(Update::Buttons(buttons)) => drop(buttons),
+                Ok(Update::Lane(lane)) => drop(lane),
                 Ok(Update::Routes { routes, .. }) => {
                     for (permit, _) in routes {
                         permit.invalidate();

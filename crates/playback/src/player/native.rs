@@ -14,6 +14,7 @@ use transit_model::{MidiInput, MidiOutPort, MidiPort};
 type Owner = RuntimeControl<Command, ActionResult>;
 const POLL: Duration = Duration::from_millis(100);
 const LOOKAHEAD: u32 = 128;
+mod handoff;
 mod transport;
 pub use transport::ButtonEvent;
 
@@ -242,6 +243,9 @@ pub(super) struct Native {
     muted: Vec<Muted>,
     /// The MIDI Learn mappings Main wants matched (ADR 0028).
     wanted: super::midi_map::Wanted,
+    /// What ties the worker to this Player's runtime, held until the first service: a replacement
+    /// Player hands it to the worker of the Native it adopts instead (#760).
+    unbound: Option<handoff::Unbound>,
 }
 
 impl Native {
@@ -254,11 +258,9 @@ impl Native {
         origin: HostOrigin,
         idle: Duration,
     ) -> std::io::Result<Self> {
-        let mut worker = ingress::Worker::start_with_idle(lane, idle)?;
+        let worker = ingress::Worker::start_unbound(idle)?;
         let (mut out, playback, echo) = midi_out::Out::new();
-        worker.set_echo(echo).map_err(std::io::Error::other)?;
         let (monitor, tap_in, tap_out) = monitor::Hub::new();
-        worker.set_monitor(tap_in).map_err(std::io::Error::other)?;
         out.set_monitor(tap_out);
         Ok(Self {
             buttons: transport::Buttons::default(),
@@ -274,6 +276,7 @@ impl Native {
             monitor,
             muted: Vec::new(),
             wanted: super::midi_map::Wanted::new(),
+            unbound: Some(handoff::Unbound { lane, echo, tap: tap_in }),
         })
     }
 
@@ -483,6 +486,7 @@ impl Native {
     }
 
     pub(super) fn service(&mut self, owner: &mut Owner, epoch: EngineEpoch) {
+        self.bind();
         self.follow_storms();
         let Some(io) = &self.io else { return };
         if io.finished.load(Ordering::Acquire) || owner.faulted() {

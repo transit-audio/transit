@@ -74,7 +74,7 @@ pub mod sources;
 mod audio;
 pub use audio::{ActionResult, Command as PlayerCommand, CountIn, StartFailure};
 mod device;
-pub use device::{MidiTake, Player, PlayerNotice};
+pub use device::{MidiInputs, MidiTake, Player, PlayerNotice};
 
 pub const SESSION_REQUESTS: usize = 64;
 

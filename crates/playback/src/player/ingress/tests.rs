@@ -289,7 +289,7 @@ pub(super) fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSen
         send,
         Pump {
             transport_out: transport::pair().0,
-            lane,
+            lane: Some(lane),
             receive,
             inputs: Vec::with_capacity(sources::PORTS),
             cursor: 0,
@@ -385,7 +385,7 @@ fn step_tap_sees_a_pedal_up_the_lane_sheds_under_zero_credits() {
         port.deliver(0, &[0x80, 60, 0]);
     }
     worker.step();
-    assert_eq!(worker.lane.note_credits(), 0);
+    assert_eq!(worker.lane.as_ref().unwrap().note_credits(), 0);
     let shed = worker.shared.shed.load(Ordering::Relaxed);
     port.deliver(0, &[0xb0, 64, 0]);
     worker.step();
@@ -447,7 +447,7 @@ fn approximate_audio_receipts_are_counted_without_refusing_or_revoking_releases(
     assert_eq!(worker.shared.approximate.load(Ordering::Relaxed), 2);
     assert_eq!(worker.shared.refused.load(Ordering::Relaxed), 0);
     assert!(sources.permits(4, token.generation()));
-    assert_eq!(worker.lane.note_credits(), action_lane::NOTE_CAPACITY);
+    assert_eq!(worker.lane.as_ref().unwrap().note_credits(), action_lane::NOTE_CAPACITY);
 }
 
 #[test]
@@ -506,7 +506,7 @@ fn fake_backend_preserves_raw_time_and_sequence_through_the_real_action_lane() {
     assert!(matches!(off.message, Message::NoteOff { .. }));
     assert_eq!(on.lookahead, 128);
     worker.step();
-    assert_eq!(worker.lane.note_credits(), 256);
+    assert_eq!(worker.lane.as_ref().unwrap().note_credits(), 256);
 }
 
 #[test]
@@ -526,12 +526,12 @@ fn release_reserve_and_generation_recovery_survive_a_stalled_audio_consumer() {
     }
     worker.step();
     worker.step();
-    assert_eq!(worker.lane.note_credits(), 32, "ordinary messages cannot consume the release reserve");
+    assert_eq!(worker.lane.as_ref().unwrap().note_credits(), 32, "ordinary messages cannot consume the release reserve");
     for _ in 0..32 {
         port.deliver(0, &[0x80, 60, 0]);
     }
     worker.step();
-    assert_eq!(worker.lane.note_credits(), 0);
+    assert_eq!(worker.lane.as_ref().unwrap().note_credits(), 0);
     assert!(sources.permits(4, token.generation()));
     port.deliver(0, &[0xb0, 64, 0]);
     worker.step();
@@ -786,7 +786,7 @@ fn one_raw_consumer_fans_out_with_independent_channels_and_identical_timestamps(
     assert_eq!(packets[1].raw, packets[2].raw);
     assert!(packets.iter().all(|packet| packet.raw.backend_time_us == 77_000));
     worker.step();
-    assert_eq!(worker.lane.note_credits(), action_lane::NOTE_CAPACITY);
+    assert_eq!(worker.lane.as_ref().unwrap().note_credits(), action_lane::NOTE_CAPACITY);
 }
 
 #[test]

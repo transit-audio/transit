@@ -1400,6 +1400,8 @@ mod external_measure;
 mod fault_api;
 mod links_api;
 mod low_latency;
+mod midi_handoff_api;
+pub use midi_handoff_api::MidiInputs;
 mod midi_map_api;
 #[cfg(test)]
 mod midi_map_tests;

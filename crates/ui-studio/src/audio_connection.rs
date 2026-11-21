@@ -4,7 +4,7 @@
 use std::{cell::RefCell, rc::Rc};
 use transit_dsp::{EditorWindowRequest, EditorWindowState};
 use transit_model::TrackId;
-use transit_playback::{AudioConfig, LinkSnapshot, Player, record::Recorder, telemetry::CallbackTelemetry};
+use transit_playback::{AudioConfig, LinkSnapshot, MidiInputs, Player, record::Recorder, telemetry::CallbackTelemetry};
 
 pub(crate) trait Editors {
     fn close_editors(&self) -> Result<(), String>;
@@ -43,6 +43,15 @@ pub(crate) trait Connection: Editors {
     fn restore_links(&mut self, snapshot: LinkSnapshot) -> Option<String> {
         drop(snapshot);
         None
+    }
+    /// The open MIDI inputs, taken from the connection being replaced so they stay open across the
+    /// reopen (#760).
+    fn take_midi_inputs(&self) -> Option<MidiInputs> {
+        None
+    }
+    /// Installs the MIDI inputs of the connection this one replaced, before it is serviced.
+    fn adopt_midi_inputs(&self, inputs: MidiInputs) {
+        drop(inputs);
     }
 }
 
@@ -87,13 +96,21 @@ impl Connection for Player {
     fn restore_links(&mut self, snapshot: LinkSnapshot) -> Option<String> {
         Player::restore_links(self, snapshot)
     }
+    fn take_midi_inputs(&self) -> Option<MidiInputs> {
+        Player::take_midi_inputs(self)
+    }
+    fn adopt_midi_inputs(&self, inputs: MidiInputs) {
+        Player::adopt_midi_inputs(self, inputs);
+    }
 }
 
 /// The one reopen of the audio device (Apply, Reconnect, the automatic reopen after a driver or
 /// server reset). Links other programs made to the device's ports (native JACK) are read here, on
 /// this control thread, before anything of the old connection closes; the snapshot belongs to this
 /// call alone and is restored once on the replacement after it opened, or dropped with the call
-/// when it ends early (ADR 0015, amendment #431, rule 6). Returns what was not restored.
+/// when it ends early (ADR 0015, amendment #431, rule 6). The open MIDI inputs are taken from the
+/// old connection once the reopen can no longer be refused and handed to the replacement right after
+/// it opened, so they stay open across the reopen (#760). Returns what was not restored.
 pub(crate) fn replace<P: Connection>(
     player: &mut Option<P>,
     input: &mut Option<P::Input>,
@@ -107,9 +124,13 @@ pub(crate) fn replace<P: Connection>(
     if input.is_some() {
         return Err("Cannot replace audio while an input is still owned by the caller".into());
     }
+    let midi = player.as_ref().and_then(Connection::take_midi_inputs);
     // Assignment must finish (including Drop) before the loader runs.
     *player = None;
     let mut opened = open();
+    if let Some(midi) = midi {
+        opened.adopt_midi_inputs(midi);
+    }
     let note = links.and_then(|links| opened.restore_links(links));
     *player = Some(opened);
     Ok(note)

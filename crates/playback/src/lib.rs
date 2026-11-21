@@ -47,7 +47,8 @@ pub(crate) use backend::cpal::OutputCallback;
 pub use devices::{AudioConfig, Backend, LoopbackCalibration};
 pub use player::ButtonEvent;
 pub use player::{
-    ActionResult, CountIn, MapMsg, MidiTake, PlayedMidi, PlayedNote, Player, PlayerCommand, PlayerError, PlayerNotice, SlotLoad, StartFailure,
+    ActionResult, CountIn, MapMsg, MidiInputs, MidiTake, PlayedMidi, PlayedNote, Player, PlayerCommand, PlayerError, PlayerNotice, SlotLoad,
+    StartFailure,
 };
 #[cfg(any(test, feature = "test-hooks"))]
 pub use player::{Clock, Deferred, Factory, PluginTestHooks};
