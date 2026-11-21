@@ -263,3 +263,17 @@ fn files_dropped_at_a_cursor_before_bar_one_follow_each_other_from_zero() {
     let clips: Vec<(String, i64)> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| (c.name.clone(), c.start)).collect();
     assert_eq!(clips, [("One".to_string(), 0), ("Two".to_string(), 4_800)]);
 }
+
+/// A dropped session that fails to open keeps its own reason on the status line: the line about
+/// the files left out comes first, so the open's refusal replaces it.
+#[test]
+fn a_dropped_session_that_fails_to_open_shows_why() {
+    let mut t = T::new();
+    let bad = t.dir.join("B.transit");
+    std::fs::write(&bad, b"not a session").unwrap();
+    let (one, two) = (t.sample("One.wav", 2_400), t.sample("Two.wav", 2_400));
+    let tl = t.app.arrange.layout.timeline;
+    t.drop_files(vec![bad, one, two], (tl[0] + 40.0, tl[1] + 12.0));
+    assert!(t.app.status.starts_with("Could not open"), "{}", t.app.status);
+    assert!(t.app.engine.session().tracks.iter().all(|tr| tr.clips().is_empty()), "nothing is imported");
+}
