@@ -199,11 +199,11 @@ fn files_dropped_together_on_a_lane_follow_each_other_on_its_track() {
     assert_eq!(clips[1].1 - clips[0].1, 4_800, "Two starts where One ends: {clips:?}");
 }
 
-/// A drop that opens a session lands none of its files by the pointer: the track it was over
-/// belongs to the document the session replaced, and its id may name another track (here a MIDI
-/// track) in the new one.
+/// A drop holding a session opens it and imports nothing else: its other files would land by a
+/// pointer or a cursor that still names the closing session's tracks (here the cursor is on the
+/// track with the id of the new session's MIDI track).
 #[test]
-fn a_drop_that_opens_a_session_puts_no_audio_on_the_new_sessions_track_of_the_same_id() {
+fn a_drop_that_opens_a_session_opens_it_and_imports_nothing_else() {
     let mut t = T::new();
     let mut other = transit_engine::Engine::default();
     other.execute("track.new", &serde_json::json!({"kind": "audio", "name": "Drums"})).unwrap();
@@ -214,13 +214,29 @@ fn a_drop_that_opens_a_session_puts_no_audio_on_the_new_sessions_track_of_the_sa
         t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap();
     }
     t.app.run("session.save", serde_json::json!({"path": t.dir.join("A.transit").to_string_lossy()})).unwrap();
+    t.app.set_cursor(96_000, Some(TrackId(synth)));
     t.frames(3);
     let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == synth).expect("A has a track of Synth's id").lane;
-    let kick = t.sample("Kick.wav", 2_400);
-    t.drop_files(vec![b, kick], mid(lane));
+    let (one, two) = (t.sample("One.wav", 2_400), t.sample("Two.wav", 2_400));
+    t.drop_files(vec![b, one, two], mid(lane));
     let s = t.app.engine.session();
     assert!(s.tracks.iter().any(|tr| tr.name == "Synth"), "B is open");
-    assert!(s.track(TrackId(synth)).unwrap().clips().is_empty(), "no audio on the MIDI track");
-    let kick_on_audio = s.tracks.iter().any(|tr| tr.kind == transit_model::TrackKind::Audio && tr.clips().iter().any(|c| c.name == "Kick"));
-    assert!(kick_on_audio, "Kick is imported, on an audio track");
+    assert!(s.tracks.iter().all(|tr| tr.clips().is_empty()), "nothing else is imported");
+    assert!(t.app.status.contains("2 dropped files were not imported"), "{}", t.app.status);
+}
+
+/// Files dropped at the cursor (here on a MIDI lane, which takes no audio) follow each other on
+/// the cursor's track, as they do on a lane, rather than each erasing the last.
+#[test]
+fn files_dropped_at_the_cursor_follow_each_other_on_its_track() {
+    let mut t = T::new();
+    let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let m = t.app.run("track.new", serde_json::json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap();
+    t.app.set_cursor(48_000, Some(TrackId(a)));
+    t.frames(3);
+    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == m).unwrap().lane;
+    let (one, two) = (t.sample("One.wav", 4_800), t.sample("Two.wav", 2_400));
+    t.drop_files(vec![one, two], mid(lane));
+    let clips: Vec<(String, i64)> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| (c.name.clone(), c.start)).collect();
+    assert_eq!(clips, [("One".to_string(), 48_000), ("Two".to_string(), 52_800)]);
 }

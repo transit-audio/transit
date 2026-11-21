@@ -879,6 +879,7 @@ pub(crate) use session::{DecodedFiles, decode_file_streamed, file_key, open_sess
 use session::{replace_with, write_synced};
 
 pub(crate) mod disk;
+pub(crate) mod split_files;
 pub use disk::{add_disk_source, copy_path};
 mod disk_reads;
 pub use disk_reads::{DiskReads, unreadable_line};

@@ -112,19 +112,32 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
         r.offer = Some((key, offer));
         return;
     }
+    // A drop holding a session opens it and nothing else: its other files would land in whichever
+    // document is open when their turn came, the closing one or the new one by a pointer or a
+    // cursor that still names the closing one's tracks.
+    if let Some(session) = offer.paths.iter().find(|p| opens_session(&p.to_string_lossy())) {
+        let left = offer.paths.len() - 1;
+        open_path(app, &session.to_string_lossy());
+        if left > 0 {
+            let name = session.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            app.status = format!(
+                "Opening {name}: the other {left} dropped file{} not imported; drop {} on the session once it is open",
+                if left == 1 { " was" } else { "s were" },
+                if left == 1 { "it" } else { "them" }
+            );
+        }
+        return;
+    }
     let snap = !ctx.input(|i| i.modifiers.shift);
-    // A drop that opens a session replaces the document the pointer was over: none of it lands
-    // by the pointer, so no file can reach a track of the new session by an old track's id.
-    let opens = offer.paths.iter().any(|p| opens_session(&p.to_string_lossy()));
-    let mut at = offer.pos.filter(|_| !opens).and_then(|p| arrangement_target(app, ctx, p, snap));
+    let mut at = offer.pos.and_then(|p| arrangement_target(app, ctx, p, snap));
     if let Some((_, time)) = at.as_mut() {
         *time = Some(time.unwrap_or_else(|| app.cursor()));
     }
     for p in &offer.paths {
-        let placed = open_path_at(app, &p.to_string_lossy(), at);
-        // The files of one drop follow each other on one track, as a browser drag's do.
-        if let (Some(at), Some((track, end))) = (at.as_mut(), placed) {
-            *at = (Some(track), Some(end));
+        // The files of one drop follow each other on one track, as a browser drag's do: the first
+        // lands by the pointer (or at the cursor), each next one where the last ended.
+        if let Some((track, end)) = open_path_at(app, &p.to_string_lossy(), at) {
+            at = Some((Some(track), Some(end)));
         }
     }
 }

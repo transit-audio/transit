@@ -9,10 +9,9 @@ use super::*;
 use crate::cmd;
 use serde_json::json;
 use std::collections::BTreeMap;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
-use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileEncoder, FileFormat};
+use transit_audio_io::{AudioBuffer, FileFormat};
 use transit_model::disk::DiskSource;
 use transit_model::{ChannelFormat, ClipContent, ClipId, SourceAudio, SourceId, TrackId, TrackKind};
 
@@ -76,10 +75,7 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
     let split = match prepare(s, &by_track, &mut written) {
         Ok(split) => split,
         Err(err) => {
-            for p in &written {
-                let _ = std::fs::remove_file(p);
-                let _ = std::fs::remove_file(transit_model::disk::sidecar_path(p));
-            }
+            crate::io::split_files::remove(&written);
             return Err(err);
         }
     };
@@ -173,7 +169,7 @@ fn prepare(
             let names: Vec<String> = (0..n).map(|ch| format!("{}.{}", meta.name, crate::io::split_label(n, ch))).collect();
             let channels = match &audio.disk {
                 Some(disk) => {
-                    write_channels(disk, &names, written)?;
+                    crate::io::split_files::write(disk, &names, written)?;
                     names.into_iter().map(|name| (name, None)).collect()
                 }
                 None => names.into_iter().enumerate().map(|(ch, name)| (name, Some(mono_audio(audio, ch)))).collect(),
@@ -190,9 +186,7 @@ fn prepare(
                     (Some(audio), _) => Ok((name, Mono::Memory(audio))),
                     (None, Some(disk)) => {
                         let p = files.next().ok_or_else(|| EngineError::Io(format!("{name}: its file was not written")))?;
-                        let len = std::fs::metadata(p).map_err(|err| EngineError::Io(format!("{}: {err}", p.display())))?.len();
-                        let audio = crate::io::disk::open_disk_audio(p, len, disk.rate()).map_err(EngineError::Io)?;
-                        Ok((name, Mono::Disk(p.clone(), audio)))
+                        Ok((name, Mono::Disk(p.clone(), crate::io::split_files::open(p, disk.rate())?)))
                     }
                     (None, None) => Err(EngineError::Io(format!("{name}: no audio"))),
                 })
@@ -200,62 +194,4 @@ fn prepare(
             Ok((src, stamp, monos))
         })
         .collect()
-}
-
-/// One mono float WAV per channel of `disk`'s file, beside it, named `names` (`<name>.wav`, or
-/// `<name>-2.wav` and on while that is taken), in one pass over the file. Each path is pushed to
-/// `written` as soon as it is created.
-fn write_channels(disk: &DiskSource, names: &[String], written: &mut Vec<PathBuf>) -> Result<()> {
-    let io = |p: &Path, err: &dyn std::fmt::Display| EngineError::Io(format!("{}: {err}", p.display()));
-    let dir = disk.path().parent().map(Path::to_path_buf).unwrap_or_default();
-    let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None, bitrate_kbps: None, title: None };
-    let mut encoders = Vec::with_capacity(names.len());
-    for name in names {
-        let stem = crate::io::sanitize_name(name);
-        let mut found = None;
-        for i in 1..1000 {
-            let p = dir.join(if i == 1 { format!("{stem}.wav") } else { format!("{stem}-{i}.wav") });
-            crate::file_access::check_write(&p).map_err(EngineError::Io)?;
-            match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
-                Ok(f) => {
-                    found = Some((p, f));
-                    break;
-                }
-                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
-                Err(err) => return Err(io(&p, &err)),
-            }
-        }
-        let (path, file) = found.ok_or_else(|| EngineError::Io(format!("{}: no file name free for {stem}.wav", dir.display())))?;
-        written.push(path.clone());
-        let enc = FileEncoder::new(std::io::BufWriter::new(file), &opts, 1, disk.rate(), None).map_err(|err| io(&path, &err))?;
-        enc.check_room(disk.frames()).map_err(|err| io(&path, &err))?;
-        encoders.push((path, enc));
-    }
-    const BLOCK: usize = 64 * 1024;
-    let frames = usize::try_from(disk.frames()).unwrap_or(usize::MAX);
-    let mut block = vec![vec![0.0f32; BLOCK]; encoders.len()];
-    let unread = || EngineError::Io(format!("{}: the file could not be read", disk.path().display()));
-    disk.with_sync(|read| {
-        let mut at = 0;
-        while at < frames {
-            let len = BLOCK.min(frames - at);
-            // Frame by frame across the channels, so the reader passes over the file once.
-            for i in 0..len {
-                for (ch, out) in block.iter_mut().enumerate() {
-                    out[i] = read(ch, at + i).ok_or_else(unread)?;
-                }
-            }
-            for ((path, enc), out) in encoders.iter_mut().zip(&block) {
-                enc.write(std::slice::from_ref(out), len).map_err(|err| io(path, &err))?;
-            }
-            at += len;
-        }
-        Ok::<(), EngineError>(())
-    })?;
-    for (path, enc) in encoders {
-        let mut w = enc.finish().map_err(|err| io(&path, &err))?;
-        w.flush().map_err(|err| io(&path, &err))?;
-        w.into_inner().map_err(|err| io(&path, &err.error()))?.sync_all().map_err(|err| io(&path, &err))?;
-    }
-    Ok(())
 }
