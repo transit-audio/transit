@@ -13,9 +13,9 @@ pub(super) struct Probe {
     /// Live input underrun frames while the input converter starts (from the first callback that
     /// delivered input until the first callback that read none: its look-ahead is not queued yet)
     /// and in every callback after that.
-    underrun_start: u64,
-    underrun_later: u64,
-    discarded: u64,
+    pub(super) underrun_start: u64,
+    pub(super) underrun_later: u64,
+    pub(super) discarded: u64,
     /// How the plan's input was aligned when the result came.
     pub(super) alignment: transit_model::Alignment,
 }
@@ -32,28 +32,76 @@ fn measure(session: u32, device: u32, delay: usize, sizes: &[usize], warm: usize
 /// [`measure`] on a paired device (`paired`: the input delivered before each render in one
 /// callback, native ASIO or JACK) or one whose input runs on its own callback (WASAPI, cpal).
 pub(super) fn measure_on(paired: bool, session: u32, device: u32, delay: usize, sizes: &[usize], warm: usize, looped: Option<i64>) -> Probe {
-    use ab::fake::{SliceSink, SliceSource};
-    let widest = sizes.iter().copied().max().unwrap();
-    let format = ab::Format::new(device, 2, ab::SampleFormat::F32);
-    let fake = ab::fake::FakeBackend::new(format).with_capture(2, paired);
+    let fake = ab::fake::FakeBackend::new(ab::Format::new(device, 2, ab::SampleFormat::F32)).with_capture(2, paired);
+    let (player, recorder) = open_on(&fake, paired, session);
+    if let Some(end) = looped {
+        player.play(0, None, Some(transit_time::Range { start: 0, end })).unwrap();
+    }
+    probe_on(&player, &fake, &recorder, Prelude::RenderOnly(4), session, device, delay, sizes, warm)
+}
+
+/// A Player under a `session` Hz plan on `fake` (`paired` as [`measure_on`] says), its input open
+/// and feeding the plan. Each call is a new open of the device: what the app does on a reopen.
+pub(super) fn open_on(fake: &ab::fake::FakeBackend, paired: bool, session: u32) -> (Player, crate::record::Recorder) {
     let cfg = AudioConfig::default();
     let doc = Session { sample_rate: transit_time::SampleRate::new(session).unwrap(), ..Session::default() };
-    let player = Player::open_native_or_cpal(Arc::new(doc), &cfg, &fake, &fake_factory(false)).unwrap();
+    let player = Player::open_native_or_cpal(Arc::new(doc), &cfg, fake, &fake_factory(false)).unwrap();
     let recorder = player.open_input(&cfg).expect("the duplex input");
     player.set_input(Arc::clone(&recorder.monitor)).unwrap();
     if !paired {
         // An input that opened on its own: the app's path table names its inputs.
         player.set_io(transit_model::IoMap::for_device("test", "fake", 2, 2)).unwrap();
     }
-    if let Some(end) = looped {
-        player.play(0, None, Some(transit_time::Range { start: 0, end })).unwrap();
-    }
+    (player, recorder)
+}
+
+/// What runs before the loopback callbacks of [`probe_on`].
+#[derive(Clone, Copy, Debug)]
+pub(super) enum Prelude {
+    /// This many render callbacks without capture: capture then starts into an empty ring.
+    RenderOnly(usize),
+    /// This many capture callbacks of silence without a render: the ring is prefilled when the
+    /// plan first reads it.
+    CaptureOnly(usize),
+    /// Nothing: the device has been running in lockstep already.
+    None,
+}
+
+/// The hardware probe through `fake`'s loopback (the render's channel 0 back on input 1, `delay`
+/// device frames later) on an open `player`, after `prelude`; the probe starts after `warm`
+/// loopback callbacks.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn probe_on(
+    player: &Player,
+    fake: &ab::fake::FakeBackend,
+    recorder: &crate::record::Recorder,
+    prelude: Prelude,
+    session: u32,
+    device: u32,
+    delay: usize,
+    sizes: &[usize],
+    warm: usize,
+) -> Probe {
+    use ab::fake::{SliceSink, SliceSource};
+    let widest = sizes.iter().copied().max().unwrap();
+    let format = ab::Format::new(device, 2, ab::SampleFormat::F32);
     let (mut output, mut input) = (vec![0.0f32; widest * 2], vec![0.0f32; widest * 2]);
     let mut sent: Vec<f32> = Vec::new();
-    for i in 0..4 {
-        let n = sizes[i % sizes.len()];
-        assert!(fake.pump_render(n, ab::Stamp::INVALID, &mut SliceSink { data: &mut output[..n * 2], channels: 2 }));
-        player.service().unwrap();
+    match prelude {
+        Prelude::RenderOnly(n) => {
+            for i in 0..n {
+                let n = sizes[i % sizes.len()];
+                assert!(fake.pump_render(n, ab::Stamp::INVALID, &mut SliceSink { data: &mut output[..n * 2], channels: 2 }));
+                player.service().unwrap();
+            }
+        }
+        Prelude::CaptureOnly(n) => {
+            for i in 0..n {
+                let n = sizes[i % sizes.len()];
+                assert!(fake.pump_capture(n, ab::Stamp::INVALID, format, &mut SliceSource { data: &input[..n * 2], channels: 2 }));
+            }
+        }
+        Prelude::None => {}
     }
     let mut last = recorder.monitor.telemetry().underrun_frames;
     let (mut start, mut later, mut starting) = (0, 0, true);
@@ -129,7 +177,7 @@ const PAIRS: [(u32, u32, i64); 8] = [
 /// the first frame kept (`r`, the first block's render frames, is at most the callback's frames
 /// times q plus the converter's reach, 16·max(1, q) + 1), so `ceil(q·(h + 1) + reach + T)` plan
 /// frames, h = halo(1/q).
-fn start_bound(session: u32, device: u32) -> u64 {
+pub(super) fn start_bound(session: u32, device: u32) -> u64 {
     let q = f64::from(session) / f64::from(device);
     let h = transit_resample::halo(1.0 / q) as f64;
     let reach = 16.0 * q.max(1.0) + 1.0;

@@ -1459,6 +1459,8 @@ mod no_fallback;
 mod null;
 mod open;
 mod term_alignment;
+mod term_reopen;
+mod term_transport;
 mod wide_group;
 pub(super) use open::fake_factory;
 use open::modes;
