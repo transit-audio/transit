@@ -132,7 +132,7 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
 
 /// Check the source before printing changes its mute state. Muted clips cannot lose audible
 /// content, even when another clip on the track plays after bar 1.
-pub(super) fn has_unmuted_zone(track: &transit_model::Track) -> bool {
+pub(crate) fn has_unmuted_zone(track: &transit_model::Track) -> bool {
     !track.mixer.mute && !track.inactive && track.clips().iter().any(|c| c.start < 0 && !c.muted)
 }
 

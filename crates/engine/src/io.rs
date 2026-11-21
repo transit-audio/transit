@@ -626,6 +626,22 @@ pub fn inactive_source_refusal(name: &str) -> String {
     format!("{name} is inactive: Track > Make Active first")
 }
 
+/// The notice a Bounce in Place returns when its source choice silences content before bar 1 (the
+/// reply's `notice`), computed before anything prints so a dialog can say it before the user
+/// confirms. `tracks` are the source tracks; `whole_track` is the track form (`track.bounce`),
+/// otherwise the clip form (`clip.bounce`), whose notice also covers unselected clips on the
+/// track (#713). `None` for Leave and for sources with nothing audible before bar 1. The commands'
+/// own decision is `cmd::clip_bounce::has_unmuted_zone` on each source track; this reads the same.
+pub fn zone_silenced_notice(s: &Session, tracks: &[TrackId], source: BounceSource, whole_track: bool) -> Option<&'static str> {
+    let silenced =
+        !matches!(source, BounceSource::Leave) && tracks.iter().any(|t| s.track(*t).is_some_and(crate::cmd::clip_bounce::has_unmuted_zone));
+    match (silenced, whole_track) {
+        (false, _) => None,
+        (true, true) => Some(crate::cmd::clip_bounce::ZONE_LEFT_OUT_NOTICE),
+        (true, false) => Some(crate::cmd::clip_bounce::ZONE_SILENCED_NOTICE),
+    }
+}
+
 /// The refusal for a print whose span (tail included) ends at or before bar 1: an audio clip
 /// cannot start before bar 1 yet (ADR 0052 decision 11), so nothing of it would sound.
 pub(crate) fn zone_print_refusal(name: &str) -> String {
