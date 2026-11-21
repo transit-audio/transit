@@ -309,7 +309,7 @@ pub fn place_prepared(e: &mut Engine, prepared: PreparedAudio, target: Option<Tr
     let s = e.session_mut();
     let session_rate = s.sample_rate.hz();
     let span = Range::new(at, at.saturating_add(i64::try_from(audio.frames()).unwrap_or(i64::MAX)));
-    if let Some(tracks) = target.and_then(|t| split_tracks(s, t, channels, span)) {
+    if let Some(tracks) = target.and_then(|t| split_tracks(s, t, channels, span)).filter(|_| !audio.is_disk()) {
         let stamp = time_reference.map(|t| stamp_at_rate(t, file_rate, session_rate));
         return Ok(place_split(s, audio, &label, &tracks, at, stamp));
     }

@@ -172,3 +172,50 @@ fn split_to_mono_tracks_writes_a_mono_file_per_channel_for_a_take_played_from_di
         assert_eq!((disk.frames(), disk.with_sync(|read| read(0, 4_799))), (4_800, Some(want)), "Take.{side}.wav holds that channel");
     }
 }
+
+#[test]
+fn a_split_that_fails_on_a_later_take_leaves_no_file_of_an_earlier_one() {
+    let d = transit_test_support::TestDir::new("split-to-mono-cleanup");
+    std::fs::create_dir_all(&*d).unwrap();
+    let mut e = Engine::default();
+    e.session_mut().edit.values.insert(transit_model::disk::STREAM_MINUTES_KEY.into(), 0.001);
+    let mut clips = Vec::new();
+    for name in ["One", "Two"] {
+        let take = d.join(format!("{name}.wav"));
+        std::fs::write(&take, stereo_wav(4_800, 16_384, -8_192)).unwrap();
+        let t = track(&mut e, "stereo");
+        clips.extend(transit_engine::io::add_recording_take(&mut e, &transit_engine::io::Recording::new(0), vec![(TrackId(t), take)], false));
+    }
+    // Two.wav loses its audio after it was placed: reading it fails partway through the split.
+    std::fs::OpenOptions::new().write(true).open(d.join("Two.wav")).unwrap().set_len(44).unwrap();
+    let tracks = e.session().tracks.len();
+    let r = e.execute("clip.split_to_mono", &json!({"clips": clips.iter().map(|c| c.0).collect::<Vec<_>>()}));
+    assert!(r.is_err(), "{r:?}");
+    // The takes' own peaks sidecars are built in the background; only split files are counted.
+    let left: Vec<String> = std::fs::read_dir(&*d).unwrap().map(|f| f.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    assert!(left.iter().all(|f| !f.contains(".L") && !f.contains(".R")), "no split file stays behind: {left:?}");
+    assert_eq!(e.session().tracks.len(), tracks, "the session is as it was");
+}
+
+#[test]
+fn the_new_tracks_sit_right_below_the_clips_track_with_a_master_above_it() {
+    let d = transit_test_support::TestDir::new("split-to-mono-master");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("LAV-2.wav");
+    std::fs::write(&wav, stereo_wav(480, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    let mics = e.execute("track.new", &json!({"kind": "audio", "format": "stereo", "name": "Mics"})).unwrap()["tracks"][0].as_u64().unwrap();
+    e.execute("track.new", &json!({"kind": "audio", "format": "mono", "name": "Other"})).unwrap();
+    let master = e.session_mut().add_track(transit_model::TrackKind::Master, transit_model::ChannelFormat::Stereo, Some("Master"));
+    let s = e.session_mut();
+    let m = s.tracks.iter().position(|t| t.id == master).unwrap();
+    let moved = s.tracks.remove(m);
+    s.tracks.insert(0, moved);
+    e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": mics})).unwrap();
+    let cid = e.session().track(TrackId(mics)).unwrap().clips()[0].id.0;
+    e.execute("clip.split_to_mono", &json!({"clips": [cid, cid]})).unwrap();
+    let names: Vec<String> = e.session().tracks.iter().map(|t| t.name.clone()).collect();
+    assert_eq!(names, ["Master 1", "Mics", "Mics L", "Mics R", "Other"]);
+    let per_track: Vec<usize> = e.session().tracks[2..4].iter().map(|t| t.clips().len()).collect();
+    assert_eq!(per_track, [1, 1], "a clip named twice splits once");
+}

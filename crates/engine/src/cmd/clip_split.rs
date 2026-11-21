@@ -30,15 +30,25 @@ pub fn specs() -> Vec<CommandSpec> {
     )]
 }
 
+/// The most channels a clip splits into: one track each, so a hostile file's channel count must
+/// not become tens of thousands of tracks.
+// ponytail: a fixed cap; a MADI-sized recording (64) fits, a wider one is refused.
+const MAX_CHANNELS: usize = 64;
+
 /// A channel's audio, ready to become a source.
 enum Mono {
     Memory(SourceAudio),
-    /// The file written for it, as the session names it, and its audio played from that file.
-    Disk(String, Arc<SourceAudio>),
+    /// The file written for it, and its audio played from that file.
+    Disk(PathBuf, Arc<SourceAudio>),
 }
 
+/// One source's split: its id, its BWF time stamp, and each channel's name and audio.
+type Split = (SourceId, u64, Vec<(String, Mono)>);
+
 fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
-    let ids = clip_ids_param(e, p);
+    let mut ids = clip_ids_param(e, p);
+    let mut seen = std::collections::HashSet::new();
+    ids.retain(|id| seen.insert(*id));
     let s = e.session();
     // The clips to split on each track, in track order, with their sources' channel counts.
     let mut by_track: BTreeMap<usize, (TrackId, Vec<(ClipId, SourceId, usize)>)> = BTreeMap::new();
@@ -46,6 +56,9 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         let (t, c) = s.find_clip(*id).ok_or_else(|| bad(ID, format!("unknown clip {}", id.0)))?;
         let ClipContent::Audio { source, .. } = c.content else { continue };
         let n = s.pool.get(source).map_or(0, |a| a.buffer.num_channels());
+        if n > MAX_CHANNELS {
+            return Err(bad(ID, format!("{} has {n} channels: a clip splits into at most {MAX_CHANNELS} tracks", c.name)));
+        }
         if let (true, Some(i)) = (n > 1, s.track_index(t)) {
             by_track.entry(i).or_insert((t, Vec::new())).1.push((*id, source, n));
         }
@@ -57,31 +70,32 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
     if let Some(tr) = by_track.values().filter_map(|(t, _)| s.track(*t)).find(|t| t.freeze.is_some()) {
         return Err(bad(ID, format!("{} is frozen: unfreeze it to split its clips", tr.name)));
     }
-    // Every channel's audio before the session changes, so a refusal leaves it as it was.
-    let mut split: BTreeMap<SourceId, Vec<(String, Mono)>> = BTreeMap::new();
-    for (_, clips) in by_track.values() {
-        for &(_, src, n) in clips {
-            if split.contains_key(&src) {
-                continue;
+    // Every channel's audio before the session changes, so a refusal leaves it as it was and no
+    // file written for it behind.
+    let mut written = Vec::new();
+    let split = match prepare(s, &by_track, &mut written) {
+        Ok(split) => split,
+        Err(err) => {
+            for p in &written {
+                let _ = std::fs::remove_file(p);
+                let _ = std::fs::remove_file(transit_model::disk::sidecar_path(p));
             }
-            let (Some(meta), Some(audio)) = (s.source(src), s.pool.get(src)) else { continue };
-            let names: Vec<String> = (0..n).map(|ch| format!("{}.{}", meta.name, crate::io::split_label(n, ch))).collect();
-            let monos = match &audio.disk {
-                Some(disk) => write_files(disk, &meta.path, &names)?.into_iter().map(|(path, a)| Mono::Disk(path, a)).collect(),
-                None => (0..n).map(|ch| Mono::Memory(mono_audio(audio, ch))).collect::<Vec<_>>(),
-            };
-            split.insert(src, names.into_iter().zip(monos).collect());
+            return Err(err);
         }
-    }
+    };
     let s = e.session_mut();
     let mut sources: BTreeMap<(SourceId, usize), SourceId> = BTreeMap::new();
-    for (src, monos) in split {
+    for (src, stamp, monos) in split {
         for (ch, (name, mono)) in monos.into_iter().enumerate() {
             let id = match mono {
                 // The extension keeps the label: a source is named after its file's stem.
                 Mono::Memory(audio) => crate::io::add_source_audio(s, &format!("{name}.wav"), Arc::new(audio), None, FileFormat::Wav),
-                Mono::Disk(path, audio) => crate::io::add_disk_source(s, &format!("{name}.wav"), audio, &path),
+                // The path written, absolute as a recording's is: a save brings it into the session folder.
+                Mono::Disk(path, audio) => crate::io::add_disk_source(s, &format!("{name}.wav"), audio, &path.to_string_lossy()),
             };
+            if let Some(sx) = s.sources.last_mut() {
+                sx.time_reference = stamp;
+            }
             sources.insert((src, ch), id);
         }
     }
@@ -92,9 +106,11 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         let mut lanes = Vec::with_capacity(n);
         for ch in 0..n {
             let nt = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(&format!("{} {}", tr.name, crate::io::split_label(n, ch))));
-            if let (Some(at), Some(from)) = (s.track_index(t), s.track_index(nt)) {
+            // Taken out before `t` is found: a new track goes in before a Master, which may sit above `t`.
+            if let Some(from) = s.track_index(nt) {
                 let moved = s.tracks.remove(from);
-                s.tracks.insert((at + 1 + ch).min(s.tracks.len()), moved);
+                let at = s.track_index(t).map_or(s.tracks.len(), |at| at + 1 + ch);
+                s.tracks.insert(at.min(s.tracks.len()), moved);
             }
             if let Some(m) = s.track_mut(nt) {
                 m.folder = tr.folder;
@@ -139,48 +155,78 @@ fn mono_audio(audio: &SourceAudio, ch: usize) -> SourceAudio {
     }
 }
 
-/// One mono WAV per channel of `disk`'s file, written beside it in one pass as `<name>.wav` (a
-/// number added while that name is taken), each opened to play from disk. Each comes back with
-/// its path as the session names it, beside `named` (the source's own path). Nothing is left
-/// behind on a failure.
-fn write_files(disk: &DiskSource, named: &str, names: &[String]) -> Result<Vec<(String, Arc<SourceAudio>)>> {
-    let dir = disk.path().parent().map(Path::to_path_buf).unwrap_or_default();
-    let mut paths: Vec<PathBuf> = Vec::new();
-    let r = write_channels(disk, &dir, names, &mut paths);
-    let opened = r.and_then(|()| {
-        paths
-            .iter()
-            .map(|p| {
-                let len = std::fs::metadata(p).map_err(|err| EngineError::Io(format!("{}: {err}", p.display())))?.len();
-                let audio = crate::io::disk::open_disk_audio(p, len, disk.rate()).map_err(EngineError::Io)?;
-                let file = p.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
-                Ok((Path::new(named).with_file_name(file).to_string_lossy().into_owned(), audio))
-            })
-            .collect::<Result<Vec<_>>>()
-    });
-    if opened.is_err() {
-        for p in &paths {
-            let _ = std::fs::remove_file(p);
+/// Each source's channels, in memory or as one mono WAV per channel written beside its file (a
+/// number added while a name is taken). The files are opened to play from disk only once every
+/// one is complete; each path created is in `written`, for the caller to remove on a failure.
+fn prepare(
+    s: &transit_model::Session,
+    by_track: &BTreeMap<usize, (TrackId, Vec<(ClipId, SourceId, usize)>)>,
+    written: &mut Vec<PathBuf>,
+) -> Result<Vec<Split>> {
+    let mut out: Vec<(SourceId, u64, Vec<(String, Option<SourceAudio>)>, Option<Arc<DiskSource>>)> = Vec::new();
+    for (_, clips) in by_track.values() {
+        for &(_, src, n) in clips {
+            if out.iter().any(|o| o.0 == src) {
+                continue;
+            }
+            let (Some(meta), Some(audio)) = (s.source(src), s.pool.get(src)) else { continue };
+            let names: Vec<String> = (0..n).map(|ch| format!("{}.{}", meta.name, crate::io::split_label(n, ch))).collect();
+            let channels = match &audio.disk {
+                Some(disk) => {
+                    write_channels(disk, &names, written)?;
+                    names.into_iter().map(|name| (name, None)).collect()
+                }
+                None => names.into_iter().enumerate().map(|(ch, name)| (name, Some(mono_audio(audio, ch)))).collect(),
+            };
+            out.push((src, meta.time_reference, channels, audio.disk.clone()));
         }
     }
-    opened
+    let mut files = written.iter();
+    out.into_iter()
+        .map(|(src, stamp, channels, disk)| {
+            let monos = channels
+                .into_iter()
+                .map(|(name, mem)| match (mem, &disk) {
+                    (Some(audio), _) => Ok((name, Mono::Memory(audio))),
+                    (None, Some(disk)) => {
+                        let p = files.next().ok_or_else(|| EngineError::Io(format!("{name}: its file was not written")))?;
+                        let len = std::fs::metadata(p).map_err(|err| EngineError::Io(format!("{}: {err}", p.display())))?.len();
+                        let audio = crate::io::disk::open_disk_audio(p, len, disk.rate()).map_err(EngineError::Io)?;
+                        Ok((name, Mono::Disk(p.clone(), audio)))
+                    }
+                    (None, None) => Err(EngineError::Io(format!("{name}: no audio"))),
+                })
+                .collect::<Result<Vec<_>>>()?;
+            Ok((src, stamp, monos))
+        })
+        .collect()
 }
 
-/// Writes the files [`write_files`] describes, pushing each path to `paths` once it is created.
-fn write_channels(disk: &DiskSource, dir: &Path, names: &[String], paths: &mut Vec<PathBuf>) -> Result<()> {
+/// One mono float WAV per channel of `disk`'s file, beside it, named `names` (`<name>.wav`, or
+/// `<name>-2.wav` and on while that is taken), in one pass over the file. Each path is pushed to
+/// `written` as soon as it is created.
+fn write_channels(disk: &DiskSource, names: &[String], written: &mut Vec<PathBuf>) -> Result<()> {
     let io = |p: &Path, err: &dyn std::fmt::Display| EngineError::Io(format!("{}: {err}", p.display()));
+    let dir = disk.path().parent().map(Path::to_path_buf).unwrap_or_default();
     let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None, bitrate_kbps: None, title: None };
     let mut encoders = Vec::with_capacity(names.len());
     for name in names {
         let stem = crate::io::sanitize_name(name);
-        let (path, file) = (1..1000)
-            .map(|i| dir.join(if i == 1 { format!("{stem}.wav") } else { format!("{stem}-{i}.wav") }))
-            .find_map(|p| {
-                crate::file_access::check_write(&p).ok()?;
-                std::fs::OpenOptions::new().write(true).create_new(true).open(&p).ok().map(|f| (p, f))
-            })
-            .ok_or_else(|| EngineError::Io(format!("{}: no file name free for {stem}.wav", dir.display())))?;
-        paths.push(path.clone());
+        let mut found = None;
+        for i in 1..1000 {
+            let p = dir.join(if i == 1 { format!("{stem}.wav") } else { format!("{stem}-{i}.wav") });
+            crate::file_access::check_write(&p).map_err(EngineError::Io)?;
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) {
+                Ok(f) => {
+                    found = Some((p, f));
+                    break;
+                }
+                Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(err) => return Err(io(&p, &err)),
+            }
+        }
+        let (path, file) = found.ok_or_else(|| EngineError::Io(format!("{}: no file name free for {stem}.wav", dir.display())))?;
+        written.push(path.clone());
         let enc = FileEncoder::new(std::io::BufWriter::new(file), &opts, 1, disk.rate(), None).map_err(|err| io(&path, &err))?;
         enc.check_room(disk.frames()).map_err(|err| io(&path, &err))?;
         encoders.push((path, enc));
