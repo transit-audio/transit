@@ -231,6 +231,17 @@ it opens, a note names it, and Copy diagnostics has an "Unplaced takes" section.
 intact (an RF64 WAV past 4 GiB); open it in another editor, or split it and import the pieces. Placing
 takes of any length is issue #187 (known issue K91).
 
+## transit says its graphics fell back, or will not start
+
+transit draws with DirectX 12 on Windows. The `WGPU_BACKEND` environment variable can ask for another backend (for example `vulkan`). When the backend it asked for cannot start, transit tries the platform default once, writes a warning to the log naming both, and shows a note in the status line once the window is up. When nothing starts, Windows shows an error window and other systems print the same text to standard error; both name the failure and the log file, and transit exits.
+
+A common cause is a stale Vulkan driver registration after a GPU driver update: the driver is still registered at a folder that no longer exists. `vulkaninfo` then says "Found no drivers" for the whole machine, and every program that asks for Vulkan fails. Fixes, in order:
+
+1. Remove the `WGPU_BACKEND` variable (or set it to `dx12`) and start transit again. The default does not use Vulkan on Windows.
+2. Install the GPU driver again from its maker's installer, restart, and check that `vulkaninfo` lists a device.
+
+The log line to look for is `graphics: ... could not start` at `ERROR` or `WARN`.
+
 ## Running without audio hardware
 
 Two command-line options run transit without touching the audio interface, for diagnosing a problem

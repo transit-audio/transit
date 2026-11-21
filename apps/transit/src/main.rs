@@ -29,6 +29,7 @@ mod drop_cursor;
 mod fonts;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
+mod graphics_fallback;
 mod logging;
 mod report;
 mod shutdown;
@@ -522,22 +523,16 @@ fn main() -> eframe::Result {
     }
     // The main window's icon for eframe; on Windows `apply_exe_icons` also sets the big taskbar icon from the exe resource.
     let icon = Arc::new(app_icon());
-    let options = eframe::NativeOptions {
+    let window_size = sane_window_size(prefs.window_size);
+    let base_options = move || eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_icon(icon)
+            .with_icon(icon.clone())
             .with_title("transit")
-            .with_inner_size(sane_window_size(prefs.window_size))
+            .with_inner_size(window_size)
             .with_min_inner_size([960.0, 600.0])
             .with_drag_and_drop(true)
             .with_app_id(APP_USER_MODEL_ID),
         ..Default::default()
-    };
-    // Before eframe creates the wgpu instance: default Windows to DirectX 12 with FXC (see graphics.rs).
-    #[cfg(target_os = "windows")]
-    let options = {
-        let mut options = options;
-        graphics::configure(&mut options, eframe::wgpu::Backends::from_env(), eframe::wgpu::Dx12Compiler::from_env());
-        options
     };
     // Keep the owner alive until the app and its autosave workers have shut down.
     let temporary_autosave =
@@ -547,65 +542,113 @@ fn main() -> eframe::Result {
     } else {
         prefs_path().and_then(|p| p.parent().map(|d| d.join("Autosave")))
     };
+    // What the app creator takes. It stays here when the window fails before the creator runs
+    // (no surface, no adapter), so a retry with other backends can build the app from it (#762).
+    let startup = std::rc::Rc::new(std::cell::RefCell::new(Some(Startup { engine, prefs, files, autosave_dir })));
+    let plan = graphics_fallback::Plan::new(eframe::wgpu::Backends::from_env());
+    let log_path = logger.and_then(|l| l.file());
     // A panic on the UI thread unwinds out of the event loop; it ends here, through the bounded
     // shutdown, not in the C runtime's exit with plug-in binaries still loaded (issue #104).
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        eframe::run_native(
-            "transit",
-            options,
-            Box::new(move |cc| {
-                // The device opens on the frame after the splash first says so (`splash::advance_open`).
-                // The window exists: give it (and, by class, the Mix window) the exe's icon in both slots.
-                #[cfg(windows)]
-                apply_exe_icons(cc);
-                // wgpu reports a lost device only to this callback (issue #104).
-                let device_watch = Arc::new(shutdown::DeviceWatch::default());
-                if let Some(render_state) = &cc.wgpu_render_state {
-                    shutdown::watch_device(&render_state.device, &device_watch, &cc.egui_ctx);
+        graphics_fallback::run(&plan, log_path.as_deref(), |backends, fallback| {
+            let mut options = base_options();
+            // Before eframe creates the wgpu instance: Windows defaults to DirectX 12 with FXC (see
+            // graphics.rs); a retry asks for the platform default by name.
+            #[cfg(target_os = "windows")]
+            graphics::configure(&mut options, backends, eframe::wgpu::Dx12Compiler::from_env());
+            #[cfg(not(target_os = "windows"))]
+            if let Some(backends) = backends {
+                graphics_fallback::set_backends(&mut options, backends);
+            }
+            let notice = fallback.map(graphics_fallback::Fallback::notice);
+            let state = startup.clone();
+            let run = eframe::run_native(
+                "transit",
+                options,
+                Box::new(move |cc| {
+                    let Some(Startup { engine, prefs, files, autosave_dir }) = state.borrow_mut().take() else {
+                        return Err("the window was created twice".into());
+                    };
+                    // The device opens on the frame after the splash first says so (`splash::advance_open`).
+                    // The window exists: give it (and, by class, the Mix window) the exe's icon in both slots.
+                    #[cfg(windows)]
+                    apply_exe_icons(cc);
+                    // wgpu reports a lost device only to this callback (issue #104).
+                    let device_watch = Arc::new(shutdown::DeviceWatch::default());
+                    if let Some(render_state) = &cc.wgpu_render_state {
+                        shutdown::watch_device(&render_state.device, &device_watch, &cc.egui_ctx);
+                    }
+                    let mut app = StudioApp::new(engine, None, services(logger));
+                    app.null_audio = null_audio;
+                    if null_audio {
+                        log::info!("{NULL_AUDIO_FLAG}: the silent device runs; no audio hardware is listed or opened");
+                    }
+                    if !no_audio {
+                        app.splash.defer_open(launch_audio(null_audio, &prefs.audio));
+                    }
+                    // Our own autosave folder: the two apps must not recover each other's sessions. Runs
+                    // without preferences (agents' tests) autosave into a folder of their own, so they
+                    // neither offer the user's leftovers nor leave theirs for the user.
+                    app.autosave_dir = autosave_dir;
+                    app.leftovers = app.autosave_dir.as_deref().map(transit_engine::autosave::leftovers).unwrap_or_default();
+                    app.ui = prefs;
+                    // ADR 0051: engine message text names notes in the saved Middle C setting.
+                    app.apply_middle_c();
+                    // The plug-in scan cache lives in our own settings folder; runs without preferences keep none.
+                    let cache = config::plugin_cache_dir().filter(|_| prefs_enabled());
+                    transit_ui_studio::plugin_scan::start(&app.ui.plugin_dirs, cache.as_deref(), std::env::current_exe().ok());
+                    app.splash.arm();
+                    install_update_check(&mut app.services, &cc.egui_ctx);
+                    app.about.app_version = env!("CARGO_PKG_VERSION").to_string();
+                    app.about.build = env!("TRANSIT_BUILD").to_string();
+                    if let Some(port) = control_port {
+                        let rx = control_server::start(port, cc.egui_ctx.clone());
+                        app = app.with_control(rx);
+                    }
+                    for f in &files {
+                        transit_ui_studio::drops::open_path(&mut app, f);
+                    }
+                    // The graphics fell back to the platform default (#762): say so in the window.
+                    if let Some(notice) = notice {
+                        app.status = notice;
+                    }
+                    let mut app = App::new(app, logger, device_watch);
+                    app.5 = window_hwnd(cc);
+                    Ok(Box::new(app))
+                }),
+            );
+            match run {
+                Ok(()) => Ok(()),
+                // The creator never ran: the window failed on its surface, adapter or device.
+                Err(eframe::Error::Wgpu(error)) if startup.borrow().is_some() => {
+                    Err(graphics_fallback::Failure::Graphics { reason: error.to_string(), error: eframe::Error::Wgpu(error) })
                 }
-                let mut app = StudioApp::new(engine, None, services(logger));
-                app.null_audio = null_audio;
-                if null_audio {
-                    log::info!("{NULL_AUDIO_FLAG}: the silent device runs; no audio hardware is listed or opened");
-                }
-                if !no_audio {
-                    app.splash.defer_open(launch_audio(null_audio, &prefs.audio));
-                }
-                // Our own autosave folder: the two apps must not recover each other's sessions. Runs
-                // without preferences (agents' tests) autosave into a folder of their own, so they
-                // neither offer the user's leftovers nor leave theirs for the user.
-                app.autosave_dir = autosave_dir;
-                app.leftovers = app.autosave_dir.as_deref().map(transit_engine::autosave::leftovers).unwrap_or_default();
-                app.ui = prefs;
-                // ADR 0051: engine message text names notes in the saved Middle C setting.
-                app.apply_middle_c();
-                // The plug-in scan cache lives in our own settings folder; runs without preferences keep none.
-                let cache = config::plugin_cache_dir().filter(|_| prefs_enabled());
-                transit_ui_studio::plugin_scan::start(&app.ui.plugin_dirs, cache.as_deref(), std::env::current_exe().ok());
-                app.splash.arm();
-                install_update_check(&mut app.services, &cc.egui_ctx);
-                app.about.app_version = env!("CARGO_PKG_VERSION").to_string();
-                app.about.build = env!("TRANSIT_BUILD").to_string();
-                if let Some(port) = control_port {
-                    let rx = control_server::start(port, cc.egui_ctx.clone());
-                    app = app.with_control(rx);
-                }
-                for f in &files {
-                    transit_ui_studio::drops::open_path(&mut app, f);
-                }
-                let mut app = App::new(app, logger, device_watch);
-                app.5 = window_hwnd(cc);
-                Ok(Box::new(app))
-            }),
-        )
+                Err(error) => Err(graphics_fallback::Failure::Other(error)),
+            }
+        })
     }));
     match result {
-        Ok(result) => result,
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(stop)) => {
+            if let Some(message) = &stop.message {
+                graphics_fallback::show_failure(message);
+            }
+            drop(temporary_autosave);
+            Err(stop.error)
+        }
         Err(payload) => {
             drop(temporary_autosave);
             shutdown::after_panic(payload.as_ref())
         }
     }
+}
+
+/// What the app creator takes from `main`.
+struct Startup {
+    engine: Engine,
+    prefs: UiState,
+    files: Vec<String>,
+    autosave_dir: Option<std::path::PathBuf>,
 }
 
 #[cfg(test)]
