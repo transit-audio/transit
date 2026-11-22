@@ -6,10 +6,12 @@
 //! Every case:
 //! 1. A reaches the boundary T through its history (block lengths cycling through 1 to 256);
 //!    B is fresh (prepared alike).
-//! 2. A's record is taken losslessly; B restores it, consumes every word, and re-records exactly
-//!    the same words.
-//! 3. Both run the same continuation; their records are equal at every block boundary and their
-//!    outputs bit-identical, and no output sample is non-finite.
+//! 2. A's record is taken losslessly; B restores it, consumes every word, re-records exactly the
+//!    same words, and reads back every parameter alike.
+//! 3. Both run the same continuation; their records are equal at every block boundary, their
+//!    outputs bit-identical, every parameter reads back alike (`Plugin::param`: the mix reads it as
+//!    an automation lane's base value, and the panels show it), and no output sample is
+//!    non-finite.
 //!
 //! Configurations: 44.1, 48 and 96 kHz crossed with one and two channels, maximum block 256.
 //! The boundaries are section 13's checklist: each applicable one is a witness with its own
@@ -92,6 +94,11 @@ fn record<P: Plugin + ?Sized>(p: &P) -> Vec<u64> {
     let mut sink = Words::default();
     p.fingerprint(&mut Writer::new(&mut sink));
     sink.0
+}
+
+/// The first declared parameter that `a` and `b` read back differently (bit for bit), if any.
+fn param_differs<P: Plugin + ?Sized>(a: &P, b: &P) -> Option<&'static str> {
+    a.info().params.iter().map(|pi| pi.id).find(|id| a.param(id).map(f32::to_bits) != b.param(id).map(f32::to_bits))
 }
 
 // ---- The duration calculator ----
@@ -387,6 +394,9 @@ fn case<P: Plugin + ?Sized>(e: &Entry<P>, w: &Witness<P>, rate: f32, ch: usize, 
     if record(&*b) != rec {
         return Err(at("the restored instance re-records other words".into()));
     }
+    if let Some(id) = param_differs(&*a, &*b) {
+        return Err(at(format!("the restored instance reads back parameter {id} differently")));
+    }
     if let Some(poison) = e.poison
         && poison(&mut b, 0) == 0
     {
@@ -406,6 +416,9 @@ fn case<P: Plugin + ?Sized>(e: &Entry<P>, w: &Witness<P>, rate: f32, ch: usize, 
         }
         if oa.iter().zip(ob).any(|(x, y)| x[..n].iter().zip(&y[..n]).any(|(x, y)| x.to_bits() != y.to_bits())) {
             return Err(format!("block {k}: the outputs differ"));
+        }
+        if let Some(id) = param_differs(&**pa, &**pb) {
+            return Err(format!("block {k}: parameter {id} reads back differently"));
         }
         let ra = record(&**pa);
         if record(&**pb) != ra {

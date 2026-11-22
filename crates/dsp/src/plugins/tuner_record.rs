@@ -7,7 +7,10 @@
 //!   loaded content.
 //! - **encoded**: the parameter values (the reference pitch and hold). No output depends on them:
 //!   `process` leaves every buffer untouched, bit for bit, and reports no latency or tail. They
-//!   are state the instance holds (section 12) and the panel reads them through `param`.
+//!   are state the instance holds (section 12), and they are read back through `param`: by the
+//!   panel, and by the mix, which takes `param` as the base value of an automation lane it drives
+//!   (so a value reaches the mix's parameter cache and its later `set_param` calls). Witness: the
+//!   harness's parameter readback after the restore and after every block.
 //! - **unobservable** and **derived**: none.
 //!
 //! Outside the instance, and outside this record: the input ring the mix keeps for an insert that

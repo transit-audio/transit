@@ -2,9 +2,9 @@
 //!
 //! The Tuner holds its two parameter values and nothing else (the inventory in `tuner_record.rs`);
 //! `process` leaves the buffers untouched, so the outputs compare equal under any state, and the
-//! witnesses rest on the record comparison: the restored instance must re-record A's words and
-//! keep them equal through every continuation. No span is declared; the continuations run a few
-//! blocks.
+//! witnesses rest on the record comparison and the parameter readback (the harness compares every
+//! parameter through `Plugin::param` after the restore and after every block: the mix reads it as
+//! an automation lane's base value). No span is declared; the continuations run a few blocks.
 
 use super::*;
 use transit_dsp::plugins::tuner::Tuner;
