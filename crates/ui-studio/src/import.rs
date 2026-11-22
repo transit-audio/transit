@@ -170,39 +170,6 @@ impl StudioApp {
         self.forget_batches();
     }
 
-    /// A drop's last line once its last file is done: what was imported where (`one`: the file's
-    /// name when the drop queued one), the Maschine/Kontakt files left out, and the files that
-    /// could not be prepared, with the first reason.
-    fn imported_line(&self, b: &Batch, one: &str) -> String {
-        let what = match (b.files, b.committed) {
-            (1, _) => one.to_string(),
-            (f, c) if f == c => format!("{c} files"),
-            (f, c) => format!("{c} of {f} files"),
-        };
-        let name = b.track.and_then(|t| self.engine.session().track(t)).map_or_else(String::new, |t| t.name.clone());
-        let mut msg = format!("Imported {what} to {name} at {}", crate::browser::bbs(self, b.at));
-        if b.closed > 0 {
-            msg.push_str(&format!(" ({} Maschine/Kontakt file{} skipped: not supported)", b.closed, if b.closed == 1 { "" } else { "s" }));
-        }
-        if !b.refused.is_empty() {
-            msg.push_str(&format!("; {}", not_prepared(&b.refused, b.asked)));
-        }
-        msg
-    }
-
-    /// The line a drop ends on when its last file fails (`lone`: that failure's own line): the
-    /// drop's "Imported …" line when a file of it committed onto a track still there, else the
-    /// files that failed when there are several, else `lone`.
-    fn failed_line(&self, b: &Batch, lone: String) -> String {
-        if b.committed > 0 && b.track.is_some_and(|t| self.engine.session().track(t).is_some()) {
-            self.imported_line(b, "")
-        } else if b.refused.len() > 1 {
-            not_prepared(&b.refused, b.asked)
-        } else {
-            lone
-        }
-    }
-
     /// Commit the oldest item: at its drop's track and next position.
     fn commit_front(&mut self) {
         let it = self.imports.items[0].clone();
@@ -240,7 +207,24 @@ impl StudioApp {
                 self.imports.batches.insert(it.batch, b.clone());
                 let left = self.imports.items.iter().any(|i| i.batch == it.batch);
                 if !left {
-                    self.status = self.imported_line(&b, &it.name);
+                    let what = match (b.files, b.committed) {
+                        (1, _) => it.name.clone(),
+                        (f, c) if f == c => format!("{c} files"),
+                        (f, c) => format!("{c} of {f} files"),
+                    };
+                    let name = b.track.and_then(|t| self.engine.session().track(t)).map_or_else(String::new, |t| t.name.clone());
+                    let mut msg = format!("Imported {what} to {name} at {}", crate::browser::bbs(self, b.at));
+                    if b.closed > 0 {
+                        msg.push_str(&format!(
+                            " ({} Maschine/Kontakt file{} skipped: not supported)",
+                            b.closed,
+                            if b.closed == 1 { "" } else { "s" }
+                        ));
+                    }
+                    if !b.refused.is_empty() {
+                        msg.push_str(&format!("; {}", not_prepared(&b.refused, b.asked)));
+                    }
+                    self.status = msg;
                     self.forget_batches();
                 }
                 if let Some(t) = b.track {
@@ -298,14 +282,18 @@ pub fn step(app: &mut StudioApp, ctx: &egui::Context) {
                 "failed" => {
                     let (name, why, batch) = (front.name.clone(), front.error.clone().unwrap_or_default(), front.batch);
                     let mut msg = format!("Couldn't import {name}: {why}");
-                    // Kept for the drop's last line, so a later file's commit keeps the reason; when
-                    // this is that last file, the line names every file of the drop that failed.
+                    // Kept for the drop's last line, so a later file's commit keeps the reason. When
+                    // this is the drop's last file, its line names the drop's failures and the files
+                    // left out up front, never a track (it may be gone, or undone, by now).
                     let last = !app.imports.items.iter().skip(1).any(|i| i.batch == batch);
                     if let Some(b) = app.imports.batches.get_mut(&batch) {
                         b.refused.push((name, why));
-                        let b = b.clone();
-                        if last {
-                            msg = app.failed_line(&b, msg);
+                        if last && b.refused.len() > 1 {
+                            msg = not_prepared(&b.refused, b.asked);
+                        }
+                        if last && b.closed > 0 {
+                            let s = if b.closed == 1 { "" } else { "s" };
+                            msg.push_str(&format!(" ({} Maschine/Kontakt file{s} skipped: not supported)", b.closed));
                         }
                     }
                     app.drop_item(0, msg);
@@ -450,23 +438,5 @@ pub fn paint(app: &mut StudioApp, ctx: &egui::Context) {
     app.imports.layout.items = out;
     if let Some(id) = cancel {
         app.cancel_imports(Some(id));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A drop whose first file committed and whose last one failed never ends on "Imported … to"
-    /// a track deleted (or undone) in between: the failure's own line stands.
-    #[test]
-    fn a_failed_last_file_never_claims_an_import_onto_a_track_that_is_gone() {
-        let mut app = crate::tests::app();
-        let a = TrackId(app.run("track.new", json!({"kind": "audio", "name": "Kicks"})).unwrap()["tracks"][0].as_u64().unwrap());
-        let refused = vec![("notes.txt".to_string(), "unsupported".to_string())];
-        let b = Batch { track: Some(a), at: 0, next: 2_400, files: 2, committed: 1, closed: 0, refused, asked: 2 };
-        assert!(app.failed_line(&b, "lone".into()).starts_with("Imported 1 of 2 files to Kicks at "));
-        app.run("track.delete", json!({"tracks": [a.0]})).unwrap();
-        assert_eq!(app.failed_line(&b, "lone".into()), "lone");
     }
 }
