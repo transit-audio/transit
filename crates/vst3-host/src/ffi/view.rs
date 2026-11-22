@@ -1,6 +1,7 @@
 //! The editor view: the plug frame, content scaling and the editor link.
 
 use super::*;
+use transit_dsp::editor_scale::{Applies, EditorScale, ScaleEntry, ScaleState};
 
 // ---- editor (IPlugView) --------------------------------------------------------------------
 
@@ -69,6 +70,14 @@ impl PlugFrame {
             self.apply(Some(view.as_com_ref()), &mut r, " (asked before attached)");
             self.depth.fetch_sub(1, Ordering::Relaxed);
         }
+    }
+
+    /// The window was made again (stretched, issue #153) before the view was attached: requests
+    /// go to `window` from now on, and a size asked for meanwhile (in the other window's pixels)
+    /// is dropped.
+    pub(super) fn retarget(&self, window: *mut c_void) {
+        self.window.store(window, Ordering::Relaxed);
+        *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
     /// Called before the view's `removed`: requests from now on are only kept.
@@ -217,20 +226,28 @@ pub(super) fn view_size(view: &ComPtr<sb::IPlugView>) -> Option<(f64, f64)> {
 }
 
 /// Makes the host window for `view` (`prepare` sees it first; tests change its DPI there), sets
-/// our frame, passes the window's content scale (issue #101) and attaches the view. On success the
-/// caller keeps the frame and window and detaches the view before dropping them.
+/// our frame, settles the editor's scale (issue #153: the factor sent, if any, and whether Windows
+/// stretches it; issue #101 for the factor) and attaches the view. On success the caller keeps the
+/// frame and window and detaches the view before dropping them.
+///
+/// Issue #153: the factor `scale`'s plan asks for is sent before `attached`; the answer settles
+/// the plan. A plan that stretches makes the window again with a DPI-unaware content container
+/// (the plug-in has no window yet) and attaches the view in its plug-in scope; it sends no factor,
+/// so none is ever applied twice. Only a plan that sends a factor sends it again after `attached`
+/// (issue #105).
 pub(super) fn attach_view(
     view: &ComPtr<sb::IPlugView>,
     platform: sb::FIDString,
     title: &str,
     header: Option<Arc<transit_rt::editor_window::HeaderCell>>,
-    prepare: impl FnOnce(&window::HostWindow),
+    scale: &mut ScaleState,
+    mut prepare: impl FnMut(&window::HostWindow),
 ) -> Result<(ComWrapper<PlugFrame>, window::HostWindow), String> {
     let (w, h) = view_size(view).unwrap_or_else(|| {
         log::info!("vst3 editor \"{title}\": size unknown before attached: default window 400×300, following the view's size after attached");
         (400.0, 300.0)
     });
-    let win = window::HostWindow::new(title, w, h, header).map_err(|e| format!("host window failed: {e}"))?;
+    let mut win = window::HostWindow::new(title, w, h, header.clone()).map_err(|e| format!("host window failed: {e}"))?;
     prepare(&win);
     let frame = ComWrapper::new(PlugFrame::new(win.raw(), title));
     if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
@@ -238,17 +255,41 @@ pub(super) fn attach_view(
         // `g.frame`, and detaches it in `teardown`).
         unsafe { view.setFrame(f.as_ptr()) };
     }
-    // Issue #101: the window's scale before `attached`, then the size the view reports at
+    // Issue #101 and #153: the plan's factor before `attached`, then the size the view reports at
     // that scale (a `resizeView` it sends now is kept until it is attached, issue #105).
-    let scale = window::content_scale(&win);
-    if let Some(scale) = scale
-        && set_content_scale(view, scale, title, "before attached")
-        && let Some((w, h)) = view_size(view)
-    {
-        window::resize(win.raw(), w, h);
+    let display = window::content_scale(&win);
+    let has_call = view.cast::<sb::IPlugViewContentScaleSupport>().is_some();
+    let first = scale.before_open(display.unwrap_or(1.0), has_call);
+    let mut answer = None;
+    if let (Some(factor), Some(_)) = (first.factor, display) {
+        let before = view_size(view);
+        let accepted = set_content_scale(view, factor, title, "before attached");
+        let after = view_size(view);
+        answer = Some((accepted, before == after && (factor - 1.0).abs() > 0.005));
+        if accepted && let Some((w, h)) = after {
+            window::resize(win.raw(), w, h);
+        }
     }
-    // SAFETY: valid view; the parent is the live content view of `win`, of the type named.
-    if !ok(unsafe { view.attached(win.parent(), platform) }) {
+    let plan = scale.opened(answer);
+    if plan.stretch.is_some() {
+        let (w, h) = view_size(view).unwrap_or((w, h));
+        match window::new_stretched(title, w, h, header) {
+            Ok(stretched) => {
+                win.close();
+                win = stretched;
+                prepare(&win);
+                frame.retarget(win.raw());
+            }
+            Err(e) => {
+                log::warn!("vst3 editor \"{title}\": cannot stretch the editor ({e}); it keeps its own drawing");
+                scale.stretch_failed();
+            }
+        }
+    }
+    let parent = win.parent();
+    // SAFETY: valid view; the parent is the live content view of `win`, of the type named. A
+    // stretched window's view makes its window in the DPI-unaware context (issue #153).
+    if !ok(window::in_plugin_scope(&win, || unsafe { view.attached(parent, platform) })) {
         // SAFETY: valid view; detach our frame again.
         unsafe { view.setFrame(std::ptr::null_mut()) };
         win.close();
@@ -258,12 +299,28 @@ pub(super) fn attach_view(
     frame.attach(view);
     // Issue #105: the same factor again once attached (the SDK allows "before or after"; some
     // plug-ins apply it only to an attached view). A view that scales asks through `resizeView`
-    // (honored now); one that only reports its new size gets the window at that size.
-    if let Some(scale) = scale {
-        set_content_scale(view, scale, title, "after attached");
+    // (honored now); one that only reports its new size gets the window at that size. Only a plan
+    // that sends a factor sends it (issue #153).
+    if let (Some(factor), Some(_)) = (scale.in_use.as_ref().and_then(|p| p.factor), display) {
+        set_content_scale(view, factor, title, "after attached");
     }
     follow_view_size(view, &win, title, "after attached");
+    log::info!("vst3 editor \"{title}\": scale: {}", scale.log_line());
     Ok((frame, win))
+}
+
+/// The Scale submenu's rows as the editor window shows them (issue #153).
+pub(super) fn scale_rows(entries: &[ScaleEntry]) -> Vec<transit_rt::editor_window::MenuItem> {
+    use transit_rt::editor_window::{MenuItem, scale_item};
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| match e {
+            ScaleEntry::Info(t) => MenuItem::Heading(t.clone()),
+            ScaleEntry::Separator => MenuItem::Separator,
+            ScaleEntry::Choice { label, checked, enabled, .. } => scale_item(i, label, *checked, *enabled),
+        })
+        .collect()
 }
 
 /// Width and height of a view rect, clamped to a sane window size.
@@ -284,6 +341,8 @@ pub(super) struct EditorInner {
     pub(super) view: Option<ComPtr<sb::IPlugView>>,
     pub(super) frame: Option<ComWrapper<PlugFrame>>,
     pub(super) window: Option<window::HostWindow>,
+    /// The editor's Scale setting, its last answer and the plan in use (issue #153).
+    pub(super) scale: ScaleState,
 }
 
 /// The link between an instance and its editor and state handles. The instance may process on
@@ -437,23 +496,80 @@ impl EditorLink {
         let shown = self.header.view().title;
         let title = if shown.is_empty() { title } else { shown.as_str() };
         let mut scale = None;
-        let attached = attach_view(&view, platform, title, Some(Arc::clone(&self.header)), |win| {
-            prepare(win);
-            scale = window::content_scale(win);
+        let mut prepare = Some(prepare);
+        g.scale.stretch_available = transit_rt::editor_window::stretch_available();
+        let attached = attach_view(&view, platform, title, Some(Arc::clone(&self.header)), &mut g.scale, |win| {
+            // The test hook sees the first window only (a stretched one is made again after it).
+            if let Some(p) = prepare.take() {
+                p(win);
+            }
+            if scale.is_none() {
+                scale = window::content_scale(win);
+            }
         });
         *facts = format!(
             "embedded={embedded} floating=n/a preferred_api=n/a size={probed_size} resizable={resizable} timer-support=n/a posix-fd-support=n/a host_run_loop={} scale={}",
             cfg!(target_os = "linux"),
             scale.map_or_else(|| "unknown".into(), |s| s.to_string())
         );
-        let (frame, win) = attached?;
+        let (frame, win) = match attached {
+            Ok(x) => x,
+            Err(e) => {
+                g.scale.closed();
+                return Err(e);
+            }
+        };
         g.view = Some(view);
         g.frame = Some(frame);
         g.window = Some(win);
+        self.show_scale_menu(&mut g);
         Ok(())
     }
 
+    /// Puts the Scale submenu for the current state into the header strip's view (issue #153).
+    fn show_scale_menu(&self, g: &mut EditorInner) {
+        let mut view = self.header.view();
+        view.scale = scale_rows(g.scale.menu());
+        self.header.set(&view);
+    }
+
+    /// The header the app sent (issue #68) with this plug-in's Scale setting (issue #153): a new
+    /// setting reaches an open editor at once where the plug-in allows (a new factor for an editor
+    /// that takes one) and otherwise on the next open, and the log says which.
+    pub fn set_header(&self, mut view: transit_rt::editor_window::HeaderView, setting: EditorScale) {
+        let mut g = self.lock();
+        let (applies, wanted) = g.scale.set_setting(setting);
+        let name = g.frame.as_ref().map_or_else(|| view.title.clone(), |f| f.name.clone());
+        let open = g.window.is_some() && g.view.is_some();
+        match applies {
+            Applies::Now if open && self.on_main_thread() => {
+                if let (Some(factor), Some(v), Some(w)) = (wanted.factor, &g.view, &g.window) {
+                    let before = view_size(v);
+                    let accepted = set_content_scale(v, factor, &name, "on a Scale change");
+                    let after = view_size(v);
+                    if accepted {
+                        follow_view_size(v, w, &name, "on a Scale change");
+                    }
+                    g.scale.applied(accepted, before == after && (factor - 1.0).abs() > 0.005);
+                }
+                log::info!("vst3 editor \"{name}\": Scale {setting:?} applied at once; scale: {}", g.scale.log_line());
+            }
+            Applies::Now | Applies::NextOpen if open => {
+                log::info!("vst3 editor \"{name}\": Scale {setting:?} applies the next time the editor opens");
+            }
+            _ => {}
+        }
+        view.scale = scale_rows(g.scale.menu());
+        self.header.set(&view);
+    }
+
+    /// The Scale setting the menu entry at `index` stores (issue #153).
+    pub fn scale_pick(&self, index: usize) -> Option<EditorScale> {
+        self.lock().scale.pick(index)
+    }
+
     pub(super) fn teardown(g: &mut EditorInner) {
+        g.scale.closed();
         if let Some(f) = &g.frame {
             f.detach();
         }
@@ -540,8 +656,11 @@ impl EditorLink {
         let mut g = self.lock();
         match &g.window {
             Some(w) if !w.is_visible() => EditorLink::teardown(&mut g),
-            Some(w) => {
-                EditorLink::follow_scale(&g);
+            Some(_) => {
+                if EditorLink::follow_scale(&mut g) {
+                    self.show_scale_menu(&mut g);
+                }
+                let Some(w) = &g.window else { return };
                 // The strip's changes and the size follow (issue #68).
                 w.sync();
                 #[cfg(target_os = "linux")]
@@ -555,14 +674,21 @@ impl EditorLink {
 
     /// Issue #101: the window moved to a monitor with other scaling (or the scaling changed):
     /// the view gets the new factor, and the window the size it then reports (normally the view
-    /// already asked for it through `resizeView`).
-    pub(super) fn follow_scale(g: &EditorInner) {
-        let (Some(w), Some(view)) = (&g.window, &g.view) else { return };
-        let Some(scale) = window::scale_change(w) else { return };
+    /// already asked for it through `resizeView`). Issue #153: only an editor drawn at the host's
+    /// factor under Auto gets one (a chosen percentage stays; Windows re-stretches a stretched
+    /// editor itself). Returns whether the DPI changed.
+    pub(super) fn follow_scale(g: &mut EditorInner) -> bool {
+        let Some(scale) = g.window.as_ref().and_then(window::scale_change) else { return false };
+        let send = g.scale.dpi_changed(scale);
+        let (Some(w), Some(view)) = (&g.window, &g.view) else { return true };
         let name = g.frame.as_ref().map_or("", |f| f.name.as_str());
-        if set_content_scale(view, scale, name, "on a DPI change") {
+        log::info!("vst3 editor \"{name}\": the window's display scale is now {scale}");
+        if let Some(factor) = send
+            && set_content_scale(view, factor, name, "on a DPI change")
+        {
             follow_view_size(view, w, name, "on a DPI change");
         }
+        true
     }
 
     /// Normalized → plain through the controller (main thread).

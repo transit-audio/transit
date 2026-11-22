@@ -135,6 +135,42 @@ mod hostwin {
         let (w, h) = win.content_size();
         (u32::try_from(w).unwrap_or(0), u32::try_from(h).unwrap_or(0))
     }
+
+    /// A window Windows stretches (issue #153): its content container is DPI-unaware.
+    #[cfg(windows)]
+    pub fn new_stretched(
+        title: &str,
+        w: f64,
+        h: f64,
+        header: Option<std::sync::Arc<transit_rt::editor_window::HeaderCell>>,
+    ) -> Result<HostWindow, String> {
+        HostWindow::new_stretched(title, w, h, header)
+    }
+
+    /// No stretch on Linux (issue #153: only GUIs that accept a factor are scaled there).
+    #[cfg(target_os = "linux")]
+    pub fn new_stretched(
+        _title: &str,
+        _w: f64,
+        _h: f64,
+        _header: Option<std::sync::Arc<transit_rt::editor_window::HeaderCell>>,
+    ) -> Result<HostWindow, String> {
+        Err("editors are not stretched on Linux".into())
+    }
+
+    /// Runs `f` (a GUI call that may make its window) in the window's plug-in scope: the
+    /// DPI-unaware thread context for a stretched window (issue #153).
+    #[cfg(windows)]
+    pub fn in_plugin_scope<R>(win: &HostWindow, f: impl FnOnce() -> R) -> R {
+        let _scope = win.plugin_scope();
+        f()
+    }
+
+    /// Runs `f`: nothing to scope on Linux.
+    #[cfg(target_os = "linux")]
+    pub fn in_plugin_scope<R>(_win: &HostWindow, f: impl FnOnce() -> R) -> R {
+        f()
+    }
 }
 /// The macOS host window: `transit_rt`'s `NSWindow` editor window (the one the VST3 host uses), on
 /// the process main thread; its content view is the plugin's `cocoa` parent. No header strip, as on
@@ -159,6 +195,21 @@ mod hostwin {
     pub fn content_size(win: &HostWindow) -> (u32, u32) {
         let (w, h) = win.content_size();
         (u32::try_from(w).unwrap_or(0), u32::try_from(h).unwrap_or(0))
+    }
+
+    /// No stretch on macOS (it scales editors itself, issue #153).
+    pub fn new_stretched(
+        _title: &str,
+        _w: f64,
+        _h: f64,
+        _header: Option<std::sync::Arc<transit_rt::editor_window::HeaderCell>>,
+    ) -> Result<HostWindow, String> {
+        Err("macOS scales plug-in editors itself".into())
+    }
+
+    /// Runs `f`: nothing to scope on macOS.
+    pub fn in_plugin_scope<R>(_win: &HostWindow, f: impl FnOnce() -> R) -> R {
+        f()
     }
 }
 /// Other platforms: embedded editors are not hosted (floating ones still are).
@@ -205,6 +256,19 @@ mod hostwin {
 
     pub fn content_size(_win: &HostWindow) -> (u32, u32) {
         (0, 0)
+    }
+
+    pub fn new_stretched(
+        _title: &str,
+        _w: f64,
+        _h: f64,
+        _header: Option<std::sync::Arc<transit_rt::editor_window::HeaderCell>>,
+    ) -> Result<HostWindow, String> {
+        Err("embedded plugin editors are not hosted on this platform".into())
+    }
+
+    pub fn in_plugin_scope<R>(_win: &HostWindow, f: impl FnOnce() -> R) -> R {
+        f()
     }
 }
 
@@ -351,21 +415,29 @@ mod tests {
     }
 
     /// Opens the embedded editor in a window at `dpi`, then moves it to `then`: the content sizes
-    /// after the open and after the move.
+    /// after the open and after the move, and whether Windows stretches it (issue #153).
     #[cfg(windows)]
-    fn open_scaled(inst: &Instance, dpi: usize, then: usize) -> ((u32, u32), (u32, u32)) {
+    fn open_scaled_stretch(inst: &Instance, dpi: usize, then: usize) -> ((u32, u32), (u32, u32), bool) {
         let link = inst.gui().unwrap();
         link.open_with("scale", |w| set_dpi(w, dpi)).unwrap();
         let sizes = {
-            let g = link.lock();
-            let win = g.window.as_ref().expect("embedded");
-            let opened = hostwin::content_size(win);
-            set_dpi(win, then);
-            GuiLink::follow_scale(&g);
-            (opened, hostwin::content_size(win))
+            let mut g = link.lock();
+            let size = |g: &GuiInner| hostwin::content_size(g.window.as_ref().expect("embedded"));
+            let opened = size(&g);
+            let stretched = g.window.as_ref().unwrap().stretch().is_some();
+            set_dpi(g.window.as_ref().unwrap(), then);
+            GuiLink::follow_scale(&mut g);
+            (opened, size(&g), stretched)
         };
         link.close();
         sizes
+    }
+
+    /// [`open_scaled_stretch`] without the stretch.
+    #[cfg(windows)]
+    fn open_scaled(inst: &Instance, dpi: usize, then: usize) -> ((u32, u32), (u32, u32)) {
+        let (opened, moved, _) = open_scaled_stretch(inst, dpi, then);
+        (opened, moved)
     }
 
     /// `set_scale` gets the window's factor before `set_parent` (the fixture asserts a created
@@ -427,13 +499,47 @@ mod tests {
         assert!(!link.is_open());
     }
 
-    /// A GUI that ignores `set_scale` (it scales itself) keeps the size it reports: no transform
-    /// of ours at any DPI.
+    /// A GUI that ignores `set_scale` keeps the size it reports in its own pixels at any DPI and
+    /// gets no other factor. Issue #153 (the maintainer's redesign of 2026-11-16) changed what
+    /// happens on screen: under Auto, Windows stretches it (its GUI is made again in a DPI-unaware
+    /// container); before #153 it was left at 100 percent.
     #[cfg(windows)]
     #[test]
-    fn a_gui_that_scales_itself_gets_no_transform() {
+    fn a_gui_that_ignores_set_scale_is_stretched_by_windows() {
         let inst = embedded_gain(&[b"CMD:gui-self-scaling"]);
-        assert_eq!(open_scaled(&inst, 144, 192), ((400, 300), (400, 300)));
+        assert_eq!(open_scaled_stretch(&inst, 144, 192), ((400, 300), (400, 300), true));
+    }
+
+    /// Issue #153 through the fixture's GUI link: the user's own-zoom mode sends no `set_scale`
+    /// (the GUI keeps 400×300) and nothing is stretched; a percentage while open is sent at once
+    /// and the window takes the size the GUI then reports; a change to the stretch waits for the
+    /// next open, and the Scale submenu says so.
+    #[cfg(windows)]
+    #[test]
+    fn the_scale_setting_reaches_the_gui_before_the_open_and_at_once_while_open() {
+        use transit_dsp::editor_scale::{EditorScale, ScaleMode, ScaleStep};
+        use transit_rt::editor_window::{HeaderView, MenuItem};
+        let inst = embedded_gain(&[]);
+        let link = inst.gui().unwrap();
+        let zoom = EditorScale { step: ScaleStep::Auto, mode: Some(ScaleMode::PluginZoom) };
+        link.set_header(HeaderView::default(), zoom);
+        link.open_with("zoom", |w| set_dpi(w, 144)).unwrap();
+        {
+            let g = link.lock();
+            let w = g.window.as_ref().unwrap();
+            assert_eq!((hostwin::content_size(w), w.stretch()), ((400, 300), None), "no factor, no stretch");
+        }
+        link.close();
+        link.set_header(HeaderView::default(), EditorScale::default());
+        link.open_with("auto", |w| set_dpi(w, 144)).unwrap();
+        let size = || hostwin::content_size(link.lock().window.as_ref().unwrap());
+        assert_eq!(size(), (600, 450), "Auto: 1.5");
+        link.set_header(HeaderView::default(), EditorScale { step: ScaleStep::Percent(200), mode: None });
+        assert_eq!(size(), (800, 600), "200% at once");
+        link.set_header(HeaderView::default(), EditorScale { step: ScaleStep::Auto, mode: Some(ScaleMode::WindowsStretch) });
+        assert_eq!(size(), (800, 600), "the stretch waits for the next open");
+        assert_eq!(link.header().view().scale[1], MenuItem::Heading("Next open: stretched by Windows to 150%".into()));
+        link.close();
     }
 }
 

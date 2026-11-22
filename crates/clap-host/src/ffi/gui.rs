@@ -1,6 +1,7 @@
 //! The editor (`clap.gui`): the main-thread check, the GUI link and its window handling.
 
 use super::*;
+use transit_dsp::editor_scale::{Applies, EditorScale, ScaleEntry, ScaleState};
 
 // ---- editor (clap.gui) ---------------------------------------------------------------------
 
@@ -61,6 +62,8 @@ pub(super) struct GuiInner {
     pub(super) visible: bool,
     /// The host window of an embedded editor (`None` for floating editors).
     pub(super) window: Option<hostwin::HostWindow>,
+    /// The editor's Scale setting, its last answer and the plan in use (issue #153).
+    pub(super) scale: ScaleState,
 }
 
 /// The link between an instance and its editor and state handles. The instance may process on
@@ -90,6 +93,7 @@ impl Default for GuiLink {
                 created: false,
                 visible: false,
                 window: None,
+                scale: ScaleState::default(),
             }),
             host: Arc::new(HostState::default()),
             header: transit_rt::editor_window::HeaderCell::new(),
@@ -231,9 +235,14 @@ impl GuiLink {
     /// known for `set_scale` (issue #101). gui.h on `set_scale`: "Set the absolute GUI scaling
     /// factor, and override any OS info. [...] If the plugin prefers to work out the scaling
     /// factor itself by querying the OS directly, then ignore the call. [...] Returns false if the
-    /// call was ignored, or the scaling could not be applied." Either way the window takes the
-    /// size `get_size` reports (physical pixels on Win32) and adds no transform of its own, so a
-    /// plug-in that scales itself is not scaled twice.
+    /// call was ignored, or the scaling could not be applied." The window takes the size
+    /// `get_size` reports (physical pixels on Win32).
+    ///
+    /// Issue #153: the factor the editor's plan asks for is the one `set_scale` gets (none for the
+    /// plug-in's own zoom or the Windows stretch). A plan that stretches (a GUI that ignored the
+    /// factor under Auto, or the user's choice) makes the window again with a DPI-unaware content
+    /// container, and the GUI again inside its plug-in scope (some GUIs make their window in
+    /// `create`), with no `set_scale`: a factor and the stretch are never both in use.
     fn open_embedded(
         &self,
         g: &mut GuiInner,
@@ -255,7 +264,8 @@ impl GuiLink {
         g.created = true;
         let shown = self.header.view().title;
         let title = if shown.is_empty() { title } else { shown.as_str() };
-        let win = match hostwin::HostWindow::new(title, 640.0, 480.0, Some(Arc::clone(&self.header))) {
+        let header = Some(Arc::clone(&self.header));
+        let mut win = match hostwin::HostWindow::new(title, 640.0, 480.0, header.clone()) {
             Ok(win) => win,
             Err(e) => {
                 GuiLink::destroy(g);
@@ -263,10 +273,42 @@ impl GuiLink {
             }
         };
         prepare(&win);
-        if let Some(scale) = hostwin::content_scale(&win) {
-            GuiLink::set_scale(g, vt, scale);
+        let display = hostwin::content_scale(&win);
+        g.scale.stretch_available = transit_rt::editor_window::stretch_available();
+        let first = g.scale.before_open(display.unwrap_or(1.0), vt.set_scale.is_some());
+        let mut answer = None;
+        if let (Some(factor), Some(_)) = (first.factor, display) {
+            let before = GuiLink::size(g, vt);
+            let accepted = GuiLink::set_scale(g, vt, factor, title);
+            answer = Some((accepted, before == GuiLink::size(g, vt) && (factor - 1.0).abs() > 0.005));
         }
-        probe.created(g, vt, hostwin::content_scale(&win), false);
+        if g.scale.opened(answer).stretch.is_some() {
+            match hostwin::new_stretched(title, 640.0, 480.0, header) {
+                Ok(stretched) => {
+                    win.close();
+                    win = stretched;
+                    if let Some(f) = vt.destroy {
+                        // SAFETY: live plugin with a created GUI that has no parent yet; destroyed
+                        // once here and created again below.
+                        unsafe { f(g.plugin) };
+                    }
+                    g.created = false;
+                    // SAFETY: live plugin; `api` is a static NUL-terminated string; main thread; no
+                    // GUI now. Inside the stretched window's plug-in scope (DPI-unaware context).
+                    if !hostwin::in_plugin_scope(&win, || unsafe { create(g.plugin, api.as_ptr(), false) }) {
+                        win.close();
+                        g.scale.closed();
+                        return Err("create failed (stretched)".into());
+                    }
+                    g.created = true;
+                }
+                Err(e) => {
+                    log::warn!("clap editor \"{title}\": cannot stretch the editor ({e}); it keeps its own drawing");
+                    g.scale.stretch_failed();
+                }
+            }
+        }
+        probe.created(g, vt, display, false);
         let Some((w, h)) = probe.size else {
             win.close();
             GuiLink::destroy(g);
@@ -275,32 +317,84 @@ impl GuiLink {
         hostwin::resize(win.raw(), f64::from(w), f64::from(h));
         let parent = clap_window { api: api.as_ptr(), specific: window_handle(&win) };
         // SAFETY: live plugin with a created embedded GUI; `parent` names our live window and
-        // outlives the call.
-        if !unsafe { set_parent(g.plugin, &parent) } {
+        // outlives the call. A stretched window's GUI parents itself in the DPI-unaware context.
+        if !hostwin::in_plugin_scope(&win, || unsafe { set_parent(g.plugin, &parent) }) {
             win.close();
             GuiLink::destroy(g);
             return Err("set_parent failed".into());
         }
-        g.window = Some(win);
         let shown = match vt.show {
-            // SAFETY: live plugin with a created, parented GUI.
-            Some(f) => unsafe { f(g.plugin) },
+            // SAFETY: live plugin with a created, parented GUI; in the plug-in scope as above.
+            Some(f) => hostwin::in_plugin_scope(&win, || unsafe { f(g.plugin) }),
             None => false,
         };
+        g.window = Some(win);
         if !shown {
             GuiLink::destroy(g);
             return Err("show failed".into());
         }
         g.visible = true;
+        log::info!("clap editor \"{title}\": scale: {}", g.scale.log_line());
+        self.show_scale_menu(g);
         Ok(())
     }
 
+    /// Puts the Scale submenu for the current state into the header strip's view (issue #153).
+    fn show_scale_menu(&self, g: &mut GuiInner) {
+        let mut view = self.header.view();
+        view.scale = scale_rows(g.scale.menu());
+        self.header.set(&view);
+    }
+
+    /// The header the app sent (issue #68) with this plug-in's Scale setting (issue #153): a new
+    /// setting reaches an open embedded editor at once where the plug-in allows (a new factor for
+    /// a GUI that takes one) and otherwise on the next open, and the log says which.
+    pub fn set_header(&self, mut view: transit_rt::editor_window::HeaderView, setting: EditorScale) {
+        let mut g = self.lock();
+        let (applies, wanted) = g.scale.set_setting(setting);
+        let open = g.created && g.window.is_some();
+        let name = view.title.clone();
+        match (applies, GuiLink::vt(&g)) {
+            (Applies::Now, Some(vt)) if open && self.on_main_thread() => {
+                if let Some(factor) = wanted.factor {
+                    let before = GuiLink::size(&g, vt);
+                    let accepted = GuiLink::set_scale(&g, vt, factor, &name);
+                    let after = GuiLink::size(&g, vt);
+                    if accepted
+                        && let (Some(win), Some((w, h))) = (&g.window, after)
+                        && hostwin::content_size(win) != (w, h)
+                    {
+                        hostwin::resize(win.raw(), f64::from(w), f64::from(h));
+                        log::info!("clap editor \"{name}\": window resized to {w}×{h} after the Scale change");
+                    }
+                    g.scale.applied(accepted, before == after && (factor - 1.0).abs() > 0.005);
+                }
+                log::info!("clap editor \"{name}\": Scale {setting:?} applied at once; scale: {}", g.scale.log_line());
+            }
+            (Applies::Now | Applies::NextOpen, _) if open => {
+                log::info!("clap editor \"{name}\": Scale {setting:?} applies the next time the editor opens");
+            }
+            _ => {}
+        }
+        view.scale = scale_rows(g.scale.menu());
+        self.header.set(&view);
+    }
+
+    /// The Scale setting the menu entry at `index` stores (issue #153).
+    pub fn scale_pick(&self, index: usize) -> Option<EditorScale> {
+        self.lock().scale.pick(index)
+    }
+
     /// `clap_plugin_gui.set_scale` (an embedded GUI on Win32): whether the plug-in applied it.
-    fn set_scale(g: &GuiInner, vt: clap_plugin_gui, scale: f64) -> bool {
-        let Some(f) = vt.set_scale.filter(|_| scale.is_finite() && scale > 0.0) else { return false };
+    /// Logged at info for the plug-in `name` (issue #153).
+    fn set_scale(g: &GuiInner, vt: clap_plugin_gui, scale: f64, name: &str) -> bool {
+        let Some(f) = vt.set_scale.filter(|_| scale.is_finite() && scale > 0.0) else {
+            log::info!("clap editor \"{name}\": no set_scale, factor {scale} not sent");
+            return false;
+        };
         // SAFETY: live plugin (`alive`, under the lock) with a created GUI; main thread.
         let applied = unsafe { f(g.plugin, scale) };
-        log::debug!("clap: set_scale {scale} -> {applied}");
+        log::info!("clap editor \"{name}\": set_scale({scale}) -> {applied}");
         applied
     }
 
@@ -314,19 +408,27 @@ impl GuiLink {
 
     /// Issue #101: the embedded editor's window moved to a monitor with other scaling (or the
     /// scaling changed). A plug-in that applies the new scale gets the size it then reports; one
-    /// that ignores it scales itself and asks through `request_resize` if it needs to.
-    pub(super) fn follow_scale(g: &GuiInner) {
-        let (Some(win), Some(vt)) = (&g.window, GuiLink::vt(g)) else { return };
-        let Some(scale) = hostwin::scale_change(win) else { return };
-        if GuiLink::set_scale(g, vt, scale)
+    /// that ignores it scales itself and asks through `request_resize` if it needs to. Issue #153:
+    /// only a GUI drawn at the host's factor under Auto gets the new one. Returns whether the DPI
+    /// changed.
+    pub(super) fn follow_scale(g: &mut GuiInner) -> bool {
+        let Some(scale) = g.window.as_ref().and_then(hostwin::scale_change) else { return false };
+        let send = g.scale.dpi_changed(scale);
+        let (Some(win), Some(vt)) = (&g.window, GuiLink::vt(g)) else { return true };
+        log::info!("clap: the editor window's display scale is now {scale}");
+        if let Some(factor) = send
+            && GuiLink::set_scale(g, vt, factor, "on a DPI change")
             && let Some((w, h)) = GuiLink::size(g, vt)
             && hostwin::content_size(win) != (w, h)
         {
             hostwin::resize(win.raw(), f64::from(w), f64::from(h));
+            log::info!("clap: editor window resized to {w}×{h} after the DPI change");
         }
+        true
     }
 
     fn destroy(g: &mut GuiInner) {
+        g.scale.closed();
         if g.created
             && let Some(f) = GuiLink::vt(g).and_then(|v| v.destroy)
         {
@@ -409,13 +511,18 @@ impl GuiLink {
             {
                 let (w, h) = ((resize >> 32) as u32, resize as u32);
                 hostwin::resize(win.raw(), f64::from(w), f64::from(h));
+                log::info!("clap: editor window resized to {w}×{h} (request_resize)");
                 if let Some(f) = GuiLink::vt(&g).and_then(|v| v.set_size) {
                     // SAFETY: live plugin with a created embedded GUI, main thread.
                     unsafe { f(g.plugin, w, h) };
                 }
             }
+            if g.window.as_ref().is_some_and(hostwin::HostWindow::is_visible) {
+                if GuiLink::follow_scale(&mut g) {
+                    self.show_scale_menu(&mut g);
+                }
+            }
             if let Some(w) = g.window.as_ref().filter(|w| w.is_visible()) {
-                GuiLink::follow_scale(&g);
                 // The strip's changes and the size follow (issue #68).
                 w.sync();
                 #[cfg(target_os = "linux")]
@@ -453,6 +560,7 @@ impl GuiLink {
 
     /// Called by the instance before it destroys the plugin.
     pub(super) fn kill(&self) {
+        self.lock().scale.closed();
         let mut g = self.lock();
         if g.created {
             if self.on_main_thread() {
@@ -466,4 +574,18 @@ impl GuiLink {
         }
         g.alive = false;
     }
+}
+
+/// The Scale submenu's rows as the editor window shows them (issue #153).
+fn scale_rows(entries: &[ScaleEntry]) -> Vec<transit_rt::editor_window::MenuItem> {
+    use transit_rt::editor_window::{MenuItem, scale_item};
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| match e {
+            ScaleEntry::Info(t) => MenuItem::Heading(t.clone()),
+            ScaleEntry::Separator => MenuItem::Separator,
+            ScaleEntry::Choice { label, checked, enabled, .. } => scale_item(i, label, *checked, *enabled),
+        })
+        .collect()
 }

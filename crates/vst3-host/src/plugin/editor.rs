@@ -63,11 +63,20 @@ impl PluginEditor for Vst3Editor {
     }
 
     fn set_header(&mut self, header: &transit_dsp::EditorHeader) {
-        self.conv.link.header().set(&header_view(header));
+        self.conv.link.set_header(header_view(header), header.scale);
     }
 
     fn take_header_actions(&mut self) -> Vec<transit_dsp::HeaderAction> {
-        self.conv.link.header().take_clicks().into_iter().map(header_action).collect()
+        let link = &self.conv.link;
+        link.header()
+            .take_clicks()
+            .into_iter()
+            .filter_map(|c| match c {
+                // Issue #153: the Scale entry's index, as the setting it stores.
+                transit_rt::editor_window::HeaderClick::Scale(i) => link.scale_pick(i).map(transit_dsp::HeaderAction::Scale),
+                c => header_action(c),
+            })
+            .collect()
     }
 
     /// `IComponentHandler2::setDirty(true)` since the last call (issue #574): the app marks the
@@ -90,14 +99,16 @@ fn header_view(h: &transit_dsp::EditorHeader) -> transit_rt::editor_window::Head
         can_delete: h.can_delete,
         disabled: h.disabled.clone(),
         learning: h.learning,
+        // Filled in by the editor link from its scale state (issue #153).
+        scale: Vec::new(),
     }
 }
 
-/// What a click in the strip asks of the host.
-fn header_action(c: transit_rt::editor_window::HeaderClick) -> transit_dsp::HeaderAction {
+/// What a click in the strip asks of the host (a Scale entry is mapped by the editor link).
+fn header_action(c: transit_rt::editor_window::HeaderClick) -> Option<transit_dsp::HeaderAction> {
     use transit_dsp::HeaderAction as A;
     use transit_rt::editor_window::HeaderClick as C;
-    match c {
+    Some(match c {
         C::User(i) => A::User(i),
         C::Factory(i) => A::Factory(i),
         C::Previous => A::Previous,
@@ -112,5 +123,6 @@ fn header_action(c: transit_rt::editor_window::HeaderClick) -> transit_dsp::Head
         C::Delete => A::Delete,
         C::ShowInChain => A::ShowInChain,
         C::LearnNext => A::LearnNext,
-    }
+        C::Scale(_) => return None,
+    })
 }

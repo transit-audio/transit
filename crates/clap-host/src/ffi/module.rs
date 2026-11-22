@@ -248,7 +248,16 @@ impl Bundle {
         let gui = inst.extension::<clap_plugin_gui>(CLAP_EXT_GUI);
         inst.gui = Arc::new(GuiLink {
             main: std::thread::current().id(),
-            inner: Mutex::new(GuiInner { plugin, gui, state: inst.state_ext, alive: true, created: false, visible: false, window: None }),
+            inner: Mutex::new(GuiInner {
+                plugin,
+                gui,
+                state: inst.state_ext,
+                alive: true,
+                created: false,
+                visible: false,
+                window: None,
+                scale: transit_dsp::editor_scale::ScaleState::default(),
+            }),
             host: Arc::clone(&inst.state),
             header: transit_rt::editor_window::HeaderCell::new(),
         });

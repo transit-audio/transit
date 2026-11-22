@@ -1,5 +1,6 @@
 use super::tests::gain_instance;
 use super::*;
+use transit_dsp::editor_scale::{EditorScale, ScaleState};
 
 // ---- issue #101: content scale ------------------------------------------------------------
 
@@ -24,14 +25,14 @@ fn the_view_gets_the_windows_scale_and_the_window_follows_its_size() {
     let link = inst.editor().unwrap();
     link.open_with("scale", |w| set_dpi(w, 144)).unwrap();
     {
-        let g = link.lock();
-        let win = g.window.as_ref().unwrap();
-        assert_eq!(win.content_size(), (480, 360), "320×240 at 1.5");
-        set_dpi(win, 192);
-        EditorLink::follow_scale(&g);
-        assert_eq!(win.content_size(), (640, 480), "the DPI change sends 2.0 and the view resizes");
-        EditorLink::follow_scale(&g);
-        assert_eq!(win.content_size(), (640, 480), "no change, no call");
+        let mut g = link.lock();
+        let size = |g: &EditorInner| g.window.as_ref().unwrap().content_size();
+        assert_eq!(size(&g), (480, 360), "320×240 at 1.5");
+        set_dpi(g.window.as_ref().unwrap(), 192);
+        EditorLink::follow_scale(&mut g);
+        assert_eq!(size(&g), (640, 480), "the DPI change sends 2.0 and the view resizes");
+        EditorLink::follow_scale(&mut g);
+        assert_eq!(size(&g), (640, 480), "no change, no call");
     }
     link.close();
     assert!(!link.is_open());
@@ -161,20 +162,33 @@ impl Class for FakeView<false> {
     type Interfaces = (sb::IPlugView,);
 }
 
-/// Opens `view` in a window at `dpi`, changes it to `then`, and returns the calls the view saw
-/// and the content sizes after the open and after the change.
+/// A scale state with the default setting (Auto, automatic mode), as a first open has it.
 #[cfg(windows)]
-fn open_fake(view: &ComPtr<sb::IPlugView>, dpi: usize, then: usize) -> ((i32, i32), (i32, i32)) {
-    let (frame, win) = attach_view(view, window::PLATFORM_TYPE.unwrap(), "fake", Some(transit_rt::editor_window::HeaderCell::new()), |w| {
-        set_dpi(w, dpi);
-    })
-    .unwrap();
+fn auto_scale() -> ScaleState {
+    ScaleState { stretch_available: transit_rt::editor_window::stretch_available(), ..ScaleState::default() }
+}
+
+/// Opens `view` in a window at `dpi` with the Scale `setting`, changes it to `then`, and returns
+/// the content sizes after the open and after the change, and whether Windows stretches it.
+#[cfg(windows)]
+fn open_fake_with(view: &ComPtr<sb::IPlugView>, setting: EditorScale, dpi: usize, then: usize) -> ((i32, i32), (i32, i32), Option<f64>) {
+    let mut scale = ScaleState { setting, ..auto_scale() };
+    let header = Some(transit_rt::editor_window::HeaderCell::new());
+    let (frame, win) = attach_view(view, window::PLATFORM_TYPE.unwrap(), "fake", header, &mut scale, |w| set_dpi(w, dpi)).unwrap();
     let opened = win.content_size();
+    let stretched = win.stretch();
     set_dpi(&win, then);
-    let mut g = EditorInner { view: Some(view.clone()), frame: Some(frame), window: Some(win), ..EditorInner::default() };
-    EditorLink::follow_scale(&g);
+    let mut g = EditorInner { view: Some(view.clone()), frame: Some(frame), window: Some(win), scale, ..EditorInner::default() };
+    EditorLink::follow_scale(&mut g);
     let moved = g.window.as_ref().unwrap().content_size();
     EditorLink::teardown(&mut g);
+    (opened, moved, stretched)
+}
+
+/// [`open_fake_with`] under Auto, without the stretch.
+#[cfg(windows)]
+fn open_fake(view: &ComPtr<sb::IPlugView>, dpi: usize, then: usize) -> ((i32, i32), (i32, i32)) {
+    let (opened, moved, _) = open_fake_with(view, EditorScale::default(), dpi, then);
     (opened, moved)
 }
 
@@ -208,7 +222,7 @@ fn fake_view_nesting(scales: bool, nest: u32) -> (ComPtr<sb::IPlugView>, Arc<Mut
 /// returns the result and the window's content width after it.
 #[cfg(windows)]
 fn resize_through_frame(view: &ComPtr<sb::IPlugView>, w: i32) -> (sb::tresult, i32) {
-    let (frame, win) = attach_view(view, window::PLATFORM_TYPE.unwrap(), "nest", None, |_| {}).unwrap();
+    let (frame, win) = attach_view(view, window::PLATFORM_TYPE.unwrap(), "nest", None, &mut auto_scale(), |_| {}).unwrap();
     let mut r = sb::ViewRect { left: 0, top: 0, right: w, bottom: 100 };
     // SAFETY: our live frame; the view is live and attached; `r` lives on this frame.
     let res = unsafe { frame.as_com_ref::<sb::IPlugFrame>().unwrap().resizeView(view.as_ptr(), &mut r) };
@@ -256,16 +270,19 @@ fn the_scale_comes_before_attached_and_again_on_a_dpi_change() {
     assert_eq!(moved, (300, 150));
 }
 
-/// A view without `IPlugViewContentScaleSupport` (a plug-in that scales itself) gets no call
-/// and no transform of ours: the window stays at the size it reports, at any DPI.
+/// A view without `IPlugViewContentScaleSupport` gets no call and keeps the size it reports in its
+/// own pixels, at any DPI. Issue #153 (the maintainer's redesign of 2026-11-16) changed what
+/// happens on screen: under Auto, Windows stretches such an editor to the display's scale (its
+/// content container is DPI-unaware); before #153 it was left at 100 percent (K74).
 #[cfg(windows)]
 #[test]
-fn a_view_that_scales_itself_gets_no_call_and_no_transform() {
+fn a_view_without_the_scale_call_gets_no_call_and_is_stretched_by_windows() {
     let (view, calls) = fake_view(false);
-    let (opened, moved) = open_fake(&view, 144, 192);
+    let (opened, moved, stretched) = open_fake_with(&view, EditorScale::default(), 144, 192);
     assert_eq!(*calls.lock().unwrap(), ["attached", "removed"]);
-    assert_eq!(opened, (200, 100));
+    assert_eq!(opened, (200, 100), "its own pixels");
     assert_eq!(moved, (200, 100));
+    assert_eq!(stretched, Some(1.5), "stretched at the display's scale (the simulated 144 DPI)");
 }
 
 // ---- issue #105: a scale applied after `attached`, and `resizeView` at any time -------------
@@ -356,7 +373,7 @@ fn scale_child_after_attach() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "run in a child process by a_refused_scale_is_logged_and_leaves_the_window_alone"]
+#[ignore = "run in a child process by a_refused_scale_is_logged_and_the_editor_is_stretched_instead"]
 fn scale_child_refuse() {
     assert_eq!(open_gain_at_144_dpi("refuse"), (320, 240), "no scale, no resize");
 }
@@ -378,18 +395,119 @@ fn the_window_takes_a_scale_the_view_applies_only_after_attached() {
     }
 }
 
-/// A view that refuses the factor (kResultFalse) is logged as such, before and after
-/// `attached`, and the window keeps the size it reports.
+/// A view that refuses the factor (kResultFalse) is logged as such before `attached`, keeps the
+/// size it reports in its own pixels, and (issue #153, Auto on Windows) is stretched by Windows
+/// instead: it is not asked again after `attached` (a factor and the stretch are never both in
+/// use), and the editor's scale line says so.
 #[cfg(windows)]
 #[test]
-fn a_refused_scale_is_logged_and_leaves_the_window_alone() {
+fn a_refused_scale_is_logged_and_the_editor_is_stretched_instead() {
     let log = scale_mode_child("scale_child_refuse", "refuse");
-    for when in ["before attached", "after attached"] {
-        let line = format!(
-            "vst3 editor \"Fixture Gain\": content scale {when}: IPlugViewContentScaleSupport obtained, setContentScaleFactor(1.5) -> kResultFalse (1); getSize 320×240 before, 320×240 after"
-        );
-        assert!(log.contains(&line), "{line:?} is not in the log:\n{log}");
-    }
+    let before = "vst3 editor \"Fixture Gain\": content scale before attached: IPlugViewContentScaleSupport obtained, setContentScaleFactor(1.5) -> kResultFalse (1); getSize 320×240 before, 320×240 after";
+    assert!(log.contains(before), "{before:?} is not in the log:\n{log}");
+    assert!(!log.contains("content scale after attached"), "no factor after the refusal:\n{log}");
+    let line =
+        "vst3 editor \"Fixture Gain\": scale: accepts a factor: no; factor in use: none; Windows stretch: 1.5; in use: stretched by Windows to 150%";
+    assert!(log.contains(line), "{line:?} is not in the log:\n{log}");
     assert!(!log.contains("resizeView"), "{log}");
     assert!(!log.contains("window follows"), "{log}");
+}
+
+// ---- issue #153: the Scale setting through the fake views and the fixture -------------------
+
+#[cfg(windows)]
+use transit_dsp::editor_scale::{ScaleMode, ScaleStep};
+#[cfg(windows)]
+use transit_rt::editor_window::{HeaderClick, HeaderView, MenuItem};
+
+#[cfg(windows)]
+fn setting(step: ScaleStep, mode: Option<ScaleMode>) -> EditorScale {
+    EditorScale { step, mode }
+}
+
+/// The third kind of editor (it takes the factor; whether it draws at it is not known): with the
+/// user's mode set to the Windows stretch it gets no scale call at all and is stretched; with its
+/// own zoom it gets neither, not even on a DPI change.
+#[cfg(windows)]
+#[test]
+fn a_view_that_takes_the_factor_can_be_stretched_or_left_to_its_own_zoom() {
+    let (view, calls) = fake_view(true);
+    let (opened, _, stretched) = open_fake_with(&view, setting(ScaleStep::Auto, Some(ScaleMode::WindowsStretch)), 144, 144);
+    assert_eq!(*calls.lock().unwrap(), ["attached", "removed"], "no factor");
+    assert_eq!((opened, stretched), ((200, 100), Some(1.5)));
+    let (view, calls) = fake_view(true);
+    let (opened, moved, stretched) = open_fake_with(&view, setting(ScaleStep::Auto, Some(ScaleMode::PluginZoom)), 144, 192);
+    assert_eq!(*calls.lock().unwrap(), ["attached", "removed"], "no factor, not even on a DPI change");
+    assert_eq!((opened, moved, stretched), ((200, 100), (200, 100), None));
+}
+
+/// A chosen percentage is the factor sent (before and after `attached`) and stays on a DPI change.
+#[cfg(windows)]
+#[test]
+fn a_chosen_percentage_is_sent_and_kept_on_a_dpi_change() {
+    let (view, calls) = fake_view(true);
+    let (opened, moved, stretched) = open_fake_with(&view, setting(ScaleStep::Percent(200), None), 144, 192);
+    assert_eq!(*calls.lock().unwrap(), ["scale 2", "attached", "scale 2", "removed"]);
+    assert_eq!((opened, moved, stretched), ((400, 200), (400, 200), None));
+}
+
+/// No factor is ever applied twice: for every setting, on a view that takes the factor and on one
+/// without the call, a stretched window never goes with a factor the view took.
+#[cfg(windows)]
+#[test]
+fn no_factor_is_applied_twice_through_the_fake_views() {
+    let steps = [ScaleStep::Auto, ScaleStep::Percent(50), ScaleStep::Percent(100), ScaleStep::Percent(150), ScaleStep::Percent(200)];
+    let modes = [None, Some(ScaleMode::HostFactor), Some(ScaleMode::PluginZoom), Some(ScaleMode::WindowsStretch)];
+    for scales in [true, false] {
+        for step in steps {
+            for mode in modes {
+                let (view, calls) = fake_view(scales);
+                let (_, _, stretched) = open_fake_with(&view, setting(step, mode), 144, 192);
+                let calls = calls.lock().unwrap();
+                // The fake that scales takes every factor it gets.
+                let took = calls.iter().any(|c| c.starts_with("scale"));
+                assert!(!(stretched.is_some() && took), "{scales} {step:?} {mode:?}: {calls:?} stretched {stretched:?}");
+                assert!(scales || !took, "a view without the call got one: {calls:?}");
+                assert!(
+                    stretched.is_some() || took || mode == Some(ScaleMode::PluginZoom) || step == ScaleStep::Percent(100),
+                    "{scales} {step:?} {mode:?}: neither"
+                );
+            }
+        }
+    }
+}
+
+/// Through the fixture's editor link: the Scale submenu is in the header strip's view; a new
+/// percentage applies at once; a change to the stretch applies on the next open and the menu says
+/// so; a click on a Scale entry maps to the setting it stores; reopened, the editor is stretched
+/// and gets no factor.
+#[cfg(windows)]
+#[test]
+fn a_scale_change_applies_at_once_or_on_the_next_open_through_the_editor_link() {
+    let inst = gain_instance();
+    let link = inst.editor().unwrap();
+    link.open_with("menu", |w| set_dpi(w, 144)).unwrap();
+    let size = || link.lock().window.as_ref().unwrap().content_size();
+    let rows = || link.header().view().scale;
+    assert_eq!(size(), (480, 360));
+    assert_eq!(rows()[0], MenuItem::Heading("In use: drawn by the plug-in at 150%".into()));
+    link.set_header(HeaderView::default(), setting(ScaleStep::Percent(200), None));
+    assert_eq!(size(), (640, 480), "200% applied at once");
+    assert_eq!(rows()[0], MenuItem::Heading("In use: drawn by the plug-in at 200%".into()));
+    link.set_header(HeaderView::default(), setting(ScaleStep::Auto, Some(ScaleMode::WindowsStretch)));
+    assert_eq!(size(), (640, 480), "unchanged until the next open");
+    assert_eq!(rows()[1], MenuItem::Heading("Next open: stretched by Windows to 150%".into()));
+    let auto = rows().iter().position(|m| matches!(m, MenuItem::Item { label, .. } if label.starts_with("Automatic"))).unwrap();
+    link.header().click(HeaderClick::Scale(auto));
+    assert_eq!(link.header().take_clicks(), [HeaderClick::Scale(auto)]);
+    assert_eq!(link.scale_pick(auto), Some(EditorScale::default()));
+    link.close();
+    link.open_with("menu", |w| set_dpi(w, 144)).unwrap();
+    {
+        let g = link.lock();
+        let w = g.window.as_ref().unwrap();
+        assert!(w.stretch().is_some(), "stretched now");
+        assert_eq!(w.content_size(), (320, 240), "its own pixels: the view got no factor");
+    }
+    link.close();
 }
