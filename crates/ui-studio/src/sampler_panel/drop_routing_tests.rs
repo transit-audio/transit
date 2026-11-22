@@ -429,3 +429,21 @@ fn a_drop_on_the_main_strip_with_no_master_track_lands_at_the_cursor() {
     let starts: Vec<i64> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| c.start).collect();
     assert_eq!(starts, [48_000], "{}", t.app.status);
 }
+
+/// A real Master track's strip is still a drop target, refused for audio with the reason (only the
+/// main bus with no Master track is no target).
+#[test]
+fn audio_dropped_on_a_master_tracks_strip_is_refused_with_the_reason() {
+    let mut t = T::new();
+    let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    t.app.run("track.new", serde_json::json!({"kind": "master"})).unwrap();
+    t.app.set_cursor(0, Some(TrackId(a)));
+    t.app.ui.show_mixer = true;
+    t.frames(3);
+    let master = t.app.mixer.layout.master.clone().expect("the Master strip is drawn");
+    assert_ne!(master.track, 0, "a Master track's own strip");
+    let one = t.sample("One.wav", 2_400);
+    t.drop_file(&one, mid(master.rect));
+    assert!(t.app.status.contains("is not an audio track"), "{}", t.app.status);
+    assert!(t.app.engine.session().tracks.iter().all(|tr| tr.clips().is_empty()), "nothing is imported");
+}

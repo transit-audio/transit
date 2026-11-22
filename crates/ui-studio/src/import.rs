@@ -190,6 +190,19 @@ impl StudioApp {
         msg
     }
 
+    /// The line a drop ends on when its last file fails (`lone`: that failure's own line): the
+    /// drop's "Imported …" line when a file of it committed onto a track still there, else the
+    /// files that failed when there are several, else `lone`.
+    fn failed_line(&self, b: &Batch, lone: String) -> String {
+        if b.committed > 0 && b.track.is_some_and(|t| self.engine.session().track(t).is_some()) {
+            self.imported_line(b, "")
+        } else if b.refused.len() > 1 {
+            not_prepared(&b.refused, b.asked)
+        } else {
+            lone
+        }
+    }
+
     /// Commit the oldest item: at its drop's track and next position.
     fn commit_front(&mut self) {
         let it = self.imports.items[0].clone();
@@ -291,10 +304,8 @@ pub fn step(app: &mut StudioApp, ctx: &egui::Context) {
                     if let Some(b) = app.imports.batches.get_mut(&batch) {
                         b.refused.push((name, why));
                         let b = b.clone();
-                        if last && b.committed > 0 {
-                            msg = app.imported_line(&b, "");
-                        } else if last && b.refused.len() > 1 {
-                            msg = not_prepared(&b.refused, b.asked);
+                        if last {
+                            msg = app.failed_line(&b, msg);
                         }
                     }
                     app.drop_item(0, msg);
@@ -439,5 +450,23 @@ pub fn paint(app: &mut StudioApp, ctx: &egui::Context) {
     app.imports.layout.items = out;
     if let Some(id) = cancel {
         app.cancel_imports(Some(id));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A drop whose first file committed and whose last one failed never ends on "Imported … to"
+    /// a track deleted (or undone) in between: the failure's own line stands.
+    #[test]
+    fn a_failed_last_file_never_claims_an_import_onto_a_track_that_is_gone() {
+        let mut app = crate::tests::app();
+        let a = TrackId(app.run("track.new", json!({"kind": "audio", "name": "Kicks"})).unwrap()["tracks"][0].as_u64().unwrap());
+        let refused = vec![("notes.txt".to_string(), "unsupported".to_string())];
+        let b = Batch { track: Some(a), at: 0, next: 2_400, files: 2, committed: 1, closed: 0, refused, asked: 2 };
+        assert!(app.failed_line(&b, "lone".into()).starts_with("Imported 1 of 2 files to Kicks at "));
+        app.run("track.delete", json!({"tracks": [a.0]})).unwrap();
+        assert_eq!(app.failed_line(&b, "lone".into()), "lone");
     }
 }
