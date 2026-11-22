@@ -373,8 +373,9 @@ fn a_drop_at_the_cursor_lands_on_the_cursors_track_not_the_focused_one() {
     assert_eq!((on(a), on(b)), (vec![48_000], vec![]), "{}", t.app.status);
 }
 
-/// When the last file of a drop fails too, the drop's last line still names every file of it that
-/// failed and the Maschine/Kontakt files left out; a lone failure keeps its own line.
+/// When the last file of a drop fails too, the drop's last line gives that failure's own reason,
+/// then the Maschine/Kontakt files left out, then the drop's earlier failures with the first
+/// reason, each its own part; a lone failure keeps its own line.
 #[test]
 fn a_drop_whose_last_file_fails_names_every_failure() {
     let mut t = T::new();
@@ -388,11 +389,20 @@ fn a_drop_whose_last_file_fails_names_every_failure() {
     };
     let (x, y) = (text(&t, "a.txt"), text(&t, "b.txt"));
     t.drop_files(vec![x, y], lane);
-    assert!(t.app.status.starts_with("2 of 2 could not be prepared: a.txt (") && t.app.status.contains("b.txt"), "{}", t.app.status);
-    let (kick, notes, kit) = (t.sample("Kick.wav", 2_400), text(&t, "notes.txt"), text(&t, "Kit.nki"));
-    t.drop_files(vec![kick, notes, kit], lane);
+    let why = "unsupported audio";
+    let status = t.app.status.clone();
+    assert!(
+        status.starts_with("Couldn't import b.txt: b.txt: unsupported audio")
+            && status.contains("; 1 of 2 could not be prepared: a.txt (a.txt: unsupported audio"),
+        "{status}"
+    );
+    let (bad, kick, notes, kit) = (text(&t, "Bad.wav"), t.sample("Kick.wav", 2_400), text(&t, "notes.txt"), text(&t, "Kit.nki"));
+    t.drop_files(vec![bad, kick, notes, kit], lane);
     let status = &t.app.status;
-    assert!(status.starts_with("Couldn't import notes.txt: ") && status.ends_with(" (1 Maschine/Kontakt file skipped: not supported)"), "{status}");
+    let parts: Vec<&str> = status.split("; ").collect();
+    assert!(parts.len() == 3 && parts[0].starts_with("Couldn't import notes.txt: ") && parts[0].contains(why), "{status}");
+    assert_eq!(parts[1], "1 Maschine/Kontakt file skipped: not supported", "{status}");
+    assert!(parts[2].starts_with("1 of 3 could not be prepared: Bad.wav (") && parts[2].contains(why), "{status}");
     let lone = text(&t, "c.txt");
     t.drop_files(vec![lone], lane);
     assert!(t.app.status.starts_with("Couldn't import c.txt: "), "{}", t.app.status);
