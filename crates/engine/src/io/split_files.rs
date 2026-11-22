@@ -26,6 +26,9 @@ pub(crate) fn remove(paths: &[PathBuf]) {
 /// `written` as soon as it is created.
 pub(crate) fn write(disk: &DiskSource, names: &[String], written: &mut Vec<PathBuf>) -> Result<()> {
     let io = |p: &Path, err: &dyn std::fmt::Display| EngineError::Io(format!("{}: {err}", p.display()));
+    // A reader that failed once reads nothing more: opened anew, as before an offline render, so a
+    // take whose file is back splits again.
+    disk.check().map_err(|why| io(&disk.path(), &why))?;
     let dir = disk.path().parent().map(Path::to_path_buf).unwrap_or_default();
     let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None, bitrate_kbps: None, title: None };
     let mut encoders = Vec::with_capacity(names.len());

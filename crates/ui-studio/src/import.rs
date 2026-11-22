@@ -280,8 +280,12 @@ pub fn step(app: &mut StudioApp, ctx: &egui::Context) {
                     app.drop_item(0, msg);
                 }
                 "failed" => {
-                    let msg = format!("Couldn't import {}: {}", front.name, front.error.clone().unwrap_or_default());
-                    app.drop_item(0, msg);
+                    let (name, why, batch) = (front.name.clone(), front.error.clone().unwrap_or_default(), front.batch);
+                    // Kept for the drop's last line too, so a later file's commit keeps the reason.
+                    if let Some(b) = app.imports.batches.get_mut(&batch) {
+                        b.refused.push((name.clone(), why.clone()));
+                    }
+                    app.drop_item(0, format!("Couldn't import {name}: {why}"));
                 }
                 _ => break,
             }

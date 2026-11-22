@@ -173,3 +173,23 @@ fn audio_is_never_imported_onto_a_midi_track() {
     assert!(r.as_ref().is_err_and(|err| err.to_string().contains("Synth is not an audio track")), "{r:?}");
     assert!(e.session().track(TrackId(midi)).unwrap().clips().is_empty() && e.session().sources.is_empty());
 }
+
+#[test]
+fn a_take_whose_file_is_back_after_a_failed_read_splits_again() {
+    let d = transit_test_support::TestDir::new("split-to-mono-reopen");
+    std::fs::create_dir_all(&*d).unwrap();
+    let take = d.join("Take.wav");
+    let bytes = stereo_wav(4_800, 16_384, -8_192);
+    std::fs::write(&take, &bytes).unwrap();
+    let mut e = Engine::default();
+    e.session_mut().edit.values.insert(transit_model::disk::STREAM_MINUTES_KEY.into(), 0.001);
+    let mics = track(&mut e, "stereo");
+    let ids = transit_engine::io::add_recording_take(&mut e, &transit_engine::io::Recording::new(0), vec![(TrackId(mics), take.clone())], false);
+    // The file loses its audio (a drive unplugged): the split's read fails and its reader with it.
+    std::fs::OpenOptions::new().write(true).open(&take).unwrap().set_len(44).unwrap();
+    assert!(e.execute("clip.split_to_mono", &json!({"clips": [ids[0].0]})).is_err());
+    // The file is back: the split opens the take anew, as an offline render does.
+    std::fs::write(&take, &bytes).unwrap();
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [ids[0].0]}));
+    assert!(r.as_ref().is_ok_and(|r| r["tracks"].as_array().map(Vec::len) == Some(2)), "{r:?}");
+}

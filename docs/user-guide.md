@@ -904,7 +904,7 @@ as MIDI). A track that takes no audio, or a file that is not audio transit impor
 with the reason on the status line. A file keeps its channels: a stereo file dropped on a mono
 track lands there as one stereo clip. A `.transit` or `.dawproject` file opens as the session,
 asking first to save unsaved changes as File > Open does; dropped with other files, it opens alone
-and the status line names what was left out. On Windows a file manager drop lands where the pointer
+and the status line says how many were left out. On Windows a file manager drop lands where the pointer
 is when you let go; on other platforms it lands as soon as the pointer moves after you let go (see
 the known issues).
 

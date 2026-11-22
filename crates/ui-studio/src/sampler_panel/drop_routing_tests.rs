@@ -325,3 +325,34 @@ fn a_dropped_session_that_fails_to_open_shows_why() {
     assert!(t.app.status.starts_with("Could not open"), "{}", t.app.status);
     assert!(t.app.engine.session().tracks.iter().all(|tr| tr.clips().is_empty()), "nothing is imported");
 }
+
+/// Whether a dropped file is audio is the engine's call, as it was for every file-manager drop:
+/// WAV data named `.rf64`, or with no extension at all, imports, though the browser lists neither.
+#[test]
+fn audio_the_engine_reads_imports_whatever_its_file_is_named() {
+    let mut t = T::new();
+    let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    t.frames(3);
+    let (rf64, bare) = (t.sample("Kick.rf64", 2_400), t.sample("Snare", 2_400));
+    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == a).unwrap().lane;
+    t.drop_files(vec![rf64, bare], mid(lane));
+    let names: Vec<String> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| c.name.clone()).collect();
+    assert_eq!(names, ["Kick", "Snare"], "{}", t.app.status);
+}
+
+/// A file that is not audio, dropped with one that is, is named on the drop's last line with the
+/// engine's reason (never as a Maschine/Kontakt file), though the audio after it commits later.
+#[test]
+fn a_file_that_is_not_audio_in_a_drop_is_named_with_its_reason() {
+    let mut t = T::new();
+    let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    t.frames(3);
+    let notes = t.dir.join("notes.txt");
+    std::fs::write(&notes, b"not audio").unwrap();
+    let kick = t.sample("Kick.wav", 2_400);
+    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == a).unwrap().lane;
+    t.drop_files(vec![notes, kick], mid(lane));
+    assert_eq!(t.app.engine.session().track(TrackId(a)).unwrap().clips().len(), 1, "Kick lands");
+    let status = &t.app.status;
+    assert!(status.contains("notes.txt (") && !status.contains("Maschine"), "{status}");
+}

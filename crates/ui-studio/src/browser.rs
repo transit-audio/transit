@@ -630,8 +630,10 @@ impl StudioApp {
     /// Import audio files at `at`: onto `track` (an audio track), or onto a new track when
     /// `track` is `None`. Several files go one after another on the same track. The files are
     /// prepared in the background and committed in order, one undo step each (see `import`).
+    /// Maschine/Kontakt files are left out here; whether any other file is audio is the engine's
+    /// call (it reads a file by its contents), and a refusal gives its reason.
     pub fn import_files(&mut self, files: &[PathBuf], track: Option<TrackId>, at: Samples) -> Result<(), String> {
-        let (ok, closed): (Vec<&PathBuf>, Vec<&PathBuf>) = files.iter().partition(|p| kind_of(&p.to_string_lossy(), false) == Some(Kind::Audio));
+        let (ok, closed): (Vec<&PathBuf>, Vec<&PathBuf>) = files.iter().partition(|p| kind_of(&p.to_string_lossy(), false) != Some(Kind::Closed));
         if ok.is_empty() {
             let what = closed.first().map_or("Nothing to import".to_string(), |p| refusal(p));
             self.status = what.clone();
