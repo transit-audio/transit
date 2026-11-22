@@ -266,6 +266,11 @@ pub(crate) fn sort_events<T: Copy>(ev: &mut [T], key: impl Fn(&T) -> usize) {
 /// Test seam (feature `testing`, issue #210): the state of the shared building blocks.
 #[cfg(feature = "testing")]
 impl Smoother {
+    /// The complete state: the current value, the target and the coefficient. The coefficient is
+    /// written although, for every owner that calls `set_time` only from `prepare` with a constant
+    /// time (each slice 2 entry of #742), it is a function of the configuration: no transplant
+    /// between identically configured instances can tell it apart (its omission mutation stays
+    /// uncaught, by construction).
     pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
         let Smoother { cur, target, coef } = self;
         for v in [*cur, *target, *coef] {
