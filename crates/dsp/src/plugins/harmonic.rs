@@ -65,9 +65,13 @@ impl Saturator {
         self.bias.set(self.p.v(1) / 100.0 * 0.5);
         self.mix.set(self.p.v(3) / 100.0);
         self.out.set(db_to_gain(self.p.v(4)));
-        let f = self.p.v(2);
-        self.tone = if f >= 19_999.0 { 0.0 } else { (-std::f32::consts::TAU * f / self.sr).exp() };
+        self.tone = tone_coef(self.p.v(2), self.sr);
     }
+}
+
+/// The tone low-pass coefficient for a cutoff `f` at `sr` (0: fully open, the low-pass skipped).
+fn tone_coef(f: f32, sr: f32) -> f32 {
+    if f >= 19_999.0 { 0.0 } else { (-std::f32::consts::TAU * f / sr).exp() }
 }
 
 impl Plugin for Saturator {
@@ -120,4 +124,29 @@ impl Plugin for Saturator {
             }
         }
     }
+
+    /// The complete record (ADR 0029, #742 slice 6): `Saturator::record_state` in
+    /// `harmonic_record.rs`.
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// The Saturator's record is complete (ADR 0029, #742 section 13): the inventory is
+    /// `Saturator::record_state`, the witnesses are the transplant harness's.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
 }
+
+#[cfg(feature = "testing")]
+#[path = "harmonic_record.rs"]
+mod record;
+#[cfg(feature = "testing")]
+pub use record::SatObserved;

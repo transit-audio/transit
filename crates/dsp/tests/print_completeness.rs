@@ -29,7 +29,9 @@
 //! (slice 4) `print_completeness/time_stretcher.rs`; the built-in MIDI effects (slice 5)
 //! `print_completeness/midi_fx.rs`, with its own runner for the `MidiEffect` seam; Room and Plate
 //! Reverb, the Filter, the Compressor and the Expander/Gate, Gain and Trim (slice 2)
-//! `print_completeness/reverb.rs`, `filter.rs`, `dynamics.rs` and `utility.rs`.
+//! `print_completeness/reverb.rs`, `filter.rs`, `dynamics.rs` and `utility.rs`; EQ 7-Band and
+//! EQ 1-Band, the Saturator and the Tuner (slice 6) `print_completeness/eq.rs`, `saturator.rs` and
+//! `tuner.rs`.
 //! Every other entry's declaration is false; an entry turning true needs its witness set here, its
 //! inventory and its mutation record.
 //!
@@ -42,6 +44,8 @@ use transit_dsp::Plugin;
 
 #[path = "print_completeness/dynamics.rs"]
 mod dynamics;
+#[path = "print_completeness/eq.rs"]
+mod eq;
 #[path = "print_completeness/filter.rs"]
 mod filter;
 #[path = "print_completeness/macro_osc.rs"]
@@ -54,8 +58,12 @@ mod modal_voice;
 mod resonator;
 #[path = "print_completeness/reverb.rs"]
 mod reverb;
+#[path = "print_completeness/saturator.rs"]
+mod saturator;
 #[path = "print_completeness/time_stretcher.rs"]
 mod time_stretcher;
+#[path = "print_completeness/tuner.rs"]
+mod tuner;
 #[path = "print_completeness/utility.rs"]
 mod utility;
 use transit_state_record::{Config, Reader, Writer};
@@ -815,13 +823,32 @@ fn the_gain_and_trim_records_are_complete() {
     harness(&utility::trim()).unwrap_or_else(|e| panic!("{e}"));
 }
 
-/// Slice 2's record sizes (#742: the scheduling test digests every complete record at every block,
-/// so its cost scales with them): words per instance after `prepare`, at each rate, mono and
-/// stereo. The Filter's grows by a few words per pending event and held note. Reported, never
-/// asserted on.
+/// EQ 7-Band's and EQ 1-Band's declarations (ADR 0029, #742 slice 6): one type, two entries.
 #[test]
-fn slice_2_record_sizes_are_reported() {
-    for id in ["room_reverb", "plate_reverb", "filter", "compressor", "expander_gate", "gain", "trim"] {
+fn the_eq_records_are_complete() {
+    harness(&eq::eq7()).unwrap_or_else(|e| panic!("{e}"));
+    harness(&eq::eq1()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// The Saturator's declaration (ADR 0029, #742 slice 6).
+#[test]
+fn the_saturator_record_is_complete() {
+    harness(&saturator::entry()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// The Tuner's declaration (ADR 0029, #742 slice 6).
+#[test]
+fn the_tuner_record_is_complete() {
+    harness(&tuner::entry()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// Slice 2's and slice 6's record sizes (#742: the scheduling test digests every complete record at
+/// every block, so its cost scales with them): words per instance after `prepare`, at each rate,
+/// mono and stereo. The Filter's grows by a few words per pending event and held note. Reported,
+/// never asserted on.
+#[test]
+fn slice_2_and_6_record_sizes_are_reported() {
+    for id in ["room_reverb", "plate_reverb", "filter", "compressor", "expander_gate", "gain", "trim", "eq_7band", "eq_1band", "saturator", "tuner"] {
         for rate in RATES {
             for ch in CHANNELS {
                 let mut p = transit_dsp::create(id).unwrap();
@@ -879,14 +906,18 @@ fn the_harness_covers_every_entry_that_declares_a_complete_record() {
     }
     // The witness sets the harness has for registry entries.
     let witnessed: &[&str] = &[
+        "eq_1band",
+        "eq_7band",
         "filter",
         "compressor",
         "expander_gate",
         "room_reverb",
         "plate_reverb",
+        "saturator",
         "time_stretcher",
         "gain",
         "trim",
+        "tuner",
         "macro_oscillator",
         "resonator",
         "modal_voice",

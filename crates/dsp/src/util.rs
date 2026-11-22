@@ -319,3 +319,28 @@ impl DelayLine {
         self.buf.iter().fold(0.0f32, |m, x| m.max(x.abs()))
     }
 }
+
+#[cfg(feature = "testing")]
+impl DcBlocker {
+    /// The two memories (#742). The pole `r` is not written: it is set only by `new` and
+    /// `set_cutoff` from a cutoff and the rate, so each owner's inventory classifies it (for an
+    /// owner that sets it only from a constant cutoff at the session rate, configuration).
+    pub(crate) fn record_memories(&self, w: &mut transit_state_record::Writer<'_>) {
+        let DcBlocker { r: _, x1, y1 } = self;
+        w.f32(*x1);
+        w.f32(*y1);
+    }
+
+    /// Sets the memories [`DcBlocker::record_memories`] wrote.
+    pub(crate) fn restore_memories(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let DcBlocker { r: _, x1, y1 } = self;
+        *x1 = r.f32()?;
+        *y1 = r.f32()?;
+        Some(())
+    }
+
+    /// Either memory is nonzero (the transplant witnesses' observation).
+    pub(crate) fn holds_memory(&self) -> bool {
+        self.x1 != 0.0 || self.y1 != 0.0
+    }
+}

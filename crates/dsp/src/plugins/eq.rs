@@ -282,7 +282,31 @@ impl<const S: usize> Plugin for Eq<S> {
             pos += n;
         }
     }
+
+    /// The complete record (ADR 0029, #742 slice 6): `Eq::record_state` in `eq_record.rs`.
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// EQ 7-Band's and EQ 1-Band's records are complete (ADR 0029, #742 section 13): the inventory
+    /// is `Eq::record_state`, the witnesses are the transplant harness's.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
 }
+
+#[cfg(feature = "testing")]
+#[path = "eq_record.rs"]
+mod record;
+#[cfg(feature = "testing")]
+pub use record::EqObserved;
 
 fn response_from(
     info: &'static PluginInfo,

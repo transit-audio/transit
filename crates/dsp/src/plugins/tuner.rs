@@ -55,7 +55,29 @@ impl Plugin for Tuner {
     fn wants_sample_tap(&self) -> bool {
         true
     }
+
+    /// The complete record (ADR 0029, #742 slice 6): `Tuner::record_state` in `tuner_record.rs`.
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// The Tuner's record is complete (ADR 0029, #742 section 13): the inventory is
+    /// `Tuner::record_state`, the witnesses are the transplant harness's.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
 }
+
+#[cfg(feature = "testing")]
+#[path = "tuner_record.rs"]
+mod record;
 
 /// Under this RMS (-50 dBFS) the panel shows "no signal".
 pub const GATE_RMS: f32 = 0.003_162_277_6;
