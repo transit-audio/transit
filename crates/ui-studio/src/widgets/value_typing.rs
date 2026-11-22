@@ -26,7 +26,7 @@ pub enum Typing {
 /// raw events: a text field gives its focus up on Escape before a window's keys run, and the
 /// window may consume the key. The keys come from the shortcut table.
 pub fn escaped(ui: &egui::Ui) -> bool {
-    ui.input(|i| crate::shortcuts::hit_raw(i, crate::shortcuts::Action::ReadoutCancel))
+    crate::modal::reaches(ui) && ui.input(|i| crate::shortcuts::hit_raw(i, crate::shortcuts::Action::ReadoutCancel))
 }
 
 /// The typing's state after this frame for the field `resp` (a `TextEdit` drawn this frame).
@@ -44,7 +44,7 @@ pub fn typing(ui: &egui::Ui, resp: &egui::Response, opened: bool) -> Typing {
     if resp.has_focus() {
         Typing::Open
     } else if resp.lost_focus() {
-        Typing::Commit { enter: ui.input(|i| crate::shortcuts::hit_raw(i, crate::shortcuts::Action::ReadoutApply)) }
+        Typing::Commit { enter: crate::modal::reaches(ui) && ui.input(|i| crate::shortcuts::hit_raw(i, crate::shortcuts::Action::ReadoutApply)) }
     } else {
         Typing::Cancel
     }

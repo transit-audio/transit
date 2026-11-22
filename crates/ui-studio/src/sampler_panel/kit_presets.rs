@@ -275,7 +275,7 @@ fn list(ui: &mut Ui, kits: &[(String, PathBuf)], current: &str, can_save: bool, 
     ui.horizontal(|ui| {
         let field = ui.add(egui::TextEdit::singleline(name).hint_text("Save As…").desired_width(100.0));
         let can = can_save && !crate::presets::file_name(name).is_empty();
-        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let entered = field.lost_focus() && crate::modal::reaches(ui) && ui.input(|i| i.key_pressed(egui::Key::Enter));
         let save = ui.add_enabled(can, egui::Button::new("Save"));
         help::hover(ui, &save, Id::SamplerKitsSaveAs);
         if save.clicked() || (can && entered) {

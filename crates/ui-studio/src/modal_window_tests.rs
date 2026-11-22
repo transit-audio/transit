@@ -135,7 +135,7 @@ impl egui::Plugin for ScrimFill {
     fn on_end_pass(&mut self, ui: &mut egui::Ui) {
         let screen = Rect::from_min_size(Pos2::ZERO, SCREEN);
         let fill = ui.ctx().graphics(|g| {
-            g.get(theme::modal_scrim_layer()).and_then(|l| {
+            g.get(theme::modal_scrim_layer(DIALOG)).and_then(|l| {
                 l.all_entries().find_map(|c| match &c.shape {
                     egui::Shape::Rect(s) if s.rect.contains_rect(screen) => Some(s.fill),
                     _ => None,
@@ -168,7 +168,7 @@ fn a_window_behind_a_modal_takes_no_click_and_is_dimmed() {
     assert_eq!(r.seen.panel_clicks, 0, "the panel behind takes no click");
     // The scrim lies over the tool window and under the dialog, and paints `overlay` over the
     // whole content.
-    let (scrim, tool) = (r.layer_index(theme::modal_scrim_layer()), r.layer_index(crate::layout_gate::window(BEHIND)));
+    let (scrim, tool) = (r.layer_index(theme::modal_scrim_layer(DIALOG)), r.layer_index(crate::layout_gate::window(BEHIND)));
     let order = r.ctx.memory(|m| m.layer_ids().collect::<Vec<_>>());
     let (scrim, tool, dialog_at) =
         (scrim.expect("the scrim is drawn"), tool.expect("the tool window is drawn"), r.layer_index(dialog_layer()).unwrap());
@@ -288,7 +288,7 @@ fn the_transport_waits_behind_the_keyboard_shortcuts_window() {
         frame(&mut app, Vec::new());
     }
     assert!(app.shortcuts_window.open, "the window is up");
-    let space = |pressed| Event::Key { key: Key::Space, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+    let space = |pressed: bool| Event::Key { key: Key::Space, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
     frame(&mut app, vec![space(true)]);
     frame(&mut app, vec![space(false)]);
     for _ in 0..3 {
@@ -296,4 +296,108 @@ fn the_transport_waits_behind_the_keyboard_shortcuts_window() {
     }
     assert!(!app.is_playing(), "Space behind the dialog does not start the transport");
     assert!(app.shortcuts_window.open, "Space does not close the window either");
+}
+
+/// Escape closes the dialog when the keyboard is on one of its buttons (only a text field or an
+/// open list holds Escape back).
+#[test]
+fn escape_closes_the_modal_with_a_button_focused() {
+    let mut r = Rig::new(true);
+    let button = r.seen.dialog_buttons[0];
+    r.ctx.memory_mut(|m| m.request_focus(button));
+    r.frames(2);
+    assert_eq!(r.focused(), Some(button), "a dialog button has the keyboard");
+    r.key(Key::Escape, Modifiers::NONE);
+    assert!(!r.open, "Escape closes the dialog with a button focused");
+}
+
+/// The piano roll's edge readers (`edges`, `step_control_edges`) give nothing while a modal is up.
+#[test]
+fn the_edge_readers_give_nothing_under_a_modal() {
+    let r = Rig::new(true);
+    let space = |pressed: bool| Event::Key { key: Key::Space, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+    let enter = |pressed: bool| Event::Key { key: Key::Enter, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+    let n = |pressed: bool| Event::Key { key: Key::N, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+    let mut seen = (Vec::new(), Vec::new(), Vec::new());
+    let raw = egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SCREEN)),
+        time: Some(r.time + 1.0 / 60.0),
+        events: vec![n(true), enter(true), space(true)],
+        ..Default::default()
+    };
+    let _ = r.ctx.run_ui(raw, |ui| {
+        let ctx = ui.ctx().clone();
+        seen.0 = shortcuts::edges(&ctx, Action::NotesFocus);
+        seen.1 = shortcuts::step_control_edges(&ctx, Action::StepTieRest, false);
+        seen.2 = shortcuts::step_control_edges(&ctx, Action::StepTieRest, true);
+        let mut open = true;
+        let _ = theme::modal_window(&ctx, DIALOG).open(&mut open).show(&ctx, |ui| ui.label("A question"));
+    });
+    assert_eq!(seen, (Vec::new(), Vec::new(), Vec::new()), "N, Enter and Space give no edge under a modal");
+}
+
+const UPPER: &str = "Upper dialog";
+
+/// Two dialogs at once.
+struct Two {
+    ctx: egui::Context,
+    time: f64,
+    lower_open: bool,
+    upper_open: bool,
+    upper_on: bool,
+    lower_clicks: usize,
+    lower_button: Rect,
+}
+
+impl Two {
+    fn frame(&mut self, events: Vec<Event>) {
+        self.time += 1.0 / 60.0;
+        let raw = egui::RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SCREEN)), time: Some(self.time), events, ..Default::default() };
+        let (lower_open, upper_open, upper_on) = (&mut self.lower_open, &mut self.upper_open, self.upper_on);
+        let (clicks, button) = (&mut self.lower_clicks, &mut self.lower_button);
+        let mut out = self.ctx.run_ui(raw, |ui| {
+            let ctx = ui.ctx().clone();
+            if *lower_open {
+                let _ = theme::modal_window(&ctx, DIALOG).open(lower_open).show(&ctx, |ui| {
+                    ui.add_space(120.0);
+                    let b = ui.button("Lower button, wide enough to reach past the upper dialog");
+                    *button = b.rect;
+                    *clicks += usize::from(b.clicked());
+                });
+            }
+            if upper_on && *upper_open {
+                let _ = theme::modal_window(&ctx, UPPER).open(upper_open).show(&ctx, |ui| ui.label("Small"));
+            }
+        });
+        out.textures_delta.clear();
+    }
+}
+
+/// The upper dialog, opened later, covers the lower one with its own scrim; the lower one takes no
+/// click and no Escape while the upper one is up.
+#[test]
+fn a_dialog_over_another_covers_it_and_owns_the_keys() {
+    let ctx = egui::Context::default();
+    theme::apply_pinned(&ctx, egui::Theme::Dark);
+    let mut t = Two { ctx, time: 0.0, lower_open: true, upper_open: true, upper_on: false, lower_clicks: 0, lower_button: Rect::NOTHING };
+    for _ in 0..3 {
+        t.frame(Vec::new());
+    }
+    t.upper_on = true;
+    for _ in 0..3 {
+        t.frame(Vec::new());
+    }
+    let at = |l: egui::LayerId| t.ctx.memory(|m| m.layer_ids().position(|x| x == l)).expect("drawn");
+    let (lower, scrim, upper) = (at(theme::modal_window_layer(DIALOG)), at(theme::modal_scrim_layer(UPPER)), at(theme::modal_window_layer(UPPER)));
+    assert!(lower < scrim && scrim < upper, "lower dialog < upper scrim < upper dialog");
+    let press = |p, pressed| Event::PointerButton { pos: p, button: PointerButton::Primary, pressed, modifiers: Modifiers::NONE };
+    let p = t.lower_button.left_center() + vec2(4.0, 0.0);
+    t.frame(vec![Event::PointerMoved(p)]);
+    t.frame(vec![press(p, true)]);
+    t.frame(vec![press(p, false)]);
+    assert_eq!(t.lower_clicks, 0, "the covered dialog takes no click");
+    let esc = |pressed| Event::Key { key: Key::Escape, physical_key: None, pressed, repeat: false, modifiers: Modifiers::NONE };
+    t.frame(vec![esc(true)]);
+    t.frame(vec![esc(false)]);
+    assert!(!t.upper_open && t.lower_open, "one Escape closes the upper dialog only");
 }

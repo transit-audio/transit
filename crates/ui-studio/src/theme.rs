@@ -505,12 +505,16 @@ fn framed<'a>(ctx: &egui::Context, title: impl Into<String>, body: egui::Margin)
     crate::title_bar::Window::new(egui::Window::new(text).frame(frame).title_frame(title_frame))
 }
 
-/// The scrim's area id (one scrim; at most one dialog is up at a time).
-const MODAL_SCRIM: &str = "modal_scrim";
+/// The layer of the `theme::modal_window` dialog titled `title` (egui derives a window's id from
+/// `Atoms::text()`, an `Option`: the `Some` is part of the hash).
+pub(crate) fn modal_window_layer(title: &str) -> egui::LayerId {
+    egui::LayerId::new(egui::Order::Foreground, egui::Id::new(Some(title)))
+}
 
-/// The layer the dialogs' scrim paints on.
-pub(crate) fn modal_scrim_layer() -> egui::LayerId {
-    egui::LayerId::new(egui::Order::Foreground, egui::Id::new(MODAL_SCRIM))
+/// The layer the scrim of the dialog titled `title` paints on (one scrim per dialog, so two
+/// dialogs can be up at once, each over its own).
+pub(crate) fn modal_scrim_layer(title: &str) -> egui::LayerId {
+    egui::LayerId::new(egui::Order::Foreground, egui::Id::new(("modal_scrim", title)))
 }
 
 /// A dialog (the design language's modal rule; #244, #770): [`window`], centered and fixed, over
@@ -522,9 +526,12 @@ pub(crate) fn modal_scrim_layer() -> egui::LayerId {
 /// the dialog itself reaches only the dialog's own scroll areas. The scrim catches the clicks
 /// outside the dialog in a widget of its own (egui's hit test does not ask the modal layer), while
 /// its area only hovers, so a click on it never raises it over the dialog. Call it each frame the
-/// dialog is shown, as `window`.
+/// dialog is shown, as `window`. Each dialog has its own scrim, so a dialog over another covers
+/// it as well.
 pub fn modal_window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title_bar::Window<'a> {
-    egui::Area::new(egui::Id::new(MODAL_SCRIM))
+    let title: String = title.into();
+    let scrim = modal_scrim_layer(&title);
+    egui::Area::new(scrim.id)
         .order(egui::Order::Foreground)
         .fixed_pos(ctx.content_rect().min)
         // The area itself only hovers: a click on it would raise it over the dialog.
@@ -538,7 +545,8 @@ pub fn modal_window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate:
             // The chrome's scrim: a dialog dims what it covers (`overlay`), it does not lift.
             ui.painter().rect_filled(r, 0.0, TOKENS.overlay);
         });
-    window(ctx, title).modal()
+    let layer = modal_window_layer(&title);
+    window(ctx, title).modal(layer, scrim)
 }
 
 /// Install both themes' visuals and follow `appearance`'s effective choice (System: the OS

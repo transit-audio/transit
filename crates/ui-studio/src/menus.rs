@@ -845,7 +845,8 @@ pub fn recovery(app: &mut StudioApp, ctx: &egui::Context) {
         return;
     }
     let mut act: Option<(usize, bool)> = None;
-    let mut later = false;
+    // Escape is Later, the choice that answers nothing now (#770 F5).
+    let mut later = crate::modal::escape(ctx, crate::theme::modal_window_layer("Recover unsaved work"));
     crate::theme::modal_window(ctx, "Recover unsaved work").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(
         ctx,
         |ui| {

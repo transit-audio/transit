@@ -290,7 +290,9 @@ pub fn modal_with(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>, primary: Pri
     let inner_w = c::MODAL_WIDTH - 2.0 * c::MODAL_PADDING[1] - 2.0 * frame.stroke.width;
     let mut layout = ModalLayout { fill: t.surface_panel, edge: t.line_strong, scrim: t.overlay, ..ModalLayout::default() };
     let mut choice = None;
-    let shown = egui::Modal::new(id).frame(frame).backdrop_color(t.overlay).show(ctx, |ui| {
+    // Read before the body: whether this modal owns the keys this frame (#770).
+    let keys = modal_keys(ctx, id, primary == Primary::Enter);
+    let shown = raw_modal(ctx, id).frame(frame).show(ctx, |ui| {
         ui.set_width(inner_w);
         ui.spacing_mut().item_spacing.y = 6.0;
         let q = ui.label(egui::RichText::new(&ask.question).font(c::QUESTION_FONT.font_id(ui.ctx())).color(t.text));
@@ -333,20 +335,30 @@ pub fn modal_with(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>, primary: Pri
     });
     layout.rect = r4(shown.response.rect);
     ctx.data_mut(|d| d.insert_temp(modal_key(id), layout));
-    choice.or_else(|| modal_keys(ctx, primary == Primary::Enter))
+    choice.or(keys)
 }
 
-/// The modal's keys this frame: Enter is the default button (when there is one), Escape is Cancel.
-fn modal_keys(ctx: &egui::Context, default: bool) -> Option<Choice> {
-    use crate::shortcuts::{Action, hit};
-    let (enter, escape) = ctx.input(|i| (hit(i, Action::DialogConfirm), hit(i, Action::DialogCancel)));
-    if enter && default {
+/// The modal `id`'s keys this frame: Enter is the default button (when there is one), Escape is
+/// Cancel. Only the top modal reads them, and it consumes the key (#770: one press never answers
+/// a second dialog under it).
+fn modal_keys(ctx: &egui::Context, id: egui::Id, default: bool) -> Option<Choice> {
+    let layer = crate::modal::layer_of(id);
+    if default && crate::modal::enter(ctx, layer) {
         Some(Choice::Default)
-    } else if escape {
+    } else if crate::modal::escape(ctx, layer) {
         Some(Choice::Cancel)
     } else {
         None
     }
+}
+
+/// Every `egui::Modal` in the app starts here (a source-scan test forbids the plain constructor
+/// elsewhere, #770): the backdrop is the design language's scrim, `overlay`, and the frame is
+/// marked modal for the app's input handlers ([`crate::modal::mark`]). Its keys go through
+/// [`crate::modal::escape`] and [`crate::modal::enter`] with [`crate::modal::layer_of`]`(id)`.
+pub fn raw_modal(ctx: &egui::Context, id: egui::Id) -> egui::Modal {
+    crate::modal::mark(ctx);
+    egui::Modal::new(id).backdrop_color(TOKENS.overlay)
 }
 
 /// A tool window's footer: a 1 px `line` across the window above it, 10 px under the line, the

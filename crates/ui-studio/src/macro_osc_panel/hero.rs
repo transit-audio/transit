@@ -284,7 +284,7 @@ fn picker(app: &mut StudioApp, ui: &mut Ui, dev: Dev, rect: Rect, model: usize, 
         app.builtin_editor.devices.picker = None;
     }
     let focused = app.builtin_editor.devices.picker == Some(dev.uid());
-    if focused && !ui.ctx().egui_wants_keyboard_input() {
+    if focused && !ui.ctx().egui_wants_keyboard_input() && !crate::modal::up(ui.ctx()) {
         for key in [egui::Key::ArrowLeft, egui::Key::ArrowRight, egui::Key::ArrowUp, egui::Key::ArrowDown] {
             if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, key))
                 && let Some(m) = model_step(new.unwrap_or(model), key)

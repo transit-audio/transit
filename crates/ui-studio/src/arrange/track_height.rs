@@ -120,7 +120,7 @@ fn notches(remainder: &mut f64, unit: egui::MouseWheelUnit, delta: f32) -> i32 {
 }
 
 fn modal(app: &StudioApp, ctx: &egui::Context) -> bool {
-    app.dialog.is_some() || ctx.memory(|m| m.top_modal_layer().is_some())
+    app.dialog.is_some() || crate::modal::up(ctx)
 }
 
 /// Runs before other UI handlers. Queries and idle frames leave a wheel gesture intact.

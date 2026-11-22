@@ -53,8 +53,9 @@ fn with_dev(app: &mut StudioApp, key: (transit_model::TrackId, usize), f: impl F
 }
 
 /// The remove question, while one is open: drawn every frame until answered; it goes when its
-/// window closes or the view changes.
-fn confirm(app: &mut StudioApp, ctx: &egui::Context) {
+/// window closes or the view changes. The frame draws it before the keys of everything behind a
+/// dialog, which wait while it is up (#770).
+pub(crate) fn confirm(app: &mut StudioApp, ctx: &egui::Context) {
     let Some(uid) = app.builtin_editor.devices.focused else { return };
     let Some(zone) = app.builtin_editor.devices.sampler.views.get(&uid).and_then(|v| v.instrument.confirm) else { return };
     let key = window_of(app, uid);
@@ -89,9 +90,8 @@ fn confirm(app: &mut StudioApp, ctx: &egui::Context) {
 /// The view's keys (see the module notes). Runs before the device window's Escape and the
 /// arrangement's keys.
 pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
-    confirm(app, ctx);
     let Some(uid) = super::super::key_owner(app) else { return };
-    let modal = ctx.memory(|m| m.top_modal_layer().is_some());
+    let modal = crate::modal::up(ctx);
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || modal {
         return;
     }

@@ -35,6 +35,12 @@ impl T {
 
     /// [`T::stuck`] with the plug-in called `name`, at interface scale `zoom`.
     fn stuck_named(name: &'static str, zoom: f32) -> T {
+        T::stuck_with(name, zoom, |_| {})
+    }
+
+    /// [`T::stuck_named`], with `before` run on the app before its first frame (a dialog it has open
+    /// when the plug-in stops answering).
+    fn stuck_with(name: &'static str, zoom: f32, before: impl FnOnce(&mut StudioApp)) -> T {
         let engine = transit_engine::Engine::default();
         let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
         let timeout = Duration::from_millis(200);
@@ -48,6 +54,7 @@ impl T {
         });
         let mut app = StudioApp::new(engine, Some(player), Services::default());
         app.ui.ui_zoom = zoom;
+        before(&mut app);
         let (release, gate) = mpsc::channel::<()>();
         let _hung = host.submit(move |ctx| {
             ctx.name_job(name);
@@ -150,7 +157,7 @@ fn later_hides_the_message_for_that_thread_and_save_now_saves() {
 /// plug-in name long enough to wrap every line of the message and the Give up label.
 #[test]
 fn the_message_keeps_its_buttons_whole_with_the_longest_plug_in_name() {
-    let layer = crate::layout_gate::window("A plug-in is not responding");
+    let layer = crate::layout_gate::modal_window(crate::host_hang::TITLE);
     for zoom in crate::layout_gate::SCALES {
         let name = "Guitar Rig With A Very Long Plug-in Name That Wraps Over Several Lines Of The Message 7";
         let mut t = T::stuck_named(name, zoom);
@@ -160,4 +167,30 @@ fn the_message_keeps_its_buttons_whole_with_the_longest_plug_in_name() {
         assert!(t.app.host_hang.layout.give_up_label.contains(name));
         crate::layout_gate::assert_clean(&t.ctx, layer);
     }
+}
+
+/// #770 round 2: the message is a modal above any other dialog. With About open when the plug-in
+/// stops answering, its buttons work; Later returns to About, which still holds the app.
+#[test]
+fn the_message_sits_over_an_open_dialog_and_its_buttons_work() {
+    let mut t = T::stuck_with("Guitar Rig 7", 1.0, |app| app.about.open = true);
+    assert!(t.app.about.open, "About is open under the message");
+    let top = crate::theme::modal_window_layer(crate::host_hang::TITLE);
+    assert!(crate::modal::is_top(&t.ctx, top), "the message is the top dialog");
+    let later = t.app.host_hang.layout.later.expect("Later");
+    t.click(later);
+    assert!(t.app.host_hang.layout.lines.is_empty(), "Later, clicked over About, hides the message");
+    assert!(t.app.about.open, "About is still open");
+    t.frames(3);
+    assert!(crate::modal::is_top(&t.ctx, crate::theme::modal_window_layer("About transit")), "About holds the app again");
+}
+
+/// Give up works over an open dialog too.
+#[test]
+fn give_up_works_over_an_open_dialog() {
+    let mut t = T::stuck_with("Guitar Rig 7", 1.0, |app| app.about.open = true);
+    let give_up = t.app.host_hang.layout.give_up.expect("Give up");
+    t.click(give_up);
+    assert_eq!(t.host.given_up(), 1, "Give up, clicked over About, gave up on the thread");
+    assert!(t.app.about.open);
 }

@@ -135,6 +135,20 @@ impl T {
         self.send("ui.click", json!({"x": x, "y": y, "button": if right { "right" } else { "left" }}));
     }
 
+    /// The not-responding message is a modal over everything (#770): Later answers it, so the
+    /// card, the mixer row and the status line behind it take clicks again. One Later per stuck
+    /// host thread: the message names one thread at a time.
+    fn later(&mut self) {
+        let mut answered = 0;
+        while let Some(later) = self.app.host_hang.layout.later {
+            assert!(answered < 4, "the message keeps coming back: {:?}", self.app.host_hang.layout.lines);
+            self.click(later, false);
+            self.frames(3);
+            answered += 1;
+        }
+        assert!(answered > 0, "the not-responding message showed, with Later");
+    }
+
     /// A new track of `kind`, focused (its device chain shows).
     fn track(&mut self, kind: &str) -> TrackId {
         let r = self.app.run("track.new", json!({"kind": kind})).unwrap();
@@ -276,6 +290,7 @@ fn a_not_responding_slot_offers_retry_on_the_card_and_the_mixer_row() {
     assert!(t.retry_glyph_in(row.retry), "the row's Retry button is the painted circular arrow");
     let history = |t: &mut T| t.app.engine.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len();
     let undo = history(&mut t);
+    t.later();
 
     // The card's Retry button: made again with its stored state.
     t.click(card.retry_button, false);
@@ -305,6 +320,7 @@ fn retry_all_in_the_status_line_makes_every_not_responding_plug_in_again() {
     t.host_plugin(b, None, &[6]);
     assert!(t.frames_until(Duration::from_secs(10), |t| t.stuck(a, SLOT) && t.stuck(b, SLOT)));
     t.frames(2);
+    t.later();
     let r = t.app.retry_all_rect.expect("Retry all");
     t.click([r.min.x + 6.0, r.min.y, r.min.x + 6.0, r.max.y], false);
     assert!(t.frames_until(Duration::from_secs(10), |t| t.bound(a, SLOT) && t.bound(b, SLOT)), "both were made again");

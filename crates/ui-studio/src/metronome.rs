@@ -177,7 +177,8 @@ fn popup(app: &mut StudioApp, ctx: &egui::Context, field: Rect) {
     // A press outside the popup and the button, or Escape, closes it.
     let outside =
         ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|p| !area.response.rect.contains(p) && !field.contains(p)));
-    if outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+    // Not while a dialog holds the app (#770): its Escape and its clicks are its own.
+    if !crate::modal::up(ctx) && (outside || ctx.input(|i| i.key_pressed(egui::Key::Escape))) {
         app.metro_popup = false;
     }
 }

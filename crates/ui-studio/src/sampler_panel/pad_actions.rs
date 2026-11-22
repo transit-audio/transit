@@ -82,7 +82,7 @@ pub(crate) fn drag_keys(app: &mut StudioApp, ctx: &egui::Context) {
         return;
     }
     let Some(uid) = app.builtin_editor.devices.focused else { return };
-    let modal = ctx.memory(|m| m.top_modal_layer().is_some());
+    let modal = crate::modal::up(ctx);
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || modal {
         return;
     }

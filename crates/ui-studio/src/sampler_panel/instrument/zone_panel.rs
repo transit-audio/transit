@@ -365,7 +365,7 @@ pub(crate) fn show(
         *text = Some(Draft { zone: z.zone, text: typing.clone(), error: error && !resp.changed() });
     }
     if resp.lost_focus() && had {
-        if !kept || ui.input(|i| crate::shortcuts::hit(i, crate::shortcuts::Action::CloseEditor)) {
+        if !kept || (crate::modal::reaches(ui) && ui.input(|i| crate::shortcuts::hit(i, crate::shortcuts::Action::CloseEditor))) {
             // Escape gives the typing up: the field reads the stored value again.
             *text = None;
         } else if let Some(d) = text.take() {

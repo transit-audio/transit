@@ -781,7 +781,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     app.audio_devices.io_editor = editor;
     // Escape discards the pending choices, unless a list is open (it closes that first).
     let popup_open = egui::Popup::is_any_open(ctx);
-    let escape = !popup_open && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    // Not while a dialog holds the app (#770): Escape is the dialog's.
+    let escape = !popup_open
+        && !crate::modal::up(ctx)
+        && !ctx.egui_wants_keyboard_input()
+        && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     if revert || (escape && app.audio_devices.draft != app.ui.audio) {
         app.audio_devices.draft = app.ui.audio.clone();
     }

@@ -779,3 +779,22 @@ fn the_hidden_tracks_form_keeps_its_buttons_whole_with_many_long_names() {
         crate::layout_gate::assert_clean(&t.ctx, layer);
     }
 }
+
+/// One Escape closes the open destination list or the dialog, never both (#770 round 2).
+#[test]
+fn escape_with_the_destination_list_open_closes_the_list_only() {
+    let mut t = T::new();
+    let source = t.track("Source", "audio");
+    let _dest = t.track("Print", "audio");
+    t.app.focus_header(source, false);
+    t.app.open_bounce_in_place();
+    t.frames();
+    t.click(t.app.bounce_place.layout.existing_track);
+    t.click(t.app.bounce_place.layout.dropdown);
+    assert!(egui::Popup::is_any_open(&t.ctx), "the destination list is open");
+    t.key("Escape");
+    assert!(!egui::Popup::is_any_open(&t.ctx), "Escape closed the list");
+    assert!(matches!(t.app.dialog, Some(crate::Dialog::BounceInPlace)), "and only the list: the dialog stays");
+    t.key("Escape");
+    assert!(t.app.dialog.is_none(), "the next Escape closes the dialog");
+}

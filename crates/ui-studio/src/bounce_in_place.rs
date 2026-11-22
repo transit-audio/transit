@@ -2,7 +2,6 @@
 
 use crate::arrange::{R4, r4};
 use crate::help::{Id, hover};
-use crate::shortcuts::{Action, hit};
 use crate::{Dialog, StudioApp};
 use serde_json::{Value, json};
 use transit_model::{ClipId, TrackId, TrackKind};
@@ -322,7 +321,10 @@ fn bounce_form(app: &mut StudioApp, ctx: &egui::Context) {
     let session = app.engine.session_arc();
     let mut f = app.bounce_place.clone();
     let mut layout = Layout::default();
-    let (mut go, mut cancel) = (false, ctx.input(|i| hit(i, Action::DialogCancel)));
+    // Escape closes through the window's close flag (the shared modal rule: the top dialog only,
+    // and not while the destination list is open); Enter is read before the body, as Escape is.
+    let (mut go, mut cancel) = (false, false);
+    let enter = crate::modal::enter(ctx, crate::theme::modal_window_layer("Bounce in Place"));
     let mut open = true;
     let id = egui::Id::new("bounce_in_place");
     let response = crate::theme::modal_window(ctx, "Bounce in Place")
@@ -406,8 +408,8 @@ fn bounce_form(app: &mut StudioApp, ctx: &egui::Context) {
                 layout.bounce = bl.rect;
                 layout.bounce_button = bl;
                 hover(ui, &b, Id::BouncePlaceApply);
-                // Let an open dropdown consume Enter to select an item first.
-                go = b.clicked() || (ready && !egui::Popup::is_any_open(ctx) && ui.input(|i| hit(i, Action::DialogConfirm)));
+                // An open dropdown keeps Enter to select an item first (`modal::held`).
+                go = b.clicked() || (ready && enter);
                 let (b, cl) = crate::chrome::button(ui, "Cancel");
                 layout.cancel = cl.rect;
                 layout.cancel_button = cl;
@@ -430,9 +432,9 @@ fn bounce_form(app: &mut StudioApp, ctx: &egui::Context) {
 fn hidden_form(app: &mut StudioApp, ctx: &egui::Context) {
     let hidden: Vec<_> = app.engine.session().tracks.iter().filter(|t| t.hidden).map(|t| (t.id, t.name.clone())).collect();
     let mut show = Vec::new();
-    let mut close = ctx.input(|i| hit(i, Action::DialogCancel));
+    let mut close = crate::modal::escape(ctx, crate::modal::layer_of(egui::Id::new("hidden_tracks")));
     let mut layout = Layout::default();
-    let response = egui::Modal::new(egui::Id::new("hidden_tracks")).show(ctx, |ui| {
+    let response = crate::chrome::raw_modal(ctx, egui::Id::new("hidden_tracks")).show(ctx, |ui| {
         ui.set_width(360.0);
         ui.heading("Show Hidden Tracks");
         egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {

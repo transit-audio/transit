@@ -512,6 +512,41 @@ fn escape_reverts_the_draft_but_not_while_a_text_field_has_focus() {
     assert_ne!(t.app.audio_devices.draft, t.app.ui.audio, "Escape in a focused field leaves the draft");
 }
 
+/// #770 round 2: About over pending choices: Escape closes About only, and the draft survives.
+#[test]
+fn escape_closes_about_over_pending_choices_and_keeps_the_draft() {
+    let mut t = T::new();
+    t.control("audio.fake_devices", two_backends()).unwrap();
+    t.open_window();
+    t.pick("system", "JACK");
+    assert_ne!(t.app.audio_devices.draft, t.app.ui.audio, "a pending choice");
+    t.app.about.open = true;
+    t.frames(3);
+    t.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE });
+    t.frames(2);
+    assert!(!t.app.about.open, "Escape closed About");
+    assert_ne!(t.app.audio_devices.draft, t.app.ui.audio, "and the pending choice survives");
+}
+
+/// #770 round 2: Escape that a dialog's own field gives up (it ends the typing, the dialog keeps
+/// it) never reaches the Audio Devices window behind: the pending choice survives.
+#[test]
+fn escape_ending_a_dialog_field_keeps_the_pending_choices_behind_it() {
+    let mut t = T::new();
+    t.control("audio.fake_devices", two_backends()).unwrap();
+    t.open_window();
+    t.pick("system", "JACK");
+    t.app.ui.show_shortcuts = true;
+    t.frames(3);
+    let f = t.app.shortcuts_window.filter;
+    t.click(((f[0] + f[2]) / 2.0, (f[1] + f[3]) / 2.0));
+    assert!(t.ctx.text_edit_focused(), "the shortcuts filter has the keyboard");
+    t.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE });
+    t.frames(2);
+    assert!(t.app.shortcuts_window.open, "Escape ended the typing; the dialog stays");
+    assert_ne!(t.app.audio_devices.draft, t.app.ui.audio, "and the pending choice behind it survives");
+}
+
 /// Copy diagnostics (#114): the button is in the status area of every section, copies the report
 /// built from what the window shows, and says "Copied" for two seconds.
 #[test]

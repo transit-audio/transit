@@ -1051,7 +1051,7 @@ fn locations_bar(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, area: Rect
         let fresp = crate::chrome::field(ui, |ui| {
             ui.put(field, egui::TextEdit::singleline(&mut text).id(id).hint_text("Folder path, e.g. D:\\").desired_width(field.width()))
         });
-        let enter = fresp.lost_focus() && ui.input(|i| crate::shortcuts::hit(i, A::BrowserAddFolder));
+        let enter = fresp.lost_focus() && crate::modal::reaches(ui) && ui.input(|i| crate::shortcuts::hit(i, A::BrowserAddFolder));
         let oresp = ui.interact(ok, ui.id().with("browser_add_ok"), Sense::click());
         p.rect_filled(ok, crate::theme::RADIUS, if oresp.hovered() { TOKENS.button_hover } else { TOKENS.button });
         p.text(ok.center(), Align2::CENTER_CENTER, "Add", FontId::proportional(11.5), TOKENS.text);
