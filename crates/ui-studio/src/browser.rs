@@ -677,7 +677,9 @@ impl StudioApp {
         }
         let m = &self.mixer.layout;
         if m.visible {
-            for s in m.strips.iter().chain(m.master.iter()) {
+            // The Main strip of a session with no Master track is the main bus, no track (its
+            // `track` is 0, an id no track has): no target, as the mixer's empty area.
+            for s in m.strips.iter().chain(m.master.iter()).filter(|s| s.track != 0) {
                 if rect(s.rect).contains(pos) {
                     return Some((Target::Track { track: TrackId(s.track), at: None }, s.rect));
                 }

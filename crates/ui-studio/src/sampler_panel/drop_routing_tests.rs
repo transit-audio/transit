@@ -374,7 +374,8 @@ fn a_drop_at_the_cursor_lands_on_the_cursors_track_not_the_focused_one() {
 }
 
 /// When the last file of a drop fails too, the drop's last line still names every file that
-/// failed, and says that the others imported; a lone failure keeps its own line.
+/// failed, and says where the others were imported, as it does when the failure comes first; a
+/// lone failure keeps its own line.
 #[test]
 fn a_drop_whose_last_file_fails_names_every_failure() {
     let mut t = T::new();
@@ -391,7 +392,11 @@ fn a_drop_whose_last_file_fails_names_every_failure() {
     assert!(t.app.status.starts_with("2 of 2 could not be prepared: a.txt (") && t.app.status.contains("b.txt"), "{}", t.app.status);
     let (kick, notes) = (t.sample("Kick.wav", 2_400), text(&t, "notes.txt"));
     t.drop_files(vec![kick, notes], lane);
-    assert!(t.app.status.starts_with("1 of 2 could not be prepared: notes.txt ("), "{}", t.app.status);
+    assert!(
+        t.app.status.starts_with("Imported 1 of 2 files to Audio 1 at ") && t.app.status.contains("; 1 of 2 could not be prepared: notes.txt ("),
+        "{}",
+        t.app.status
+    );
     let lone = text(&t, "c.txt");
     t.drop_files(vec![lone], lane);
     assert!(t.app.status.starts_with("Couldn't import c.txt: "), "{}", t.app.status);
@@ -406,4 +411,21 @@ fn a_drop_on_a_deleted_track_says_so() {
     let r = t.app.import_files(&[one], Some(TrackId(9_999)), 0);
     assert!(r.is_err() && t.app.status == "The track was deleted: drop the files again", "{}", t.app.status);
     assert!(!t.app.imports.active());
+}
+
+/// The mixer's Main strip with no Master track is the main bus, no track: a file dropped there
+/// lands at the cursor, as anywhere else no track is, never refused as a deleted track.
+#[test]
+fn a_drop_on_the_main_strip_with_no_master_track_lands_at_the_cursor() {
+    let mut t = T::new();
+    let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    t.app.set_cursor(48_000, Some(TrackId(a)));
+    t.app.ui.show_mixer = true;
+    t.frames(3);
+    assert!(t.app.engine.session().tracks.iter().all(|tr| tr.kind != transit_model::TrackKind::Master));
+    let main = t.app.mixer.layout.master.clone().expect("the Main strip is drawn");
+    let one = t.sample("One.wav", 2_400);
+    t.drop_file(&one, mid(main.rect));
+    let starts: Vec<i64> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| c.start).collect();
+    assert_eq!(starts, [48_000], "{}", t.app.status);
 }

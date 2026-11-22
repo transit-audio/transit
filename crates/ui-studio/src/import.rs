@@ -170,6 +170,26 @@ impl StudioApp {
         self.forget_batches();
     }
 
+    /// A drop's last line once its last file is done: what was imported where (`one`: the file's
+    /// name when the drop queued one), the Maschine/Kontakt files left out, and the files that
+    /// could not be prepared, with the first reason.
+    fn imported_line(&self, b: &Batch, one: &str) -> String {
+        let what = match (b.files, b.committed) {
+            (1, _) => one.to_string(),
+            (f, c) if f == c => format!("{c} files"),
+            (f, c) => format!("{c} of {f} files"),
+        };
+        let name = b.track.and_then(|t| self.engine.session().track(t)).map_or_else(String::new, |t| t.name.clone());
+        let mut msg = format!("Imported {what} to {name} at {}", crate::browser::bbs(self, b.at));
+        if b.closed > 0 {
+            msg.push_str(&format!(" ({} Maschine/Kontakt file{} skipped: not supported)", b.closed, if b.closed == 1 { "" } else { "s" }));
+        }
+        if !b.refused.is_empty() {
+            msg.push_str(&format!("; {}", not_prepared(&b.refused, b.asked)));
+        }
+        msg
+    }
+
     /// Commit the oldest item: at its drop's track and next position.
     fn commit_front(&mut self) {
         let it = self.imports.items[0].clone();
@@ -207,24 +227,7 @@ impl StudioApp {
                 self.imports.batches.insert(it.batch, b.clone());
                 let left = self.imports.items.iter().any(|i| i.batch == it.batch);
                 if !left {
-                    let what = match (b.files, b.committed) {
-                        (1, _) => it.name.clone(),
-                        (f, c) if f == c => format!("{c} files"),
-                        (f, c) => format!("{c} of {f} files"),
-                    };
-                    let name = b.track.and_then(|t| self.engine.session().track(t)).map_or_else(String::new, |t| t.name.clone());
-                    let mut msg = format!("Imported {what} to {name} at {}", crate::browser::bbs(self, b.at));
-                    if b.closed > 0 {
-                        msg.push_str(&format!(
-                            " ({} Maschine/Kontakt file{} skipped: not supported)",
-                            b.closed,
-                            if b.closed == 1 { "" } else { "s" }
-                        ));
-                    }
-                    if !b.refused.is_empty() {
-                        msg.push_str(&format!("; {}", not_prepared(&b.refused, b.asked)));
-                    }
-                    self.status = msg;
+                    self.status = self.imported_line(&b, &it.name);
                     self.forget_batches();
                 }
                 if let Some(t) = b.track {
@@ -287,7 +290,10 @@ pub fn step(app: &mut StudioApp, ctx: &egui::Context) {
                     let last = !app.imports.items.iter().skip(1).any(|i| i.batch == batch);
                     if let Some(b) = app.imports.batches.get_mut(&batch) {
                         b.refused.push((name, why));
-                        if last && (b.refused.len() > 1 || b.committed > 0) {
+                        let b = b.clone();
+                        if last && b.committed > 0 {
+                            msg = app.imported_line(&b, "");
+                        } else if last && b.refused.len() > 1 {
                             msg = not_prepared(&b.refused, b.asked);
                         }
                     }
