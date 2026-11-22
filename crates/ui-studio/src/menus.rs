@@ -906,7 +906,6 @@ pub fn shortcuts_window(app: &mut StudioApp, ctx: &egui::Context) {
         .collapsible(false)
         .resizable(true)
         .default_size([560.0, 520.0])
-        .default_pos(ctx.content_rect().center() - egui::vec2(280.0, 260.0))
         .show(ctx, |ui| {
             let resp = ui
                 .horizontal(|ui| {

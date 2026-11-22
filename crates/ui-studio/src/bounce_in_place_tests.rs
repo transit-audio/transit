@@ -588,7 +588,7 @@ const LONG_NAME: &str = "A very long track name that runs past any sensible widt
 /// window, at 1x and 1.5x.
 #[test]
 fn the_bounce_in_place_form_keeps_its_buttons_whole_with_the_longest_content() {
-    let layer = crate::layout_gate::window("Bounce in Place");
+    let layer = crate::layout_gate::modal_window("Bounce in Place");
     for zoom in crate::layout_gate::SCALES {
         let mut t = T::new();
         crate::layout_gate::watch(&t.ctx, layer);
@@ -649,7 +649,7 @@ fn the_range_line_reads_in_bars_and_beats_with_the_pre_count_counting_down() {
 /// left of it, and a line under Source saying what the choice does.
 #[test]
 fn the_form_is_a_titled_window_with_sections_and_the_default_button_at_the_bottom_right() {
-    let layer = crate::layout_gate::window("Bounce in Place");
+    let layer = crate::layout_gate::modal_window("Bounce in Place");
     let mut t = T::new();
     t.source();
     t.app.open_bounce_in_place();

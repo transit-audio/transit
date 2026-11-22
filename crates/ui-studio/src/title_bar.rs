@@ -24,11 +24,26 @@ pub struct Window<'a> {
     closable: bool,
     /// The body's button padding when it differs from the theme's (device windows, #326).
     button_padding: Option<Vec2>,
+    /// The close flag [`Window::open`] was given (it reaches egui at [`Window::show`]).
+    open: Option<&'a mut bool>,
+    /// A dialog ([`theme::modal_window`], #770): see [`Window::modal`].
+    modal: bool,
 }
 
 impl<'a> Window<'a> {
     pub(crate) fn new(inner: egui::Window<'a>) -> Self {
-        Window { inner, collapsible: true, closable: false, button_padding: None }
+        Window { inner, collapsible: true, closable: false, button_padding: None, open: None, modal: false }
+    }
+
+    /// The window is a dialog (#770; the design language's modal rule): it sits centered and fixed
+    /// over the `overlay` scrim in the foreground order, above every panel and every other window;
+    /// it is egui's modal layer, so nothing behind it takes the pointer or the keyboard focus (Tab
+    /// stays inside it, a field behind gives its focus up) and the app's shortcuts wait
+    /// (`shortcuts::pressed`); and Escape closes it when it has a close button, unless a value is
+    /// being typed or a list is open (those keep Escape).
+    pub(crate) fn modal(mut self) -> Self {
+        self.modal = true;
+        self
     }
 
     /// The body lays its buttons out with `padding` instead of the theme's.
@@ -43,7 +58,7 @@ impl<'a> Window<'a> {
     }
 
     pub fn open(mut self, open: &'a mut bool) -> Self {
-        self.inner = self.inner.open(open);
+        self.open = Some(open);
         self.closable = true;
         self
     }
@@ -118,15 +133,43 @@ impl<'a> Window<'a> {
 
     /// Show the window, then swap egui's control shapes for icons.
     pub fn show<R>(self, ctx: &Context, add_contents: impl FnOnce(&mut egui::Ui) -> R) -> Option<InnerResponse<Option<R>>> {
-        let (collapsible, closable, padding) = (self.collapsible, self.closable, self.button_padding);
-        let shown = self.inner.show(ctx, |ui| {
+        let Window { mut inner, collapsible, closable, button_padding: padding, open, modal } = self;
+        if modal {
+            inner = inner.order(egui::Order::Foreground).anchor(Align2::CENTER_CENTER, Vec2::ZERO);
+        }
+        if let Some(open) = open {
+            // Read before the body runs: a field that gives its focus up on this Escape, or a list
+            // that closes on it, keeps the key.
+            let keys_free = !ctx.egui_wants_keyboard_input() && !egui::Popup::is_any_open(ctx);
+            if modal && keys_free && ctx.input(|i| crate::shortcuts::hit(i, crate::shortcuts::Action::DialogCancel)) {
+                *open = false;
+            }
+            inner = inner.open(open);
+        }
+        let shown = inner.show(ctx, |ui| {
             if let Some(p) = padding {
                 ui.spacing_mut().button_padding = p;
             }
             add_contents(ui)
         });
         if let Some(r) = &shown {
-            swap_controls(ctx, r.response.layer_id, r.response.rect, r.inner.is_some(), collapsible, closable);
+            let layer = r.response.layer_id;
+            if modal {
+                ctx.memory_mut(|m| {
+                    m.set_modal_layer(layer);
+                    // The scrim is shown first each frame and so starts below the dialog, and its
+                    // area only hovers, so a click does not raise it. This keeps it below whatever
+                    // happens.
+                    let scrim = crate::theme::modal_scrim_layer();
+                    let at = |l: LayerId| m.layer_ids().position(|x| x == l);
+                    if let (Some(s), Some(d)) = (at(scrim), at(layer))
+                        && s > d
+                    {
+                        m.areas_mut().move_to_top(layer);
+                    }
+                });
+            }
+            swap_controls(ctx, layer, r.response.rect, r.inner.is_some(), collapsible, closable);
         }
         shown
     }

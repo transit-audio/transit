@@ -505,25 +505,40 @@ fn framed<'a>(ctx: &egui::Context, title: impl Into<String>, body: egui::Margin)
     crate::title_bar::Window::new(egui::Window::new(text).frame(frame).title_frame(title_frame))
 }
 
-/// A dialog: [`window`] over a full-screen scrim that takes the pointer (#244). The scrim is an
-/// invisible, interactable `Area` in the background order (below every window, above the panels),
-/// so the views behind the dialog see another layer under the pointer: their wheel, zoom and drag
-/// handling asks `Ui::rect_contains_pointer`, which is false there, and clicks cannot reach them
-/// either. A wheel over the dialog itself reaches only the dialog's own scroll areas. Call it each
-/// frame the dialog is shown, as `window`.
+/// The scrim's area id (one scrim; at most one dialog is up at a time).
+const MODAL_SCRIM: &str = "modal_scrim";
+
+/// The layer the dialogs' scrim paints on.
+pub(crate) fn modal_scrim_layer() -> egui::LayerId {
+    egui::LayerId::new(egui::Order::Foreground, egui::Id::new(MODAL_SCRIM))
+}
+
+/// A dialog (the design language's modal rule; #244, #770): [`window`], centered and fixed, over
+/// the `overlay` scrim. The scrim covers the main window's whole content in the foreground order,
+/// so it dims every panel and every other window behind the dialog; the dialog is egui's modal
+/// layer ([`crate::title_bar::Window::modal`]), so the views behind it see the dialog's layer under
+/// the pointer (their wheel, zoom and drag handling asks `Ui::rect_contains_pointer`, which is
+/// false there), take no click and no keyboard focus, and the app's shortcuts wait. A wheel over
+/// the dialog itself reaches only the dialog's own scroll areas. The scrim catches the clicks
+/// outside the dialog in a widget of its own (egui's hit test does not ask the modal layer), while
+/// its area only hovers, so a click on it never raises it over the dialog. Call it each frame the
+/// dialog is shown, as `window`.
 pub fn modal_window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title_bar::Window<'a> {
-    egui::Area::new(egui::Id::new("modal_scrim"))
-        .order(egui::Order::Background)
+    egui::Area::new(egui::Id::new(MODAL_SCRIM))
+        .order(egui::Order::Foreground)
         .fixed_pos(ctx.content_rect().min)
-        .sense(egui::Sense::click_and_drag())
+        // The area itself only hovers: a click on it would raise it over the dialog.
+        .sense(egui::Sense::hover())
         .show(ctx, |ui| {
             let r = ctx.content_rect();
             ui.set_clip_rect(r);
+            // egui's hit test ignores the modal layer: this widget, above every panel and window,
+            // is what catches a click or a drag outside the dialog.
             ui.allocate_rect(r, egui::Sense::click_and_drag());
             // The chrome's scrim: a dialog dims what it covers (`overlay`), it does not lift.
             ui.painter().rect_filled(r, 0.0, TOKENS.overlay);
         });
-    window(ctx, title)
+    window(ctx, title).modal()
 }
 
 /// Install both themes' visuals and follow `appearance`'s effective choice (System: the OS

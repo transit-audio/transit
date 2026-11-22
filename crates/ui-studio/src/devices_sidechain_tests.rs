@@ -165,7 +165,7 @@ mod hardware_inserts {
     /// renamed to long names, and a measured pair.
     #[test]
     fn the_picker_keeps_its_buttons_whole_with_the_longest_path_names() {
-        let layer = crate::layout_gate::window("Hardware Insert");
+        let layer = crate::layout_gate::modal_window("Hardware Insert");
         for zoom in crate::layout_gate::SCALES {
             let (mut app, ctx, mut time, t) = mixer_app();
             crate::layout_gate::watch(&ctx, layer);

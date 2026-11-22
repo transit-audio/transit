@@ -251,7 +251,7 @@ fn the_splash_reports_the_device_stage_before_the_scan_stage() {
 /// The dialog layout gate (#735) on About transit, at 1x and 1.5x.
 #[test]
 fn the_about_window_keeps_its_buttons_whole() {
-    let layer = crate::layout_gate::window("About transit");
+    let layer = crate::layout_gate::modal_window("About transit");
     for zoom in crate::layout_gate::SCALES {
         let mut t = T::new();
         crate::layout_gate::watch(&t.ctx, layer);

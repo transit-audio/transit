@@ -805,6 +805,8 @@ mod midi_reopen_tests;
 #[cfg(test)]
 mod modal_voice_panel_tests;
 #[cfg(test)]
+mod modal_window_tests;
+#[cfg(test)]
 mod modulator_panel_tests;
 #[cfg(test)]
 mod param_capture_tests;
