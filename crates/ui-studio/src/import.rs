@@ -281,11 +281,17 @@ pub fn step(app: &mut StudioApp, ctx: &egui::Context) {
                 }
                 "failed" => {
                     let (name, why, batch) = (front.name.clone(), front.error.clone().unwrap_or_default(), front.batch);
-                    // Kept for the drop's last line too, so a later file's commit keeps the reason.
+                    let mut msg = format!("Couldn't import {name}: {why}");
+                    // Kept for the drop's last line, so a later file's commit keeps the reason; when
+                    // this is that last file, the line names every file of the drop that failed.
+                    let last = !app.imports.items.iter().skip(1).any(|i| i.batch == batch);
                     if let Some(b) = app.imports.batches.get_mut(&batch) {
-                        b.refused.push((name.clone(), why.clone()));
+                        b.refused.push((name, why));
+                        if last && (b.refused.len() > 1 || b.committed > 0) {
+                            msg = not_prepared(&b.refused, b.asked);
+                        }
                     }
-                    app.drop_item(0, format!("Couldn't import {name}: {why}"));
+                    app.drop_item(0, msg);
                 }
                 _ => break,
             }

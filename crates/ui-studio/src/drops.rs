@@ -139,15 +139,21 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
     }
     // The rest lands as a browser drag's files do (`import_files`): on the track under the pointer
     // (at the pointer's time on its lane) or on a new track below the tracks, one after another;
-    // anywhere else at the cursor. A track that takes no audio, or a file that is not audio this
-    // app imports, is refused with the reason on the status line.
+    // anywhere else at the cursor (on the cursor's track, as before). A track that takes no audio,
+    // or a file that is not audio, is refused with the reason on the status line.
     let snap = !ctx.input(|i| i.modifiers.shift);
     let cursor = app.cursor();
     let _ = match offer.pos.and_then(|p| app.drop_target(ctx, p, snap, true)).map(|(t, _)| t) {
         Some(Target::Track { track, at }) => app.import_files(&audio, Some(track), at.unwrap_or(cursor)),
         Some(Target::Below { at }) => app.import_files(&audio, None, at.unwrap_or(cursor)),
-        _ => app.import_at_cursor(&audio),
+        _ => app.import_files(&audio, cursor_audio_track(app), cursor),
     };
+}
+
+/// The cursor's track when it is an audio track: where audio lands at the cursor (none: a new
+/// track).
+fn cursor_audio_track(app: &StudioApp) -> Option<TrackId> {
+    app.cursor_track().filter(|t| app.engine.session().track(*t).is_some_and(|t| t.kind == transit_model::TrackKind::Audio))
 }
 
 /// Whether dropping `p` opens it as the session.
@@ -188,8 +194,7 @@ pub fn open_path(app: &mut StudioApp, p: &str) {
     } else {
         let at = app.cursor();
         let mut params = serde_json::json!({"path": p, "at": at});
-        let audio = |t: &TrackId| app.engine.session().track(*t).is_some_and(|t| t.kind == transit_model::TrackKind::Audio);
-        if let Some(t) = app.cursor_track().filter(audio) {
+        if let Some(t) = cursor_audio_track(app) {
             params["track"] = serde_json::json!(t.0);
         }
         app.run("file.import_audio", params)

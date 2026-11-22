@@ -356,3 +356,54 @@ fn a_file_that_is_not_audio_in_a_drop_is_named_with_its_reason() {
     let status = &t.app.status;
     assert!(status.contains("notes.txt (") && !status.contains("Maschine"), "{status}");
 }
+
+/// A drop at the cursor lands on the cursor's track, as it did before drops followed the pointer,
+/// even when an earlier import left the focus on another audio track.
+#[test]
+fn a_drop_at_the_cursor_lands_on_the_cursors_track_not_the_focused_one() {
+    let mut t = T::new();
+    let new = |t: &mut T| t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let (a, b) = (new(&mut t), new(&mut t));
+    t.app.set_cursor(48_000, Some(TrackId(a)));
+    t.app.ui.focus_track = Some(TrackId(b));
+    t.frames(3);
+    let one = t.sample("One.wav", 2_400);
+    t.drop_file(&one, MENU_BAR);
+    let on = |id: u64| t.app.engine.session().track(TrackId(id)).unwrap().clips().iter().map(|c| c.start).collect::<Vec<_>>();
+    assert_eq!((on(a), on(b)), (vec![48_000], vec![]), "{}", t.app.status);
+}
+
+/// When the last file of a drop fails too, the drop's last line still names every file that
+/// failed, and says that the others imported; a lone failure keeps its own line.
+#[test]
+fn a_drop_whose_last_file_fails_names_every_failure() {
+    let mut t = T::new();
+    let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    t.frames(3);
+    let lane = mid(t.app.arrange.layout.tracks.iter().find(|r| r.id == a).unwrap().lane);
+    let text = |t: &T, name: &str| {
+        let p = t.dir.join(name);
+        std::fs::write(&p, b"not audio").unwrap();
+        p
+    };
+    let (x, y) = (text(&t, "a.txt"), text(&t, "b.txt"));
+    t.drop_files(vec![x, y], lane);
+    assert!(t.app.status.starts_with("2 of 2 could not be prepared: a.txt (") && t.app.status.contains("b.txt"), "{}", t.app.status);
+    let (kick, notes) = (t.sample("Kick.wav", 2_400), text(&t, "notes.txt"));
+    t.drop_files(vec![kick, notes], lane);
+    assert!(t.app.status.starts_with("1 of 2 could not be prepared: notes.txt ("), "{}", t.app.status);
+    let lone = text(&t, "c.txt");
+    t.drop_files(vec![lone], lane);
+    assert!(t.app.status.starts_with("Couldn't import c.txt: "), "{}", t.app.status);
+}
+
+/// A drop on a track deleted since the frame it was seen in says so, rather than importing nothing
+/// unannounced.
+#[test]
+fn a_drop_on_a_deleted_track_says_so() {
+    let mut t = T::new();
+    let one = t.sample("One.wav", 2_400);
+    let r = t.app.import_files(&[one], Some(TrackId(9_999)), 0);
+    assert!(r.is_err() && t.app.status == "The track was deleted: drop the files again", "{}", t.app.status);
+    assert!(!t.app.imports.active());
+}

@@ -641,7 +641,10 @@ impl StudioApp {
         }
         if let Some(t) = track {
             let s = self.engine.session();
-            let Some(tr) = s.track(t) else { return Err("no such track".into()) };
+            let Some(tr) = s.track(t) else {
+                self.status = "The track was deleted: drop the files again".into();
+                return Err(self.status.clone());
+            };
             if tr.kind != TrackKind::Audio {
                 self.status = format!("{} is not an audio track: drop audio files on an audio track or below the tracks", tr.name);
                 return Err(self.status.clone());
