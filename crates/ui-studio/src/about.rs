@@ -57,6 +57,18 @@ pub const THIRD_PARTY_NOTICES: &str = concat!(
 pub const TRADEMARKS: &str = "VST is a registered trademark of Steinberg Media Technologies GmbH.
 ASIO is a registered trademark of Steinberg Media Technologies GmbH.
 Mac and macOS are trademarks of Apple Inc., registered in the U.S. and other countries and regions.";
+/// The About window's content width in points. egui gave the window its default width (the window came out 340
+/// wide), which wrapped the small-print paragraphs (the credits, the trademark lines, the privacy line) into many
+/// short rows. 560 is wide enough that most credit lines stay on one row, and with the tool window's body padding
+/// the window is about 594, which still fits a 1366x768 screen at 1x and a 1920x1080 screen at 150 percent (1280x720
+/// points). Fixed, not a default, so the window does not change width with the content (a long version string, an
+/// update notice).
+const CONTENT_W: f32 = 560.0;
+/// The window's height in points with the third-party notices collapsed (measured at the width above, with room
+/// for the window's edge): what is left of the screen below this is the notices list's, up to [`NOTICES_MAX_H`].
+const NOTICES_RESERVE_H: f32 = 560.0;
+/// The most height the third-party notices list takes when it is expanded.
+const NOTICES_MAX_H: f32 = 220.0;
 /// Wordmark width in points.
 const WORDMARK_W: f32 = 260.0;
 
@@ -77,6 +89,8 @@ pub struct AboutState {
     pub licenses: String,
     pub third_party: String,
     pub trademarks: String,
+    /// The "Third-party notices" header (click it to expand the list).
+    pub notices: R4,
     pub copy: R4,
     pub close: R4,
     /// What the Copy button put on the clipboard last.
@@ -117,12 +131,15 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     }
     let mut open = true;
     let mut close = false;
+    // The expanded list shrinks on a short screen so the whole window still fits it (1280x720 points at 150 percent).
+    let notices_h = (ctx.content_rect().height() - NOTICES_RESERVE_H).clamp(80.0, NOTICES_MAX_H);
     let r = crate::theme::modal_window(ctx, "About transit")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
         .show(ctx, |ui| {
+            ui.set_width(CONTENT_W);
             ui.vertical_centered(|ui| {
                 ui.add_space(SPACE);
                 let (r, _) = ui.allocate_exact_size(egui::vec2(WORDMARK_W, WORDMARK_W / crate::icons::WORDMARK_ASPECT), egui::Sense::hover());
@@ -149,11 +166,12 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 ui.add_space(SPACE / 2.0);
                 s.trademarks = TRADEMARKS.to_string();
                 ui.label(egui::RichText::new(TRADEMARKS).color(TOKENS.text_dim).size(11.0));
-                egui::CollapsingHeader::new("Third-party notices").id_salt("about_notices").show(ui, |ui| {
-                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                let notices = egui::CollapsingHeader::new("Third-party notices").id_salt("about_notices").show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(notices_h).show(ui, |ui| {
                         ui.label(egui::RichText::new(THIRD_PARTY_NOTICES).monospace().size(10.0).color(TOKENS.text_dim));
                     });
                 });
+                s.notices = r4(notices.header_response.rect);
                 ui.add_space(SPACE);
                 ui.horizontal(|ui| {
                     let copy = ui.button("Copy version info");
