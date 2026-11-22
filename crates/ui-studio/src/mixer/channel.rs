@@ -474,7 +474,7 @@ fn fader_and_meter(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Re
     // The meter, in the fader's meter slot.
     let d = app.meters.get(&id).copied().unwrap_or_default();
     let slot = lay.meter.map_or(Rect::NOTHING, rect);
-    let meter = strip_meter(p, slot.min.x, travel, &lay.placed, &d, main);
+    let meter = strip_meter(p, slot.min.x, travel, &lay.placed, &d, main, renders_mono(t));
     let wells = meter_bounds(&meter);
     let resp = ui.interact(wells.intersect(clip), ui.id().with(("meter", id.0)), Sense::click());
     crate::help::hover(ui, &resp, crate::help::Id::MixerStripMeter);
@@ -568,4 +568,10 @@ pub(super) fn peak_readout(
 /// The rect of a layout's `[min x, min y, max x, max y]`.
 pub(super) fn rect(r: R4) -> Rect {
     Rect::from_min_max(pos2(r[0], r[1]), pos2(r[2], r[3]))
+}
+
+/// Whether `t`'s strip renders one channel: the mix's `routing::strip_channels` (an instrument
+/// renders at least two, the Master the main mix's width, any other strip its track's width).
+fn renders_mono(t: &Track) -> bool {
+    !matches!(t.kind, TrackKind::Master | TrackKind::Instrument) && t.channels() == 1
 }

@@ -262,7 +262,7 @@ fn main_out(app: &mut StudioApp, ui: &mut Ui, r: Rect, short: bool) -> (StripLay
     let scale = kit_fader::paint_channel_scale(&p, a.fader);
     let x = a.fader.min.x + kit_fader::CHANNEL_METER_X;
     let d = app.main_meter;
-    let meter = strip_meter(&p, x, travel, &scale.placed, &d, true);
+    let meter = strip_meter(&p, x, travel, &scale.placed, &d, true, false);
     let wells = meter_bounds(&meter);
     let on_meter = ui.interact(wells, ui.id().with("main_meter_click"), Sense::click());
     if on_meter.clicked() {
