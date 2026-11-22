@@ -61,6 +61,10 @@ pub struct UiState {
     /// #67): "last time 12 s" beside the loading readout. A per-machine preference, updated on
     /// every successful load; older files have none.
     pub plugin_load_ms: std::collections::BTreeMap<String, u64>,
+    /// Each plug-in's editor Scale setting by plug-in id (issue #153, `crate::editor_scale`):
+    /// written into `ui.json` as soon as it is picked; per machine, never in the session. Plug-ins
+    /// at the default (Auto, automatic mode) have no entry.
+    pub editor_scale: std::collections::BTreeMap<String, transit_dsp::EditorScale>,
     /// Width of the track list.
     pub header_width: f32,
     /// The main window's size (logical points) and maximized state.
@@ -187,6 +191,7 @@ impl Default for UiState {
             device_sections: std::collections::BTreeMap::new(),
             editor_follow: Vec::new(),
             plugin_load_ms: std::collections::BTreeMap::new(),
+            editor_scale: std::collections::BTreeMap::new(),
             header_width: 236.0,
             window_size: [1600.0, 1000.0],
             window_maximized: false,

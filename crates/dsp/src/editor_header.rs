@@ -28,6 +28,9 @@ pub struct EditorHeader {
     pub disabled: Option<String>,
     /// MIDI Learn waits for a parameter of this plug-in to be touched (the menu item is checked).
     pub learning: bool,
+    /// This plug-in's editor Scale setting on this machine (issue #153): the editor applies it on
+    /// its thread and shows it in the window's Scale menu.
+    pub scale: crate::editor_scale::EditorScale,
 }
 
 /// What the user did in the header strip, reported by [`crate::PluginEditor::take_header_actions`].
@@ -50,6 +53,9 @@ pub enum HeaderAction {
     ShowInChain,
     /// Arm (or cancel) MIDI Learn for the next parameter the plug-in reports as edited.
     LearnNext,
+    /// The user picked this Scale setting in the window's menu (issue #153): the app stores it for
+    /// the plug-in id at once and sends it back in the header.
+    Scale(crate::editor_scale::EditorScale),
 }
 
 /// What [`StateJob::poll`] found.

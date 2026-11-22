@@ -15,6 +15,7 @@
 
 pub mod biquad;
 pub mod editor_header;
+pub mod editor_scale;
 pub mod event;
 pub mod host_call;
 pub mod loudness;
@@ -39,6 +40,7 @@ mod smoother_tests;
 mod pages_tests;
 
 pub use editor_header::{EditorHeader, HeaderAction, JobPoll, LoadedValues, StateJob};
+pub use editor_scale::{EditorScale, ScaleMode, ScaleStep};
 pub use offline::FadeShape;
 pub use osc::Waveform;
 pub use plugins::eq::{eq1_response, eq7_response};

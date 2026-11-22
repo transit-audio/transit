@@ -32,6 +32,7 @@ pub mod diagnostics;
 pub mod drops;
 pub mod edit_tools;
 mod editor_group;
+mod editor_scale;
 mod editors;
 mod external_instrument;
 mod external_measure;

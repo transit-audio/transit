@@ -341,6 +341,8 @@ impl StudioApp {
         self.step_host_clock();
         self.step_poll();
         editor_group::drive(self, ctx);
+        // The Scale setting reaches an editor before its open (issue #153).
+        self.send_headers_before_open();
         self.drive_editors();
         self.drive_plugin_headers();
         theme::probe_fonts(ctx);

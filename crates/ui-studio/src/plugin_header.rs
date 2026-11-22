@@ -234,6 +234,7 @@ impl StudioApp {
             can_paste: self.plugin_header.clipboard.as_ref().is_some_and(|c| c.plugin == ins.plugin),
             disabled,
             learning: self.midi_learn.next == Some(key),
+            scale: self.editor_scale_of(&ins.plugin),
         })
     }
 
@@ -241,6 +242,11 @@ impl StudioApp {
     pub fn header_action(&mut self, t: TrackId, slot: usize, action: HeaderAction) {
         let key = (t, slot);
         let Some(ins) = self.hosted_insert(key) else { return };
+        // A machine preference, not a preset operation: never held back by one (issue #153).
+        if let HeaderAction::Scale(value) = action {
+            self.set_editor_scale(&ins.plugin, value);
+            return;
+        }
         if let Some(doing) = self.plugin_header.busy(key) {
             self.status = format!("{doing} Wait for it to finish.");
             return;
@@ -348,6 +354,8 @@ impl StudioApp {
                 }
             }
             HeaderAction::LearnNext => self.learn_next_touched(key),
+            // Taken before the busy check above.
+            HeaderAction::Scale(_) => {}
             HeaderAction::ShowInChain => {
                 self.focus(t);
                 self.ui.show_devices = true;

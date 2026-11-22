@@ -4215,6 +4215,7 @@ dependencies = [
  "rtrb",
  "rustfft",
  "serde",
+ "serde_json",
  "transit-dsp",
  "transit-granular",
  "transit-instrument-core",
