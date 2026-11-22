@@ -109,8 +109,9 @@ impl Section {
     /// Test seam (feature `testing`, #742): the two integrator memories.
     #[cfg(feature = "testing")]
     pub fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
-        w.f32(self.ic1);
-        w.f32(self.ic2);
+        let Section { ic1, ic2 } = self;
+        w.f32(*ic1);
+        w.f32(*ic2);
     }
 }
 
