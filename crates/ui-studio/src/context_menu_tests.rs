@@ -269,8 +269,7 @@ fn a_clip_context_menu_has_clip_actions_and_no_add_track_rows_while_an_empty_lan
     let tl = t.app.arrange.layout.timeline;
     let h = t.header(keys);
     let lane = [tl[2] - 60.0, h[1] + 4.0, tl[2] - 40.0, h[3] - 4.0];
-    // The first click only closes the clip's menu.
-    t.click(lane, "primary");
+    // With the clip's menu still open, one right-click opens the lane's (#769).
     t.click(lane, "secondary");
     let menu = t.app.arrange.menu.clone();
     let bounce = find(&menu, "Bounce in Place");

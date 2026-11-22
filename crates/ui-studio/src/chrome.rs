@@ -402,8 +402,41 @@ pub fn row_has_gutter(ui: &Ui) -> bool {
 /// popup with the row style ([`menu_style_for`]); its rows are [`MenuRow`]s and `checks` says
 /// whether any of them can carry a check (the gutter is reserved only then). Its submenus decide
 /// for themselves ([`submenu`]). Chain `.id(..)` for a menu that shares a response with another popup.
-pub fn context_menu(response: &Response, checks: bool) -> egui::Popup<'static> {
-    egui::Popup::context_menu(response).style(menu_style_for(checks))
+///
+/// A right-click on the widget while its own menu is open reopens the menu at the new pointer in
+/// that one click (#769), as Ableton and Logic do; see [`ContextMenu::show`].
+pub fn context_menu(response: &Response, checks: bool) -> ContextMenu {
+    ContextMenu { popup: egui::Popup::context_menu(response).style(menu_style_for(checks)), secondary: response.secondary_clicked() }
+}
+
+/// A context menu from [`context_menu`]: egui's popup and whether this frame's secondary click
+/// landed on the menu's widget.
+pub struct ContextMenu {
+    popup: egui::Popup<'static>,
+    secondary: bool,
+}
+
+impl ContextMenu {
+    /// The popup's own id, for a menu that shares its response with another popup.
+    pub fn id(self, id: egui::Id) -> Self {
+        Self { popup: self.popup.id(id), ..self }
+    }
+
+    /// Shows the menu while it is open.
+    ///
+    /// Seam for egui 0.36.2 (#769). `Popup::show` (egui `containers/popup.rs`, lines 513 and
+    /// 608-613) exempts the click that opens a popup from closing it only when the popup was not
+    /// open on the previous frame, so a secondary click that reopens an already open context menu
+    /// on its own widget moves it to the new pointer and closes it again in the same frame.
+    /// On exactly that frame the menu ignores clicks for closing (Escape still closes it); every
+    /// other frame keeps the normal close behavior. Remove this when egui exempts the reopening
+    /// click itself: `egui_still_closes_a_reopened_context_menu` in `context_menu_reclick_tests`
+    /// starts failing then.
+    pub fn show<R>(self, content: impl FnOnce(&mut Ui) -> R) -> Option<egui::InnerResponse<R>> {
+        let reopened = self.secondary && egui::Popup::is_id_open(self.popup.ctx(), self.popup.get_id());
+        let popup = if reopened { self.popup.close_behavior(egui::PopupCloseBehavior::IgnoreClicks) } else { self.popup };
+        popup.show(content)
+    }
 }
 
 /// A popup menu that a click on `response` opens and closes, flush under it, in the chrome's
