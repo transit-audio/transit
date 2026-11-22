@@ -23,6 +23,10 @@
 mod mods;
 // The state-variable sections moved to the instrument primitives (ADR 0041); the old path stays.
 pub use transit_instrument_core::svf;
+#[cfg(feature = "testing")]
+mod record;
+#[cfg(feature = "testing")]
+pub use record::FilterObserved;
 #[cfg(test)]
 mod tests;
 
@@ -510,18 +514,22 @@ impl Plugin for Filter {
         self.queued = 0;
     }
 
+    /// The complete record (ADR 0029, #742 slice 2): `Filter::record_state` in `filter/record.rs`.
     #[cfg(feature = "testing")]
     fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
-        w.u64(self.clock);
-        w.f32(self.env.level);
-        w.f32(self.amp.level);
-        w.f32(self.follower.level);
-        self.lfo.fingerprint(w);
-        for st in &self.state {
-            for s in st {
-                s.fingerprint(w);
-            }
-        }
+        self.record_state(w);
+    }
+
+    /// The Filter's record is complete (ADR 0029, #742 section 13): the inventory is
+    /// `Filter::record_state` and what it calls, the witnesses are the transplant harness's.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
     }
 }
 

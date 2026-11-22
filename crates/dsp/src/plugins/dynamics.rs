@@ -222,17 +222,23 @@ impl Plugin for Compressor {
         Some(gain_to_db(self.det_peak))
     }
 
-    /// The detector envelope, the sidechain filters' memory, the lookahead lines (contents and
-    /// write positions) and the makeup and mix smoothers.
+    /// The complete record (ADR 0029, #742 slice 2): `Compressor::record_state` in
+    /// `dynamics_record.rs`.
     #[cfg(feature = "testing")]
     fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
-        w.f32(self.gr);
-        w.f32(self.gr_meter);
-        w.usize(self.lookahead);
-        self.sc.iter().for_each(|b| b.fingerprint(w));
-        self.delay.iter().for_each(|d| d.fingerprint(w));
-        self.makeup.fingerprint(w);
-        self.mix.fingerprint(w);
+        self.record_state(w);
+    }
+
+    /// The Compressor/Limiter's record is complete (ADR 0029, #742 section 13): the inventory is
+    /// `Compressor::record_state`, the witnesses are the transplant harness's.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
     }
 }
 
@@ -380,4 +386,29 @@ impl Plugin for ExpanderGate {
     fn gain_reduction_db(&self) -> f32 {
         self.gr_meter
     }
+
+    /// The complete record (ADR 0029, #742 slice 2): `ExpanderGate::record_state` in
+    /// `dynamics_record.rs`.
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// The Expander/Gate's record is complete (ADR 0029, #742 section 13): the inventory is
+    /// `ExpanderGate::record_state`, the witnesses are the transplant harness's.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
 }
+
+#[cfg(feature = "testing")]
+#[path = "dynamics_record.rs"]
+mod record;
+#[cfg(feature = "testing")]
+pub use record::{CompObserved, GateObserved};

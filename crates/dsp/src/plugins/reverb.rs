@@ -341,4 +341,29 @@ impl Plugin for Reverb {
         let secs = self.p.v(2) * 1.3 + self.p.v(1) * 0.001 + 0.1;
         (secs * self.sr) as usize
     }
+
+    /// The complete record (ADR 0029, #742 slice 2): `Reverb::record_state` in `reverb_record.rs`.
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// Room Reverb's and Plate Reverb's records are complete (ADR 0029, #742 section 13): the
+    /// inventory is `Reverb::record_state` and what it calls, the witnesses are the transplant
+    /// harness's (`tests/print_completeness.rs`).
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
 }
+
+#[cfg(feature = "testing")]
+#[path = "reverb_record.rs"]
+mod record;
+#[cfg(feature = "testing")]
+pub use record::Observed;

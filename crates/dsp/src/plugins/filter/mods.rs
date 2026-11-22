@@ -138,3 +138,90 @@ impl Follower {
         self.level.min(1.0)
     }
 }
+
+// ---- The state record (feature `testing`; ADR 0029, amendment for #742) ----
+
+#[cfg(feature = "testing")]
+impl Notes {
+    /// The complete state: the held entries in use, each with its table index (the table's order
+    /// decides which entry a release or a re-strike finds first), the count, the pedal and the last
+    /// key. An entry not in use is unobservable apart from `used`: every read of an entry tests
+    /// `used` first (`matches`, `pedal`'s filter) or overwrites the whole entry (`on` takes the
+    /// first free entry and writes it whole; `off`, `pedal`, `all_off` and `reset` free entries by
+    /// writing `FREE` whole). Restore writes `FREE` to every entry not in use; the poison witness
+    /// fills their other fields ([`Notes::poison_free`]).
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Notes { held, count, sustain, last_key } = self;
+        w.usize(held.iter().filter(|h| h.used).count());
+        for (i, h) in held.iter().enumerate() {
+            let Held { used, channel, key, voice, sustained } = h;
+            if *used {
+                w.usize(i);
+                w.u8(*channel);
+                w.u8(*key);
+                w.i32(*voice);
+                w.bool(*sustained);
+            }
+        }
+        w.usize(*count);
+        w.bool(*sustain);
+        w.u8(*last_key);
+    }
+
+    /// Sets what [`Notes::record_state`] wrote (indexes strictly increasing, inside the table).
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Notes { held, count, sustain, last_key } = self;
+        let n = r.usize()?;
+        if n > MAX_HELD {
+            return None;
+        }
+        *held = [FREE; MAX_HELD];
+        let mut next = 0;
+        for _ in 0..n {
+            let i = r.usize()?;
+            if i < next || i >= MAX_HELD {
+                return None;
+            }
+            next = i + 1;
+            held[i] = Held { used: true, channel: r.u8()?, key: r.u8()?, voice: r.i32()?, sustained: r.bool()? };
+        }
+        *count = r.usize()?;
+        *sustain = r.bool()?;
+        *last_key = r.u8()?;
+        Some(())
+    }
+
+    /// Poison witnesses only: fills the fields of every entry not in use (but `used`) with values
+    /// from `seed`; returns how many entries it wrote.
+    pub(crate) fn poison_free(&mut self, seed: u32) -> u64 {
+        let mut n = 0;
+        for (i, h) in self.held.iter_mut().enumerate().filter(|(_, h)| !h.used) {
+            let v = seed.wrapping_mul(2_654_435_761).wrapping_add(i as u32);
+            *h = Held { used: false, channel: (v & 0x0F) as u8, key: (v >> 4) as u8 & 0x7F, voice: (v >> 8) as i32, sustained: v & 1 == 1 };
+            n += 1;
+        }
+        n
+    }
+
+    /// The witnesses' observations: entries in use, the pedal.
+    pub(crate) fn observe(&self) -> (usize, bool) {
+        (self.held.iter().filter(|h| h.used).count(), self.sustain)
+    }
+}
+
+#[cfg(feature = "testing")]
+impl Follower {
+    /// The level (state). The attack and release coefficients are derived: `set_times` from the
+    /// parameters and the rate, which `Filter::update` calls; the Filter's restore calls `update`.
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Follower { level, attack: _, release: _ } = self;
+        w.f32(*level);
+    }
+
+    /// Sets what [`Follower::record_state`] wrote.
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Follower { level, attack: _, release: _ } = self;
+        *level = r.f32()?;
+        Some(())
+    }
+}

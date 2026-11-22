@@ -49,8 +49,9 @@
 //! ([`Schedule::shrink`]) and printed as a Rust literal with the first divergence; the minimal
 //! schedule lands as a named regression test ([`regression`], see the template at the end).
 //!
-//! **Where no complete record reads the state** (the Macro Oscillator declares one, #742 slice 1
-//! push 2; the other corpus entries do not yet): the holds end `WINDOW` blocks before the end of
+//! **Where no complete record reads the state** (the Macro Oscillator, Resonator, Modal Voice,
+//! Time Stretcher, the MIDI effects, the reverbs, Filter, Compressor, Expander/Gate, Gain and Trim
+//! declare one, #742 slices 1 to 5; the EQ, Saturator, Tuner and Sampler do not yet): the holds end `WINDOW` blocks before the end of
 //! the render and every corpus case states its
 //! post-fault window from its configured, loaded instances (`MixEngine::strip_plugin_facts`
 //! after the latency probe block): the longest tail plus latency of an instance whose record is
@@ -129,27 +130,27 @@ fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_s
 /// test fails when the computed set differs, so an entry turning complete, or a corpus session
 /// adding an incomplete one, is a reviewed change here.
 const INCOMPLETE: &[(&str, &[&str])] = &[
-    ("v0.3.2-demo.transit", &["compressor", "eq_7band", "gain", "plate_reverb", "saturator"]),
-    ("v0.3.2-features.transit", &["compressor", "gain", "plate_reverb"]),
-    ("v0.4.0-demo.transit", &["compressor", "eq_7band", "gain", "plate_reverb", "saturator"]),
-    ("v0.4.0-features.transit", &["compressor", "gain", "plate_reverb"]),
-    ("v0.4.1-demo.transit", &["compressor", "eq_7band", "gain", "plate_reverb", "saturator"]),
-    ("v0.4.1-features.transit", &["compressor", "gain", "plate_reverb"]),
-    ("v0.5.0-demo.transit", &["compressor", "eq_7band", "gain", "plate_reverb", "saturator"]),
-    ("v0.5.0-features.transit", &["compressor", "gain", "plate_reverb"]),
-    ("v0.6.0-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
-    ("v0.6.0-features.transit", &["compressor", "filter", "gain", "plate_reverb", "tuner"]),
-    ("v0.7.0-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
-    ("v0.7.0-features.transit", &["compressor", "filter", "gain", "plate_reverb", "sampler", "tuner"]),
-    ("v0.7.1-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
-    ("v0.7.1-features.transit", &["compressor", "filter", "gain", "plate_reverb", "sampler", "tuner"]),
-    ("v0.7.2-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
-    ("v0.7.2-features.transit", &["compressor", "filter", "gain", "plate_reverb", "sampler", "tuner"]),
-    ("v0.7.3-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
-    ("v0.7.3-features.transit", &["compressor", "filter", "gain", "plate_reverb", "sampler", "tuner"]),
-    ("v0.7.4-demo.transit", &["compressor", "eq_7band", "filter", "gain", "plate_reverb", "saturator"]),
-    ("v0.7.4-features.transit", &["compressor", "filter", "gain", "plate_reverb", "sampler", "tuner"]),
-    ("returns-and-groups.transit", &["compressor", "gain", "room_reverb"]),
+    ("v0.3.2-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.3.2-features.transit", &[]),
+    ("v0.4.0-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.4.0-features.transit", &[]),
+    ("v0.4.1-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.4.1-features.transit", &[]),
+    ("v0.5.0-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.5.0-features.transit", &[]),
+    ("v0.6.0-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.6.0-features.transit", &["tuner"]),
+    ("v0.7.0-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.7.0-features.transit", &["sampler", "tuner"]),
+    ("v0.7.1-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.7.1-features.transit", &["sampler", "tuner"]),
+    ("v0.7.2-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.7.2-features.transit", &["sampler", "tuner"]),
+    ("v0.7.3-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.7.3-features.transit", &["sampler", "tuner"]),
+    ("v0.7.4-demo.transit", &["eq_7band", "saturator"]),
+    ("v0.7.4-features.transit", &["sampler", "tuner"]),
+    ("returns-and-groups.transit", &[]),
 ];
 
 /// Gate (#210): a key edge removed, and one added, while a worker holds an old task: the plan is

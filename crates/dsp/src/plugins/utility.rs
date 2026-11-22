@@ -90,10 +90,22 @@ impl Plugin for Gain {
         apply_gain(io, frames, self.ch, &mut self.g);
     }
 
-    /// The gain smoother.
+    /// The complete record (ADR 0029, #742 slice 2): `Gain::record_state` in `utility_record.rs`.
     #[cfg(feature = "testing")]
     fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
-        self.g.fingerprint(w);
+        self.record_state(w);
+    }
+
+    /// Gain's record is complete (ADR 0029, #742 section 13): the inventory is
+    /// `Gain::record_state`, the witnesses are the transplant harness's.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
     }
 }
 
@@ -153,7 +165,29 @@ impl Plugin for Trim {
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
         apply_gain(io, frames, self.ch, &mut self.g);
     }
+
+    /// The complete record (ADR 0029, #742 slice 2): `Trim::record_state` in `utility_record.rs`.
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
+        self.record_state(w);
+    }
+
+    /// Trim's record is complete (ADR 0029, #742 section 13): the inventory is
+    /// `Trim::record_state`, the witnesses are the transplant harness's.
+    #[cfg(feature = "testing")]
+    fn print_complete(&self) -> bool {
+        true
+    }
+
+    #[cfg(feature = "testing")]
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.restore_state(r).is_some()
+    }
 }
+
+#[cfg(feature = "testing")]
+#[path = "utility_record.rs"]
+mod record;
 
 // ---------------------------------------------------------------------------------------------
 

@@ -275,6 +275,15 @@ impl Plugin for Hold {
     fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
         self.inner.fingerprint(w);
     }
+    /// The inner gain's declaration (#742 slice 2): the hold keeps no state of its own that reaches
+    /// an output sample (`knob` only decides when a worker's `process` returns, never what it
+    /// writes; `process` is the inner gain's on the same buffers).
+    fn print_complete(&self) -> bool {
+        self.inner.print_complete()
+    }
+    fn restore_print(&mut self, r: &mut transit_state_record::Reader<'_>) -> bool {
+        self.inner.restore_print(r)
+    }
 }
 
 /// A pure delay of `n` samples reporting `n` as its latency (as in `sidechain.rs`).

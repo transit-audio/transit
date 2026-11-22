@@ -27,7 +27,9 @@
 //! `print_completeness/macro_osc.rs`; the Resonator and the Modal Voice (slice 3)
 //! `print_completeness/resonator.rs` and `print_completeness/modal_voice.rs`; the Time Stretcher
 //! (slice 4) `print_completeness/time_stretcher.rs`; the built-in MIDI effects (slice 5)
-//! `print_completeness/midi_fx.rs`, with its own runner for the `MidiEffect` seam.
+//! `print_completeness/midi_fx.rs`, with its own runner for the `MidiEffect` seam; Room and Plate
+//! Reverb, the Filter, the Compressor and the Expander/Gate, Gain and Trim (slice 2)
+//! `print_completeness/reverb.rs`, `filter.rs`, `dynamics.rs` and `utility.rs`.
 //! Every other entry's declaration is false; an entry turning true needs its witness set here, its
 //! inventory and its mutation record.
 //!
@@ -38,6 +40,10 @@
 use std::hash::Hasher;
 use transit_dsp::Plugin;
 
+#[path = "print_completeness/dynamics.rs"]
+mod dynamics;
+#[path = "print_completeness/filter.rs"]
+mod filter;
 #[path = "print_completeness/macro_osc.rs"]
 mod macro_osc;
 #[path = "print_completeness/midi_fx.rs"]
@@ -46,8 +52,12 @@ mod midi_fx;
 mod modal_voice;
 #[path = "print_completeness/resonator.rs"]
 mod resonator;
+#[path = "print_completeness/reverb.rs"]
+mod reverb;
 #[path = "print_completeness/time_stretcher.rs"]
 mod time_stretcher;
+#[path = "print_completeness/utility.rs"]
+mod utility;
 use transit_state_record::{Config, Reader, Writer};
 
 const RATES: [f32; 3] = [44_100.0, 48_000.0, 96_000.0];
@@ -109,6 +119,9 @@ enum Step {
     /// `frames` of silent input (zero on every channel), in maximum blocks: an effect's input
     /// stops (a burst, then silence).
     Silent(usize),
+    /// `frames` of small input (the script's input scaled by 1/1000), in maximum blocks: the small
+    /// input after a flush boundary.
+    Small(usize),
     Param(&'static str, f32),
     Reset,
     Prepare(f32),
@@ -124,6 +137,11 @@ enum Step {
     /// The transport plays at this tempo from now on (`set_transport` before every block, at the
     /// script's frame clock), or stops (`None`).
     Transport(Option<f64>),
+    /// A plug-in event (a note with a channel and voice id, a pedal) at an offset into the next
+    /// block (`Plugin::event`, as the mix gives a note-reading insert its track's notes).
+    Event(u32, transit_dsp::event::PluginEvent),
+    /// `Plugin::all_notes_off`, as the mix calls it for a skipped block.
+    AllNotesOff,
 }
 
 /// What a script did.
@@ -200,10 +218,11 @@ fn run<P: Plugin + ?Sized>(
     let mut io = vec![vec![vec![0.0f32; MAX_BLOCK]; ch]; ps.len()];
     for (s, step) in steps.iter().enumerate() {
         let silent = matches!(step, Step::Silent(_));
+        let scale = if matches!(step, Step::Small(_)) { 1.0e-3 } else { 1.0 };
         let blocks: Vec<usize> = match *step {
             Step::Run(n) => lengths(n, s * 7 + clock.frames).collect(),
             Step::RunBlocks(n, b) => (0..n.div_ceil(b)).map(|k| b.min(n - k * b)).collect(),
-            Step::Silent(n) => (0..n.div_ceil(MAX_BLOCK)).map(|k| MAX_BLOCK.min(n - k * MAX_BLOCK)).collect(),
+            Step::Silent(n) | Step::Small(n) => (0..n.div_ceil(MAX_BLOCK)).map(|k| MAX_BLOCK.min(n - k * MAX_BLOCK)).collect(),
             ref other => {
                 for p in ps.iter_mut() {
                     match *other {
@@ -218,7 +237,11 @@ fn run<P: Plugin + ?Sized>(
                         Step::Macros(m) => p.set_rack_macros(&m),
                         // At once (a stop is told once: no transport goes with later blocks).
                         Step::Transport(tempo) => p.set_transport(&Clock { tempo, ..*clock }.transport()),
-                        Step::Run(_) | Step::RunBlocks(..) | Step::Silent(_) => {}
+                        Step::Event(at, ev) => {
+                            p.event(at, &ev);
+                        }
+                        Step::AllNotesOff => p.all_notes_off(),
+                        Step::Run(_) | Step::RunBlocks(..) | Step::Silent(_) | Step::Small(_) => {}
                     }
                 }
                 match *other {
@@ -233,7 +256,7 @@ fn run<P: Plugin + ?Sized>(
             for (p, io) in ps.iter_mut().zip(io.iter_mut()) {
                 for (c, b) in io.iter_mut().enumerate() {
                     for (i, x) in b.iter_mut().take(n).enumerate() {
-                        *x = if silent { 0.0 } else { input(clock.frames + i, c) };
+                        *x = if silent { 0.0 } else { input(clock.frames + i, c) * scale };
                     }
                 }
                 if clock.tempo.is_some() {
@@ -752,6 +775,52 @@ fn the_midi_effect_records_are_complete() {
     }
 }
 
+/// Room Reverb's and Plate Reverb's declarations (ADR 0029, #742 slice 2): every witness of each
+/// entry's set in every configuration.
+#[test]
+fn the_reverb_records_are_complete() {
+    harness(&reverb::room()).unwrap_or_else(|e| panic!("{e}"));
+    harness(&reverb::plate()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// The Filter's declaration (ADR 0029, #742 slice 2): every witness of its set in every
+/// configuration.
+#[test]
+fn the_filter_record_is_complete() {
+    harness(&filter::entry()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// The Compressor/Limiter's and the Expander/Gate's declarations (ADR 0029, #742 slice 2).
+#[test]
+fn the_dynamics_records_are_complete() {
+    harness(&dynamics::compressor()).unwrap_or_else(|e| panic!("{e}"));
+    harness(&dynamics::expander_gate()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// Gain's and Trim's declarations (ADR 0029, #742 slice 2).
+#[test]
+fn the_gain_and_trim_records_are_complete() {
+    harness(&utility::gain()).unwrap_or_else(|e| panic!("{e}"));
+    harness(&utility::trim()).unwrap_or_else(|e| panic!("{e}"));
+}
+
+/// Slice 2's record sizes (#742: the scheduling test digests every complete record at every block,
+/// so its cost scales with them): words per instance after `prepare`, at each rate, mono and
+/// stereo. The Filter's grows by a few words per pending event and held note. Reported, never
+/// asserted on.
+#[test]
+fn slice_2_record_sizes_are_reported() {
+    for id in ["room_reverb", "plate_reverb", "filter", "compressor", "expander_gate", "gain", "trim"] {
+        for rate in RATES {
+            for ch in CHANNELS {
+                let mut p = transit_dsp::create(id).unwrap();
+                p.prepare(rate, MAX_BLOCK, ch);
+                println!("{id} at {rate} Hz, {ch} channel(s): {} words", record(&*p).len());
+            }
+        }
+    }
+}
+
 /// A witness set must cover the checklist: a boundary with neither a witness nor an explanation
 /// fails the harness before any case runs.
 #[test]
@@ -798,7 +867,21 @@ fn the_harness_covers_every_entry_that_declares_a_complete_record() {
         }
     }
     // The witness sets the harness has for registry entries.
-    let witnessed: &[&str] =
-        &["time_stretcher", "macro_oscillator", "resonator", "modal_voice", "midi_transpose", "midi_velocity", "random_sequencer"];
+    let witnessed: &[&str] = &[
+        "filter",
+        "compressor",
+        "expander_gate",
+        "room_reverb",
+        "plate_reverb",
+        "time_stretcher",
+        "gain",
+        "trim",
+        "macro_oscillator",
+        "resonator",
+        "modal_voice",
+        "midi_transpose",
+        "midi_velocity",
+        "random_sequencer",
+    ];
     assert_eq!(covered, witnessed, "every entry declaring a complete record has a witness set in this harness");
 }

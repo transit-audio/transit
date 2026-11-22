@@ -267,7 +267,8 @@ pub(crate) fn sort_events<T: Copy>(ev: &mut [T], key: impl Fn(&T) -> usize) {
 #[cfg(feature = "testing")]
 impl Smoother {
     pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
-        for v in [self.cur, self.target, self.coef] {
+        let Smoother { cur, target, coef } = self;
+        for v in [*cur, *target, *coef] {
             w.f32(v);
         }
     }
@@ -285,9 +286,31 @@ impl Smoother {
 
 #[cfg(feature = "testing")]
 impl DelayLine {
+    /// The complete state: the write position, the mask (configuration: the allocation's length
+    /// less one, written so a restore can check it) and the whole ring.
     pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
-        w.usize(self.pos);
-        w.usize(self.mask);
-        w.f32s(&self.buf);
+        let DelayLine { buf, mask, pos } = self;
+        w.usize(*pos);
+        w.usize(*mask);
+        w.f32s(buf);
+    }
+
+    /// Sets the state [`DelayLine::fingerprint`] wrote (#742): the ring must have this line's
+    /// length (`mask`, set by `allocate`, is configuration) and the position must lie in it.
+    pub(crate) fn restore(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let DelayLine { buf, mask, pos } = self;
+        let p = r.usize()?;
+        if r.usize()? != *mask || p > *mask {
+            return None;
+        }
+        r.f32s(buf)?;
+        *pos = p;
+        Some(())
+    }
+
+    /// The largest magnitude in the ring (the transplant witnesses' observation that it holds
+    /// history).
+    pub(crate) fn peak(&self) -> f32 {
+        self.buf.iter().fold(0.0f32, |m, x| m.max(x.abs()))
     }
 }

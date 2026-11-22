@@ -182,9 +182,29 @@ pub(crate) fn butterworth_qs(order: usize) -> &'static [f32] {
 /// Test seam (feature `testing`, issue #210): the filter's memory.
 #[cfg(feature = "testing")]
 impl Biquad {
-    pub(crate) fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
-        w.f32(self.z1);
-        w.f32(self.z2);
+    /// The complete state (#742): the coefficients last designed (kept between blocks; a block
+    /// that designs none reads them) and the two memories.
+    pub(crate) fn record_state(&self, w: &mut transit_state_record::Writer<'_>) {
+        let Biquad { coeffs: Coeffs { b0, b1, b2, a1, a2 }, z1, z2 } = self;
+        w.f32s(&[*b0, *b1, *b2, *a1, *a2]);
+        w.f32(*z1);
+        w.f32(*z2);
+    }
+
+    /// Sets what [`Biquad::record_state`] wrote.
+    pub(crate) fn restore_state(&mut self, r: &mut transit_state_record::Reader<'_>) -> Option<()> {
+        let Biquad { coeffs: Coeffs { b0, b1, b2, a1, a2 }, z1, z2 } = self;
+        let mut c = [0.0f32; 5];
+        r.f32s(&mut c)?;
+        [*b0, *b1, *b2, *a1, *a2] = c;
+        *z1 = r.f32()?;
+        *z2 = r.f32()?;
+        Some(())
+    }
+
+    /// Either memory is nonzero (the transplant witnesses' observation).
+    pub(crate) fn holds_memory(&self) -> bool {
+        self.z1 != 0.0 || self.z2 != 0.0
     }
 }
 
