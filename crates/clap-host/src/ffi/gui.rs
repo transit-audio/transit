@@ -517,10 +517,8 @@ impl GuiLink {
                     unsafe { f(g.plugin, w, h) };
                 }
             }
-            if g.window.as_ref().is_some_and(hostwin::HostWindow::is_visible) {
-                if GuiLink::follow_scale(&mut g) {
-                    self.show_scale_menu(&mut g);
-                }
+            if g.window.as_ref().is_some_and(hostwin::HostWindow::is_visible) && GuiLink::follow_scale(&mut g) {
+                self.show_scale_menu(&mut g);
             }
             if let Some(w) = g.window.as_ref().filter(|w| w.is_visible()) {
                 // The strip's changes and the size follow (issue #68).

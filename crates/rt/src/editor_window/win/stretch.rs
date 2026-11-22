@@ -16,7 +16,7 @@
 //!   enables the creation and re-parenting of child windows with different DPI awareness. This
 //!   context is applied when the parent window was created." With the default behavior "The
 //!   associated window behaves as normal, and cannot create or re-parent child windows with a
-//!   different DPI_AWARENESS_CONTEXT." It needs Windows 10 version 1803; the app runs from 1607
+//!   different `DPI_AWARENESS_CONTEXT`." It needs Windows 10 version 1803; the app runs from 1607
 //!   (docs/building.md), so it is looked up at run time and the stretch is unavailable without it.
 //!
 //! So the frame is made with the mixed hosting behavior (it hosts the unaware container), the

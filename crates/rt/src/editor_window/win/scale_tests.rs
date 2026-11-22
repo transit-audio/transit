@@ -163,7 +163,9 @@ fn a_dpi_change_restretches_the_container_and_keeps_the_plugin_size() {
     let mut suggested = RECT { left: 0, top: 0, right: 0, bottom: 0 };
     // SAFETY: a live window of this thread; WM_DPICHANGED's wparam carries the DPI twice and its
     // lparam points to a suggested RECT, which outlives the call.
-    unsafe { SendMessageW(win.raw(), WM_DPICHANGED, (192 << 16) | 192, (&raw mut suggested) as LPARAM) };
+    unsafe {
+        SendMessageW(win.raw(), WM_DPICHANGED, (0xC0 << 16) | 0xC0 /* 192 DPI */, (&raw mut suggested) as LPARAM)
+    };
     assert_eq!(win.content_size(), (320, 200), "the plug-in's pixels");
     assert_eq!(win.stretch(), Some(2.0), "stretched by the new DPI over 96");
     // (The container's measured size is not checked: the message changes the DPI the frame
