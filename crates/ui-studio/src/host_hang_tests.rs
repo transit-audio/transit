@@ -30,6 +30,11 @@ impl T {
     /// An app whose plug-in host (request and creation timeout 200 ms) has a call into
     /// "Guitar Rig 7" that does not return until the test releases it.
     fn stuck() -> T {
+        T::stuck_named("Guitar Rig 7", 1.0)
+    }
+
+    /// [`T::stuck`] with the plug-in called `name`, at interface scale `zoom`.
+    fn stuck_named(name: &'static str, zoom: f32) -> T {
         let engine = transit_engine::Engine::default();
         let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
         let timeout = Duration::from_millis(200);
@@ -41,10 +46,11 @@ impl T {
             clock: Arc::new(Instant::now),
             slow_after: Duration::from_secs(10),
         });
-        let app = StudioApp::new(engine, Some(player), Services::default());
+        let mut app = StudioApp::new(engine, Some(player), Services::default());
+        app.ui.ui_zoom = zoom;
         let (release, gate) = mpsc::channel::<()>();
         let _hung = host.submit(move |ctx| {
-            ctx.name_job("Guitar Rig 7");
+            ctx.name_job(name);
             let _ = gate.recv();
         });
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0, host, release: Some(release) };
@@ -138,4 +144,20 @@ fn later_hides_the_message_for_that_thread_and_save_now_saves() {
     assert!(t.app.host_hang.layout.lines.is_empty(), "and it stays hidden for that thread");
     assert_eq!(t.host.given_up(), 0, "Later gives up on nothing");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The dialog layout gate (#735) on the plug-in-not-responding window, at 1x and 1.5x, with a
+/// plug-in name long enough to wrap every line of the message and the Give up label.
+#[test]
+fn the_message_keeps_its_buttons_whole_with_the_longest_plug_in_name() {
+    let layer = crate::layout_gate::window("A plug-in is not responding");
+    for zoom in crate::layout_gate::SCALES {
+        let name = "Guitar Rig With A Very Long Plug-in Name That Wraps Over Several Lines Of The Message 7";
+        let mut t = T::stuck_named(name, zoom);
+        crate::layout_gate::watch(&t.ctx, layer);
+        t.frames(10);
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        assert!(t.app.host_hang.layout.give_up_label.contains(name));
+        crate::layout_gate::assert_clean(&t.ctx, layer);
+    }
 }

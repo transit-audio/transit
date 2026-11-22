@@ -279,3 +279,24 @@ fn export_audio_command_lists_the_shortcut_the_table_binds() {
     let listed = transit_engine::find_command("file.bounce_mix").and_then(|c| c.shortcut).expect("file.bounce_mix lists a shortcut");
     assert_eq!(listed.replace("Cmd+", "Ctrl+"), label(Action::Bounce), "the control-channel listing and the shortcuts table agree");
 }
+
+/// The dialog layout gate (#735) on Help > Keyboard Shortcuts, at 1x and 1.5x. The window's only
+/// button besides the title bar's is the Step Tie/Rest key selector, so the table is filtered to
+/// the Step scope, which shows it (the unfiltered table scrolls it out of view, and the gate
+/// refuses to pass on a dialog with no button on screen).
+#[test]
+fn the_shortcuts_window_keeps_its_buttons_whole_on_the_step_scope() {
+    let layer = crate::layout_gate::window("Keyboard Shortcuts");
+    for zoom in crate::layout_gate::SCALES {
+        let mut t = T::new();
+        crate::layout_gate::watch(&t.ctx, layer);
+        t.app.ui.ui_zoom = zoom;
+        t.app.ui.shortcuts_filter = crate::shortcuts::Scope::Step.label().into();
+        t.click(mid(view_item(&t, "Help")));
+        t.click(mid(view_item(&t, "Keyboard Shortcuts")));
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        let rows: Vec<String> = serde_json::from_value(t.inspect()["shortcuts"]["rows"].clone()).unwrap();
+        assert!(rows.iter().any(|r| r.starts_with("Step entry · ")), "the Step scope is listed: {rows:?}");
+        crate::layout_gate::assert_clean(&t.ctx, layer);
+    }
+}

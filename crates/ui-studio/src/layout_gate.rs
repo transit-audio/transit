@@ -16,8 +16,8 @@
 //! ```
 //!
 //! What is read. The widget rectangles egui recorded in its last pass (`prev_pass.widgets`), in the
-//! dialog's own layer, and the bounding boxes of the text the layer painted (a plugin reads the
-//! layer's paint list at the end of each pass; a label's widget rectangle is a layout reservation
+//! dialog's own layer, and the ink of the text the layer painted, one rectangle per row of a label
+//! that wraps (a plugin reads the layer's paint list at the end of each pass; a label's widget rectangle is a layout reservation
 //! that can be far wider than its text, the painted text is what a reader sees).
 //!
 //! * A *button* is a widget that senses clicks and not drags ([`is_button`]).
@@ -55,7 +55,12 @@ pub(crate) fn window(title: &str) -> LayerId {
 
 /// The layer of an `egui::Modal` created with this id.
 pub(crate) fn modal(id: &str) -> LayerId {
-    LayerId::new(Order::Foreground, Id::new(id))
+    modal_layer(Id::new(id))
+}
+
+/// The layer of an `egui::Modal` created with this id (for ids that are not a plain string).
+pub(crate) fn modal_layer(id: Id) -> LayerId {
+    LayerId::new(Order::Foreground, id)
 }
 
 /// What one layer painted in its last pass: the text, and every piece of shape of any kind.
@@ -73,6 +78,25 @@ struct Capture {
     layers: Vec<LayerId>,
 }
 
+/// The ink of a text shape, one rectangle per row of its galley. A label that wraps (in a wrapped
+/// row of buttons it can end one row and continue on the next) is one shape whose bounding box
+/// spans both rows and everything between them; the glyphs only cover each row's own ink.
+fn text_rects(t: &egui::epaint::TextShape, clip: Rect, out: &mut Vec<Rect>) {
+    if t.angle != 0.0 {
+        let r = t.visual_bounding_rect().intersect(clip);
+        if r.is_positive() {
+            out.push(r);
+        }
+        return;
+    }
+    for row in &t.galley.rows {
+        let r = row.visuals.mesh_bounds.translate(row.pos.to_vec2() + t.pos.to_vec2()).intersect(clip);
+        if r.is_positive() {
+            out.push(r);
+        }
+    }
+}
+
 fn collect(shape: &Shape, clip: Rect, out: &mut Painted) {
     match shape {
         Shape::Vec(v) => v.iter().for_each(|s| collect(s, clip, out)),
@@ -81,8 +105,8 @@ fn collect(shape: &Shape, clip: Rect, out: &mut Painted) {
             let r = other.visual_bounding_rect().intersect(clip);
             if r.is_positive() {
                 out.shapes.push(r);
-                if matches!(other, Shape::Text(_)) {
-                    out.texts.push(r);
+                if let Shape::Text(t) = other {
+                    text_rects(t, clip, &mut out.texts);
                 }
             }
         }

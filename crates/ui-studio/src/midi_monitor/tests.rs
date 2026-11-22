@@ -598,3 +598,51 @@ fn the_filter_bar_is_the_kit_a_segmented_direction_option_toggles_and_chrome_com
     let again = bar_after(&ctx, &mut app, 4.0);
     assert_eq!((app.ui.midi_monitor.filters.dir, again.dir.selected, again.types[0].on), (DirFilter::Out, 2, false));
 }
+
+/// The dialog layout gate (#735) on the MIDI Monitor, at 1x and 1.5x, with the longest realistic
+/// content: very long port names in every state, a caught row in large type with its Dismiss
+/// button, a paused view, dropped events and truncated SysEx counts, and a long filter text.
+#[test]
+fn the_monitor_window_keeps_its_buttons_whole_with_the_longest_content() {
+    let layer = crate::layout_gate::window("MIDI Monitor");
+    for zoom in crate::layout_gate::SCALES {
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
+        let ctx = egui::Context::default();
+        crate::layout_gate::watch(&ctx, layer);
+        app.ui.ui_zoom = zoom;
+        app.ui.midi_monitor.open = true;
+        app.ui.midi_monitor.size = [0.0, 0.0];
+        app.ui.midi_monitor.filters.text = "a filter text that is much longer than the box that shows it".into();
+        let long = "Very Long Controller Port Name With A Manufacturer And A Model Number ";
+        let states = [PortState::Open, PortState::Failed, PortState::Missing];
+        let ports: Vec<PortReport> = (0..6u16)
+            .map(|i| PortReport {
+                state: states[usize::from(i) % 3],
+                tracks: Vec::new(),
+                dir: if i % 2 == 0 { Dir::In } else { Dir::Out },
+                id: i,
+                name: format!("{}{i}", long.repeat(2)),
+                clock_bpm: Some(120.04),
+                sensing: true,
+            })
+            .collect();
+        app.midi_monitor.port_lines =
+            ports.iter().map(|p| format!("{} (in) · open · no data in 12 s · clock 120.0 BPM · active sensing", p.name)).collect();
+        app.midi_monitor.ports = ports;
+        app.midi_monitor.dropped = (123_456_789, 987_654_321);
+        app.midi_monitor.sysex_truncated = 4_000_000;
+        for _ in 0..40 {
+            app.midi_monitor.push(&ev(Dir::In, 0xB0, 74, 55));
+        }
+        app.midi_monitor.paused_at = Some(0);
+        app.midi_monitor.learn = Learn::Armed;
+        app.midi_monitor.push(&ev(Dir::In, 0xE0, 127, 127));
+        frame(&ctx, &mut app, 1.0);
+        for i in 1..6 {
+            frame(&ctx, &mut app, 1.0 + f64::from(i) / 60.0);
+        }
+        assert_eq!(ctx.pixels_per_point(), zoom);
+        assert!(matches!(app.midi_monitor.learn, Learn::Caught(_)), "the Dismiss button is drawn");
+        crate::layout_gate::assert_clean(&ctx, layer);
+    }
+}

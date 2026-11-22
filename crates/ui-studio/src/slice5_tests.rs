@@ -1044,3 +1044,22 @@ fn a_refused_command_error_leaves_the_status_bar_but_not_the_report() {
     t.frames(2);
     assert_eq!(t.app.status, "newer");
 }
+
+/// The dialog layout gate (#735) on the Callback Telemetry window, at 1x and 1.5x, over a 1080p
+/// screen and the longest content: the render pool with every strip row.
+#[test]
+fn the_details_window_keeps_its_buttons_whole_with_the_longest_content() {
+    let layer = crate::layout_gate::window("Callback Telemetry");
+    for zoom in crate::layout_gate::SCALES {
+        let size = egui::vec2(1920.0 / zoom, 1080.0 / zoom);
+        let mut t = T::new();
+        crate::layout_gate::watch(&t.ctx, layer);
+        t.app.ui.ui_zoom = zoom;
+        t.app.telemetry.injected = Some(pool_snap(transit_mix::TOP_STRIPS));
+        t.app.telemetry.open = true;
+        t.frames_at(30, size);
+        assert_eq!(t.ctx.pixels_per_point(), zoom);
+        assert_eq!(t.inspect()["telemetry"]["open"], true);
+        crate::layout_gate::assert_clean(&t.ctx, layer);
+    }
+}

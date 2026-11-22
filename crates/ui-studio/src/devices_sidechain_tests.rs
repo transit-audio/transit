@@ -160,6 +160,35 @@ mod hardware_inserts {
         assert!(app.mixer.devices.cards[0].bypass);
     }
 
+    /// The dialog layout gate (#735) on the Hardware Insert picker, at 1x and 1.5x, with the
+    /// longest content: every output paired with every input of a 32-in 32-out device, the paths
+    /// renamed to long names, and a measured pair.
+    #[test]
+    fn the_picker_keeps_its_buttons_whole_with_the_longest_path_names() {
+        let layer = crate::layout_gate::window("Hardware Insert");
+        for zoom in crate::layout_gate::SCALES {
+            let (mut app, ctx, mut time, t) = mixer_app();
+            crate::layout_gate::watch(&ctx, layer);
+            app.ui.ui_zoom = zoom;
+            let mut io = IoMap::for_device("test", "test", 32, 32);
+            let names: Vec<(String, transit_model::IoDirection)> = [transit_model::IoDirection::Output, transit_model::IoDirection::Input]
+                .into_iter()
+                .flat_map(|d| io.paths_of(d).map(move |p| (p.name.clone(), d)))
+                .collect();
+            for (i, (name, direction)) in names.iter().enumerate() {
+                let long = format!("A long path name for the interface at position {i} with its channel pair");
+                io.rename_path_in(name, Some(*direction), &long).unwrap();
+            }
+            app.engine.set_io_map(io);
+            app.focus(t);
+            app.mixer.hw_picker = Some(t);
+            frames(&mut app, &ctx, 6, &mut time);
+            assert_eq!(ctx.pixels_per_point(), zoom);
+            assert!(app.mixer.hw_picker_layout.rows.len() > 100, "{} rows", app.mixer.hw_picker_layout.rows.len());
+            crate::layout_gate::assert_clean(&ctx, layer);
+        }
+    }
+
     #[test]
     fn the_card_says_why_a_pair_does_not_run() {
         let (mut app, ctx, mut time, t) = mixer_app();

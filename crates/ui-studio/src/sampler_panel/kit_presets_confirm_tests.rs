@@ -200,3 +200,38 @@ fn a_refused_step_never_holds_another_gestures_merge_open() {
     t.frames(2);
     assert_eq!(t.undo_len(), undo + 2, "two gestures, two undo steps");
 }
+
+/// The dialog layout gate (#735) on the Sampler's three kit questions (replace the kit, delete a
+/// kit file, replace a kit file), at 1x and 1.5x, with a kit name that wraps over several lines.
+#[test]
+fn the_kit_questions_keep_their_buttons_whole_with_the_longest_kit_name() {
+    use crate::layout_gate;
+    let long = "A very long kit name with many words that runs past the width of any question 0123456789";
+    for zoom in layout_gate::SCALES {
+        let (mut t, tr, root) = rig();
+        t.app.ui.ui_zoom = zoom;
+        t.frames(2);
+        let file = kit_file(&root, long);
+        let detail = kit_presets::detail(&t.patch(tr), long);
+        let id = uid(&t, tr);
+        let questions = [(kit_presets::modal_id(id), "replace"), (kit_presets::confirm_id(id), "delete"), (kit_presets::confirm_id(id), "overwrite")];
+        for (modal, which) in questions {
+            let layer = layout_gate::modal_layer(modal);
+            layout_gate::watch(&t.ctx, layer);
+            let view = t.app.builtin_editor.devices.sampler.views.get_mut(&id).expect("the Sampler's view");
+            match which {
+                "replace" => {
+                    view.kit.pending = Some(kit_presets::Pending { file: file.clone(), name: long.into(), step: false, detail: detail.clone() })
+                }
+                "delete" => view.kit.confirm = Some((kit_presets::Confirm::Delete { file: file.clone(), name: long.into() }, true)),
+                _ => view.kit.confirm = Some((kit_presets::Confirm::Overwrite { file: file.clone(), name: long.into() }, true)),
+            }
+            t.frames(3);
+            assert_eq!(t.ctx.pixels_per_point(), zoom);
+            layout_gate::assert_clean(&t.ctx, layer);
+            let view = t.app.builtin_editor.devices.sampler.views.get_mut(&id).unwrap();
+            (view.kit.pending, view.kit.confirm) = (None, None);
+            t.frames(2);
+        }
+    }
+}
