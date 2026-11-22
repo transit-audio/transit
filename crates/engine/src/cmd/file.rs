@@ -56,7 +56,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Audio...",
             ["File", "Import"],
             Some("Cmd+Shift+I"),
-            "{path | paths: [..], track?: target track (a mono one with mono tracks below takes one channel of a wider file each), at?: position, name?: clip, source and new track name, new_tracks?: true (default; false uses `track` or the selected audio track)}",
+            "{path | paths: [..], track?: target track, at?: position, name?: clip, source and new track name, new_tracks?: true (default; false uses `track` or the selected audio track)}",
             always,
             import_audio
         ),

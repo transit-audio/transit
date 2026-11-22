@@ -300,19 +300,13 @@ pub fn prepare_audio_bytes(
 
 /// Place prepared audio: a new source, and a clip at `at` on `target` (or on a new track of
 /// matching width). `name` replaces the file name as the source, clip and new track name. Audio
-/// prepared at another rate than the session's is resampled here. A file of several channels on a
-/// mono track with as many mono tracks below it splits across them, one channel each.
+/// prepared at another rate than the session's is resampled here.
 pub fn place_prepared(e: &mut Engine, prepared: PreparedAudio, target: Option<TrackId>, at: Samples, name: Option<&str>) -> Result<Value> {
     let PreparedAudio { name: file, path, audio, format, file_rate, time_reference } = prepared;
     let label = name.map(str::trim).filter(|n| !n.is_empty()).unwrap_or(&file).to_string();
     let channels = audio.buffer.num_channels();
     let s = e.session_mut();
     let session_rate = s.sample_rate.hz();
-    let span = Range::new(at, at.saturating_add(i64::try_from(audio.frames()).unwrap_or(i64::MAX)));
-    if let Some(tracks) = target.and_then(|t| split_tracks(s, t, channels, span)).filter(|_| !audio.is_disk()) {
-        let stamp = time_reference.map(|t| stamp_at_rate(t, file_rate, session_rate));
-        return Ok(place_split(s, audio, &label, &tracks, at, stamp));
-    }
     let src = if audio.buffer.sample_rate == session_rate {
         add_source_audio(s, &label, audio, path.as_deref(), format)
     } else {
@@ -331,61 +325,6 @@ pub fn place_prepared(e: &mut Engine, prepared: PreparedAudio, target: Option<Tr
     let cid = s.new_clip_id();
     crate::edit::place_clip(s, track, Clip::audio(cid, stem, src, 0, at, frames));
     Ok(json!({"track": track, "clip": cid, "source": src, "frames": frames, "channels": channels}))
-}
-
-/// The tracks a file of `channels` channels splits across when it lands on `target` over `span`:
-/// `target` and the next `channels - 1` tracks the Edit window shows, when every one is a mono
-/// audio track, none is frozen, and the ones below hold nothing in `span` (a split never edits
-/// a track it was not dropped on).
-fn split_tracks(s: &Session, target: TrackId, channels: usize, span: Range) -> Option<Vec<TrackId>> {
-    let mono = |t: &&transit_model::Track| t.kind == TrackKind::Audio && t.format == ChannelFormat::Mono && t.freeze.is_none();
-    let free = |t: &&transit_model::Track| mono(t) && !t.clips().iter().any(|c| c.start < span.end && c.end() > span.start);
-    let i = s.track_index(target).filter(|_| channels > 1)?;
-    let first = s.tracks.get(i).filter(mono)?;
-    let below = s.tracks.iter().skip(i + 1).filter(|t| crate::edit::shown(s, t)).take(channels - 1).take_while(free);
-    let tracks: Vec<TrackId> = std::iter::once(first).chain(below).map(|t| t.id).collect();
-    (tracks.len() == channels).then_some(tracks)
-}
-
-/// Channel `ch` of `n` in a split's names: `L` and `R` for stereo, else its number from 1 (a
-/// file's channels carry no layout here; an eight-track field recording is not 7.1).
-pub(crate) fn split_label(n: usize, ch: usize) -> String {
-    match (n, ch) {
-        (2, 0) => "L".into(),
-        (2, 1) => "R".into(),
-        _ => (ch + 1).to_string(),
-    }
-}
-
-/// One mono source per channel, `<name>.L` and `<name>.R` (`.1`, `.2`… past stereo), written to
-/// `Audio Files` on save, and a clip of each at `at` on its track of `tracks`, each keeping its
-/// channel's peaks. The reply is the first clip's, with every clip under `split`.
-fn place_split(s: &mut Session, audio: Arc<SourceAudio>, label: &str, tracks: &[TrackId], at: Samples, stamp: Option<u64>) -> Value {
-    let stem = Path::new(label).file_stem().and_then(|x| x.to_str()).unwrap_or(label).to_string();
-    let (buf, mut peaks) = Arc::try_unwrap(audio)
-        .map_or_else(|a| (a.buffer.clone(), a.peaks.clone()), |mut a| (std::mem::take(&mut a.buffer), std::mem::take(&mut a.peaks)));
-    let rate = buf.sample_rate;
-    let mut placed = Vec::new();
-    for (ch, (samples, &track)) in buf.channels.into_iter().zip(tracks).enumerate() {
-        // The source name is the given name's stem, so the extension keeps the channel label.
-        let name = format!("{stem}.{}.wav", split_label(tracks.len(), ch));
-        let mono = AudioBuffer { sample_rate: rate, channels: vec![samples] };
-        let src = match peaks.get_mut(ch).map(std::mem::take).filter(|_| rate == s.sample_rate.hz()) {
-            Some(p) => add_source_audio(s, &name, Arc::new(SourceAudio { buffer: mono, peaks: vec![p], disk: None }), None, FileFormat::Wav),
-            None => add_source(s, &name, mono, None, FileFormat::Wav),
-        };
-        if let (Some(stamp), Some(sx)) = (stamp, s.sources.last_mut()) {
-            sx.time_reference = stamp;
-        }
-        let frames = s.source(src).map_or(0, |x| i64::try_from(x.frames).unwrap_or(0));
-        let clip_name = s.source(src).map(|x| x.name.clone()).unwrap_or_default();
-        let cid = s.new_clip_id();
-        crate::edit::place_clip(s, track, Clip::audio(cid, clip_name, src, 0, at, frames));
-        placed.push(json!({"track": track, "clip": cid, "source": src, "frames": frames, "channels": 1}));
-    }
-    let mut reply = placed.first().cloned().unwrap_or_else(|| json!({}));
-    reply["split"] = json!(placed);
-    reply
 }
 
 /// Decode and place an audio file. With no target track, a new track of matching width is made.

@@ -898,19 +898,22 @@ view has content it takes no drag. On an Instrument key map with zones, a file d
 no zone plays shows, dashed, the keys it will cover, and letting go makes a zone there (see below). A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
 drop, so nothing behind it is reached. Anywhere else, a browser drag lands on the track lane,
 header, mixer strip or device chain where you let go. A file from the file manager lands the same
-way on an audio track's lane, header, mixer strip or device chain, or below the tracks on a new
-track, and several files follow each other on that track; anywhere else it is imported into the
-arrangement at the cursor (a MIDI file imports as MIDI). A `.transit` or `.dawproject` file opens
-as the session; dropped with other files, it opens alone and the status line names what was left
-out. On Windows a file manager drop lands where the pointer is when you let go; on other
-platforms it lands as soon as the pointer moves after you let go (see the known issues). A stereo
-or wider file that lands on a mono audio track with as many mono tracks below it (in the Edit
-window's order, none frozen and none holding a clip where the file goes) splits across them in
-one undo step: each channel becomes its own mono file, `<name>.L` and `<name>.R` (`.1`, `.2`… past
-stereo), saved to `Audio Files`; otherwise the file lands whole on the one track. To split a clip
-already in the session, such as two microphones recorded onto one stereo track, right-click it and
-choose **Split to Mono Tracks**: each channel goes to a new mono track below the clip's track, the
-original clip is muted, and a take played from its file gets one mono WAV per channel beside it.
+way: on the track under the pointer (at the pointer's time on its lane) or below the tracks on a
+new track, several files one after another, and anywhere else at the cursor (a MIDI file imports
+as MIDI). A track that takes no audio, or a file that is not audio transit imports, is refused
+with the reason on the status line. A file keeps its channels: a stereo file dropped on a mono
+track lands there as one stereo clip. A `.transit` or `.dawproject` file opens as the session,
+asking first to save unsaved changes as File > Open does; dropped with other files, it opens alone
+and the status line names what was left out. On Windows a file manager drop lands where the pointer
+is when you let go; on other platforms it lands as soon as the pointer moves after you let go (see
+the known issues).
+
+To split a stereo or wider clip into mono tracks, such as two microphones recorded onto one stereo
+track, right-click it and choose **Split to Mono Tracks**: each channel goes to a new mono track
+below the clip's track (`<track> L` and `<track> R`, numbered past stereo), with the clip's
+timing, fades and gain, the original clip is muted, and the whole split is one undo step. Each
+channel becomes its own mono file, saved to `Audio Files`; a take played from its file gets one
+mono WAV per channel beside it.
 
 Right-click a pad and choose **Clear pad** to empty it and reset its name, choke group, mute,
 and solo. Delete or Backspace does the same for the selected pad while the Sampler window has

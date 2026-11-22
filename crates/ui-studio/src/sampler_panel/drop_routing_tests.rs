@@ -5,12 +5,17 @@
 use super::test_rig::{T, mid};
 use transit_model::TrackId;
 
-/// A point on the arrangement's timeline that no editor window covers.
+/// A point on the menu bar: no track, nor the space below the tracks, so a drop there lands at the
+/// cursor.
+const MENU_BAR: (f32, f32) = (300.0, 12.0);
+
+/// A point on the arrangement's timeline that no editor window covers, below the tracks (a drop
+/// there lands on a new track; the Sampler's own instrument track takes no audio).
 fn arrangement_point(t: &T, tr: TrackId) -> (f32, f32) {
     let tl = t.app.arrange.layout.timeline;
     let w = t.window(tr).rect;
     let inside = |p: (f32, f32)| p.0 >= w[0] && p.0 <= w[2] && p.1 >= w[1] && p.1 <= w[3];
-    let candidates = [(tl[0] + 40.0, tl[1] + 12.0), (tl[2] - 40.0, tl[1] + 12.0), (tl[0] + 40.0, tl[3] - 12.0), (tl[2] - 40.0, tl[3] - 12.0)];
+    let candidates = [(tl[0] + 40.0, tl[3] - 12.0), (tl[2] - 40.0, tl[3] - 12.0)];
     *candidates.iter().find(|p| !inside(**p) && tl[3] - tl[1] > 24.0).expect("a visible stretch of timeline outside the editor window")
 }
 
@@ -110,8 +115,9 @@ fn a_drop_with_the_pointer_gone_then_a_position_on_the_arrangement_imports_a_cli
     let snare = t.sample("Snare.wav", 2400);
     let clips = t.clip_count();
     t.drop_gone(&snare);
-    assert_eq!(t.clip_count(), clips, "held");
+    assert!(t.clip_count() == clips && !t.app.imports.active(), "held");
     t.point(arrangement_point(&t, tr));
+    t.settle_imports();
     assert_eq!(t.clip_count(), clips + 1, "one clip imported");
     assert!(t.patch(tr).zones.is_empty(), "no pad bound");
 }
@@ -124,8 +130,10 @@ fn a_drop_held_after_the_pointer_left_goes_to_the_arrangement_after_the_grace_fr
     // The drop frame counts as the first held frame; the last held frame is the grace count.
     t.drop_gone(&snare);
     t.frames(crate::drops::GONE_GRACE_FRAMES as usize - 1);
-    assert_eq!(t.clip_count(), clips, "still held on the last grace frame");
+    assert!(t.clip_count() == clips && !t.app.imports.active(), "still held on the last grace frame");
     t.frames(1);
+    assert!(t.app.imports.active() || t.clip_count() == clips + 1, "routed on the next frame");
+    t.settle_imports();
     assert_eq!(t.clip_count(), clips + 1, "then imported to the arrangement: the drop never vanishes");
     assert!(t.patch(tr).zones.is_empty());
 }
@@ -158,11 +166,12 @@ fn the_gone_rule_holds_where_the_old_rule_imported() {
     }
 }
 
-/// A file-manager drop lands where it is let go, as a browser drag does: a stereo file on a mono
-/// track's lane with a mono track below splits there, rather than going to the cursor's track (a
-/// new stereo track when the cursor has none).
+/// A file-manager drop lands where it is let go, as a browser drag does: on the track under the
+/// pointer, at the pointer's time on its lane, rather than at the cursor (on a new track when the
+/// cursor has none). A stereo file keeps its channels there: a split is asked for, never done on
+/// import, even with a free mono track below.
 #[test]
-fn a_stereo_file_dropped_on_a_mono_lane_splits_onto_that_track_and_the_one_below() {
+fn a_stereo_file_dropped_on_a_mono_lane_lands_whole_on_that_track_at_the_pointer() {
     let mut t = T::new();
     let mono = |t: &mut T| t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
     let (a, b) = (mono(&mut t), mono(&mut t));
@@ -177,11 +186,17 @@ fn a_stereo_file_dropped_on_a_mono_lane_splits_onto_that_track_and_the_one_below
     let path = t.dir.join("Mics.wav");
     std::fs::write(&path, wav).unwrap();
     let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == a).unwrap().lane;
-    t.drop_file(&path, mid(lane));
+    let at = (lane[0] + (lane[2] - lane[0]) * 0.75, (lane[1] + lane[3]) / 2.0);
+    let Some((crate::browser::Target::Track { at: Some(want), .. }, _)) = t.app.drop_target(&t.ctx, egui::pos2(at.0, at.1), true, true) else {
+        panic!("the lane is a drop target")
+    };
+    assert!(want > 0 && t.app.cursor() == 0, "the pointer's time ({want}) is not the cursor's");
+    t.drop_file(&path, at);
     let s = t.app.engine.session();
-    let names = |id: u64| s.track(TrackId(id)).unwrap().clips().iter().map(|c| c.name.clone()).collect::<Vec<_>>();
+    let on = |id: u64| s.track(TrackId(id)).unwrap().clips().iter().map(|c| (c.name.clone(), c.start)).collect::<Vec<_>>();
     assert_eq!(s.tracks.len(), 2, "no new track");
-    assert_eq!((names(a), names(b)), (vec!["Mics.L".to_string()], vec!["Mics.R".to_string()]));
+    assert_eq!((on(a), on(b)), (vec![("Mics".to_string(), want)], vec![]), "whole, on A, at the pointer");
+    assert_eq!(s.sources.iter().map(|x| x.channels).collect::<Vec<_>>(), [2], "one stereo source");
 }
 
 /// Several files dropped on a lane follow each other on its track, as a browser drag's do: each
@@ -225,20 +240,54 @@ fn a_drop_that_opens_a_session_opens_it_and_imports_nothing_else() {
     assert!(t.app.status.contains("2 files dropped with B.transit were not imported"), "{}", t.app.status);
 }
 
-/// Files dropped at the cursor (here on a MIDI lane, which takes no audio) follow each other on
-/// the cursor's track, as they do on a lane, rather than each erasing the last.
+/// Files dropped where no track or the space below them is (here the menu bar) land at the cursor
+/// on the cursor's track, and follow each other there, rather than each erasing the last.
 #[test]
 fn files_dropped_at_the_cursor_follow_each_other_on_its_track() {
     let mut t = T::new();
     let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
-    let m = t.app.run("track.new", serde_json::json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap();
+    t.app.run("track.new", serde_json::json!({"kind": "midi"})).unwrap();
     t.app.set_cursor(48_000, Some(TrackId(a)));
     t.frames(3);
-    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == m).unwrap().lane;
     let (one, two) = (t.sample("One.wav", 4_800), t.sample("Two.wav", 2_400));
-    t.drop_files(vec![one, two], mid(lane));
+    t.drop_files(vec![one, two], MENU_BAR);
     let clips: Vec<(String, i64)> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| (c.name.clone(), c.start)).collect();
     assert_eq!(clips, [("One".to_string(), 48_000), ("Two".to_string(), 52_800)]);
+}
+
+/// Audio dropped on a track that takes none (a MIDI track's lane) is refused with the reason on
+/// the status line, as a browser drag's is, rather than landing somewhere else unannounced.
+#[test]
+fn audio_dropped_on_a_midi_lane_is_refused_with_the_reason() {
+    let mut t = T::new();
+    let a = t.app.run("track.new", serde_json::json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let m = t.app.run("track.new", serde_json::json!({"kind": "midi", "name": "Synth"})).unwrap()["tracks"][0].as_u64().unwrap();
+    t.app.set_cursor(0, Some(TrackId(a)));
+    t.frames(3);
+    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == m).unwrap().lane;
+    let one = t.sample("One.wav", 2_400);
+    t.drop_file(&one, mid(lane));
+    assert!(t.app.status.starts_with("Synth is not an audio track"), "{}", t.app.status);
+    assert!(t.app.engine.session().tracks.iter().all(|tr| tr.clips().is_empty()), "nothing is imported");
+}
+
+/// A dropped session goes through the save question File > Open asks: with unsaved changes it
+/// opens only once the question is answered, and nothing else of the drop is imported.
+#[test]
+fn a_dropped_session_asks_to_save_unsaved_changes_first() {
+    let mut t = T::new();
+    let b = t.dir.join("B.transit");
+    let mut other = transit_engine::Engine::default();
+    other.execute("track.new", &serde_json::json!({"kind": "midi", "name": "Synth"})).unwrap();
+    other.execute("session.save", &serde_json::json!({"path": b.to_string_lossy()})).unwrap();
+    t.app.run("track.new", serde_json::json!({"kind": "audio", "name": "Unsaved"})).unwrap();
+    t.frames(3);
+    assert!(t.app.unsaved_changes());
+    let one = t.sample("One.wav", 2_400);
+    t.drop_files(vec![b, one], MENU_BAR);
+    assert!(matches!(t.app.dialog, Some(crate::Dialog::SaveChanges { .. })), "the save question is up");
+    let s = t.app.engine.session();
+    assert!(s.tracks.iter().any(|tr| tr.name == "Unsaved") && s.tracks.iter().all(|tr| tr.clips().is_empty()), "nothing opened or imported yet");
 }
 
 /// With the cursor before bar 1 (a count-in session's pre-count zone), files dropped at the cursor
@@ -257,9 +306,8 @@ fn files_dropped_at_a_cursor_before_bar_one_follow_each_other_from_zero() {
     t.app.ui.cursor = -48_000;
     t.app.ui.cursor_track = Some(TrackId(a));
     assert_eq!(t.app.cursor(), -48_000, "the cursor is before bar 1");
-    let lane = t.app.arrange.layout.tracks.iter().find(|r| r.id == m).unwrap().lane;
     let (one, two) = (t.sample("One.wav", 4_800), t.sample("Two.wav", 4_800));
-    t.drop_files(vec![one, two], mid(lane));
+    t.drop_files(vec![one, two], MENU_BAR);
     let clips: Vec<(String, i64)> = t.app.engine.session().track(TrackId(a)).unwrap().clips().iter().map(|c| (c.name.clone(), c.start)).collect();
     assert_eq!(clips, [("One".to_string(), 0), ("Two".to_string(), 4_800)]);
 }

@@ -29,10 +29,19 @@ pub fn specs() -> Vec<CommandSpec> {
     )]
 }
 
-/// The most channels a clip splits into: one track each, so a hostile file's channel count must
-/// not become tens of thousands of tracks.
-// ponytail: a fixed cap; a MADI-sized recording (64) fits, a wider one is refused.
+/// The most channels a clip splits into, one track each, so a hostile file's channel count never
+/// becomes tens of thousands of tracks: a MADI-sized recording (64) fits, a wider one is refused.
 const MAX_CHANNELS: usize = 64;
+
+/// Channel `ch` of `n` in a split's names: `L` and `R` for stereo, else its number from 1 (a
+/// file's channels carry no layout here; an eight-track field recording is not 7.1).
+fn split_label(n: usize, ch: usize) -> String {
+    match (n, ch) {
+        (2, 0) => "L".into(),
+        (2, 1) => "R".into(),
+        _ => (ch + 1).to_string(),
+    }
+}
 
 /// A channel's audio, ready to become a source.
 enum Mono {
@@ -101,7 +110,7 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         let n = clips.iter().map(|c| c.2).max().unwrap_or(0);
         let mut lanes = Vec::with_capacity(n);
         for ch in 0..n {
-            let nt = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(&format!("{} {}", tr.name, crate::io::split_label(n, ch))));
+            let nt = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(&format!("{} {}", tr.name, split_label(n, ch))));
             // Taken out before `t` is found: a new track goes in before a Master, which may sit above `t`.
             if let Some(from) = s.track_index(nt) {
                 let moved = s.tracks.remove(from);
@@ -124,7 +133,7 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
                 let Some(&mono) = sources.get(&(src, ch)) else { continue };
                 let mut c = orig.clone();
                 c.id = s.new_clip_id();
-                c.name = format!("{}.{}", orig.name, crate::io::split_label(channels, ch));
+                c.name = format!("{}.{}", orig.name, split_label(channels, ch));
                 c.content = ClipContent::Audio { source: mono, offset };
                 c.group = None;
                 new_clips.push(c.id);
@@ -166,7 +175,7 @@ fn prepare(
                 continue;
             }
             let (Some(meta), Some(audio)) = (s.source(src), s.pool.get(src)) else { continue };
-            let names: Vec<String> = (0..n).map(|ch| format!("{}.{}", meta.name, crate::io::split_label(n, ch))).collect();
+            let names: Vec<String> = (0..n).map(|ch| format!("{}.{}", meta.name, split_label(n, ch))).collect();
             let channels = match &audio.disk {
                 Some(disk) => {
                     crate::io::split_files::write(disk, &names, written)?;

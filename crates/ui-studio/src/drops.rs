@@ -8,14 +8,14 @@
 //! frame or a later one). A `PointerGone` does not route it blind: the drop stays held, and only
 //! after [`GONE_GRACE_FRAMES`] frames with no position does it go to the arrangement. Then the
 //! editor window on top at that position (egui's own layer order) claims it, or the arrangement
-//! imports it: on the audio track under the pointer or below the tracks, as a browser drag lands,
-//! else at the cursor. Exactly one claimant takes a drop; a held drop never vanishes (a second drop while
-//! one is held routes with it).
+//! imports it by the browser drag's rules: on the track under the pointer or below the tracks, else
+//! at the cursor, with the reason on the status line when it can't. Exactly one claimant takes a
+//! drop; a held drop never vanishes (a second drop while one is held routes with it).
 
 use crate::StudioApp;
+use crate::browser::Target;
 use std::path::PathBuf;
 use transit_model::TrackId;
-use transit_time::Samples;
 
 /// Files offered to a claimant, and where they were dropped (`None`: the pointer left the window).
 #[derive(Debug, Clone)]
@@ -130,18 +130,24 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
         open_path(app, &session.to_string_lossy());
         return;
     }
+    let (midi, audio): (Vec<PathBuf>, Vec<PathBuf>) = offer.paths.iter().cloned().partition(|p| is_midi(&p.to_string_lossy()));
+    for p in midi {
+        open_path(app, &p.to_string_lossy());
+    }
+    if audio.is_empty() {
+        return;
+    }
+    // The rest lands as a browser drag's files do (`import_files`): on the track under the pointer
+    // (at the pointer's time on its lane) or on a new track below the tracks, one after another;
+    // anywhere else at the cursor. A track that takes no audio, or a file that is not audio this
+    // app imports, is refused with the reason on the status line.
     let snap = !ctx.input(|i| i.modifiers.shift);
-    let mut at = offer.pos.and_then(|p| arrangement_target(app, ctx, p, snap));
-    if let Some((_, time)) = at.as_mut() {
-        *time = Some(time.unwrap_or_else(|| app.cursor()));
-    }
-    for p in &offer.paths {
-        // The files of one drop follow each other on one track, as a browser drag's do: the first
-        // lands by the pointer (or at the cursor), each next one where the last ended.
-        if let Some((track, end)) = open_path_at(app, &p.to_string_lossy(), at) {
-            at = Some((Some(track), Some(end)));
-        }
-    }
+    let cursor = app.cursor();
+    let _ = match offer.pos.and_then(|p| app.drop_target(ctx, p, snap, true)).map(|(t, _)| t) {
+        Some(Target::Track { track, at }) => app.import_files(&audio, Some(track), at.unwrap_or(cursor)),
+        Some(Target::Below { at }) => app.import_files(&audio, None, at.unwrap_or(cursor)),
+        _ => app.import_at_cursor(&audio),
+    };
 }
 
 /// Whether dropping `p` opens it as the session.
@@ -150,17 +156,10 @@ fn opens_session(p: &str) -> bool {
     lower.ends_with(".transit") || lower.ends_with(".dawproject")
 }
 
-/// Where a file-manager drop at `pos` lands in the arrangement, as a browser drag does: the audio
-/// track whose lane (at the pointer's time), header, mixer strip or device chain is under the
-/// pointer, or a new track when it is below the tracks. `None` elsewhere: the drop imports at the
-/// cursor, as before.
-fn arrangement_target(app: &StudioApp, ctx: &egui::Context, pos: egui::Pos2, snap: bool) -> Option<(Option<TrackId>, Option<Samples>)> {
-    let audio = |t: TrackId| app.engine.session().track(t).is_some_and(|t| t.kind == transit_model::TrackKind::Audio);
-    match app.drop_target(ctx, pos, snap, true)?.0 {
-        crate::browser::Target::Track { track, at } if audio(track) => Some((Some(track), at)),
-        crate::browser::Target::Below { at } => Some((None, at)),
-        _ => None,
-    }
+/// Whether `p` imports as MIDI.
+fn is_midi(p: &str) -> bool {
+    let lower = p.to_ascii_lowercase();
+    lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf")
 }
 
 /// Offers `path` to the editor window `key` in the next frame, as a file dropped on it at `pos` (a
@@ -175,49 +174,27 @@ pub(crate) fn take(app: &mut StudioApp, key: (TrackId, usize)) -> Option<DropOff
     if r.offer.as_ref().is_some_and(|(k, _)| *k == key) { r.offer.take().map(|(_, o)| o) } else { None }
 }
 
-/// The arrangement's claim: a `.transit` or `.dawproject` file opens as the session, a MIDI file
-/// imports, any other file imports as audio at the cursor (on the cursor's track). Also used for
-/// files named on the command line.
+/// The arrangement's claim: a `.transit` or `.dawproject` file opens as the session (asking to
+/// save unsaved changes first, as File > Open does), a MIDI file imports, any other file imports
+/// as audio at the cursor (on the cursor's track when it is an audio track, else on a new one).
+/// Used for files named on the command line; a failure's reason goes to the status line.
 pub fn open_path(app: &mut StudioApp, p: &str) {
-    open_path_at(app, p, None);
-}
-
-/// [`open_path`], with an audio file landing on `at`'s track (none: a new track) at its time (none:
-/// the cursor) when `at` is given, where [`arrangement_target`] put a drop. Returns the track an
-/// audio file landed on and where it ends there.
-fn open_path_at(app: &mut StudioApp, p: &str, at: Option<(Option<TrackId>, Option<Samples>)>) -> Option<(TrackId, Samples)> {
-    let lower = p.to_ascii_lowercase();
     if opens_session(p) {
         app.run_or_ask("session.open", serde_json::json!({"path": p}));
-        return None;
+        return;
     }
-    let r = if lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf") {
+    let r = if is_midi(p) {
         app.run("file.import_midi", serde_json::json!({"path": p}))
     } else {
-        // The cursor's track only when it holds audio; else a new track.
+        let at = app.cursor();
+        let mut params = serde_json::json!({"path": p, "at": at});
         let audio = |t: &TrackId| app.engine.session().track(*t).is_some_and(|t| t.kind == transit_model::TrackKind::Audio);
-        let (track, time) = match at {
-            Some((track, time)) => (track, time.unwrap_or_else(|| app.cursor())),
-            None => (app.cursor_track().filter(audio), app.cursor()),
-        };
-        // Where the engine puts it (a cursor before bar 1 imports at 0), so the next file of the
-        // drop starts where this one really ends.
-        let time = time.max(0);
-        let mut params = serde_json::json!({"path": p, "at": time});
-        if let Some(t) = track {
+        if let Some(t) = app.cursor_track().filter(audio) {
             params["track"] = serde_json::json!(t.0);
         }
-        let r = app.run("file.import_audio", params);
-        if let Ok(v) = &r {
-            let one = &v["imported"][0];
-            if let (Some(t), Some(len)) = (one["track"].as_u64(), one["frames"].as_i64()) {
-                return Some((TrackId(t), time.saturating_add(len)));
-            }
-        }
-        r
+        app.run("file.import_audio", params)
     };
     if let Err(e) = r {
         log::warn!("{p}: {e}");
     }
-    None
 }
