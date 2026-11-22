@@ -400,6 +400,38 @@ fn witnesses() -> Vec<W> {
             reached: |p| obs(p).anchored,
             completed: |p| !obs(p).anchored,
         },
+        // The transport as last told, read before it is told again: playing in a bar grid that
+        // starts off zero (an earlier meter change) with a bar division synced, T between blocks;
+        // the continuation runs blocks with no `set_transport` (the synced LFO reads the last told
+        // block position, bar origin and bar length), then told blocks, then stops (a stopped
+        // transport is told once: the LFO runs on at the bar length last told).
+        W {
+            boundary: Boundary::Entry("transport not told"),
+            history: |rate| {
+                let mut h = setup();
+                h.extend([
+                    Step::Param("lfo_amount", 60.0),
+                    Step::Param("lfo_sync", 1.0),
+                    Step::Param("lfo_division", 0.0),
+                    Step::BarOffset(1.5),
+                    Step::Transport(Some(100.0)),
+                    Step::On(60, 100, 0),
+                    Step::Run(span(&[LFO], rate)),
+                ]);
+                h
+            },
+            continuation: |rate| {
+                vec![
+                    Step::Untold(span(&[HOLD], rate)),
+                    Step::Run(span(&[HOLD], rate)),
+                    Step::Param("lfo_division", 2.0),
+                    Step::Transport(None),
+                    Step::Run(span(&[LFO], rate)),
+                ]
+            },
+            reached: |p| obs(p).anchored,
+            completed: |p| !obs(p).anchored,
+        },
     ]
 }
 

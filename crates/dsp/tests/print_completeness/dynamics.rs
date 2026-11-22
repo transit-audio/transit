@@ -312,6 +312,20 @@ fn gate_witnesses() -> Vec<GW> {
             reached: |p| p.observe().hold_left > 0 && p.observe().hold_left < p.observe().hold,
             completed: |p| p.observe().env > 0.0,
         },
+        // The detector envelope above the threshold at T (the input loud); the continuation goes
+        // silent, so the envelope's decay decides when the hold starts, then the gate closes
+        // partway and the input comes back.
+        GW {
+            boundary: Boundary::Entry("detector envelope"),
+            history: |rate| {
+                let mut h = gate_setup();
+                h.push(Step::Run(span(&[HOLD], rate)));
+                h
+            },
+            continuation: |rate| vec![Step::Silent(span(&[HOLD], rate) + 300), Step::Run(span(&[HOLD], rate))],
+            reached: |p| p.observe().env > 0.25,
+            completed: |p| p.observe().env > 0.0,
+        },
     ]
 }
 

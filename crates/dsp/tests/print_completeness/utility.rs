@@ -67,6 +67,15 @@ macro_rules! witnesses {
                 reached: |p| !p.settling(),
                 completed: |p| !p.settling(),
             },
+            // The parameter values read again: a gain set and settled at T; the continuation prepares
+            // again at the case's rate (`prepare` sets the target from the parameters and snaps).
+            W {
+                boundary: Boundary::Entry("prepare reads the parameters"),
+                history: |rate| vec![Step::Param("gain", -14.0), Step::Run(frames(&[$settle], rate))],
+                continuation: |rate| vec![Step::Prepare(rate), Step::Run(300)],
+                reached: |p| !p.settling(),
+                completed: |p| !p.settling(),
+            },
             // 10: prepared at another rate, boundary 1's obligation met there, then prepared at the
             // case's rate (T); the continuation meets boundary 1's obligation again.
             W {

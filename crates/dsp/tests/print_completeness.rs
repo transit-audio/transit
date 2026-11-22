@@ -142,6 +142,12 @@ enum Step {
     Event(u32, transit_dsp::event::PluginEvent),
     /// `Plugin::all_notes_off`, as the mix calls it for a skipped block.
     AllNotesOff,
+    /// `frames` of input in maximum blocks with no `set_transport` before them even while the
+    /// transport plays (the trait does not require one before every `process`).
+    Untold(usize),
+    /// The transport's bar grid from now on starts this many quarter notes after zero
+    /// ([`Clock::bar_offset`]).
+    BarOffset(f64),
 }
 
 /// What a script did.
@@ -178,6 +184,9 @@ struct Clock {
     frames: usize,
     tempo: Option<f64>,
     rate: f32,
+    /// Where bar 0 would start, in quarter notes (0 unless a script sets it): the bar grid of a
+    /// song whose meter changed earlier.
+    bar_offset: f64,
 }
 
 impl Clock {
@@ -198,8 +207,8 @@ impl Clock {
             samples: self.frames as i64,
             seconds,
             quarters,
-            bar_start: (quarters / 3.0).floor() * 3.0,
-            bar: (quarters / 3.0).floor() as i64,
+            bar_start: ((quarters - self.bar_offset) / 3.0).floor() * 3.0 + self.bar_offset,
+            bar: ((quarters - self.bar_offset) / 3.0).floor() as i64,
         }
     }
 }
@@ -219,10 +228,11 @@ fn run<P: Plugin + ?Sized>(
     for (s, step) in steps.iter().enumerate() {
         let silent = matches!(step, Step::Silent(_));
         let scale = if matches!(step, Step::Small(_)) { 1.0e-3 } else { 1.0 };
+        let told = !matches!(step, Step::Untold(_));
         let blocks: Vec<usize> = match *step {
             Step::Run(n) => lengths(n, s * 7 + clock.frames).collect(),
             Step::RunBlocks(n, b) => (0..n.div_ceil(b)).map(|k| b.min(n - k * b)).collect(),
-            Step::Silent(n) | Step::Small(n) => (0..n.div_ceil(MAX_BLOCK)).map(|k| MAX_BLOCK.min(n - k * MAX_BLOCK)).collect(),
+            Step::Silent(n) | Step::Small(n) | Step::Untold(n) => (0..n.div_ceil(MAX_BLOCK)).map(|k| MAX_BLOCK.min(n - k * MAX_BLOCK)).collect(),
             ref other => {
                 for p in ps.iter_mut() {
                     match *other {
@@ -241,12 +251,13 @@ fn run<P: Plugin + ?Sized>(
                             p.event(at, &ev);
                         }
                         Step::AllNotesOff => p.all_notes_off(),
-                        Step::Run(_) | Step::RunBlocks(..) | Step::Silent(_) | Step::Small(_) => {}
+                        Step::Run(_) | Step::RunBlocks(..) | Step::Silent(_) | Step::Small(_) | Step::Untold(_) | Step::BarOffset(_) => {}
                     }
                 }
                 match *other {
                     Step::Prepare(rate) => clock.rate = rate,
                     Step::Transport(t) => clock.tempo = t,
+                    Step::BarOffset(o) => clock.bar_offset = o,
                     _ => {}
                 }
                 continue;
@@ -259,7 +270,7 @@ fn run<P: Plugin + ?Sized>(
                         *x = if silent { 0.0 } else { input(clock.frames + i, c) * scale };
                     }
                 }
-                if clock.tempo.is_some() {
+                if told && clock.tempo.is_some() {
                     p.set_transport(&clock.transport());
                 }
                 p.process(io, n);
