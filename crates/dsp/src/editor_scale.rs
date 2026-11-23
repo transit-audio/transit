@@ -23,13 +23,15 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 pub const PERCENTS: [u16; 6] = [50, 75, 100, 125, 150, 200];
 
 /// The size step of the setting: Auto (the display's scale) or a percentage of the plug-in's
-/// size at 100 percent. Saved as `"auto"` or the number.
+/// size at 100 percent. Saved as `"auto"` or the number; anything else does not load (the app's
+/// settings loader then keeps that field at its default and says so in the log, as for every
+/// other preference).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ScaleStep {
     /// The display's scale.
     #[default]
     Auto,
-    /// One of [`PERCENTS`] (a hand-edited other value is read as Auto).
+    /// One of [`PERCENTS`].
     Percent(u16),
 }
 
@@ -68,14 +70,17 @@ impl<'de> Deserialize<'de> for ScaleStep {
         #[serde(untagged)]
         enum Raw {
             Number(u64),
-            Other(serde::de::IgnoredAny),
+            Text(String),
         }
-        // Anything but one of the offered percentages reads as Auto: a hand-edited or future
-        // value never fails the whole settings file.
-        Ok(match Raw::deserialize(d)? {
-            Raw::Number(n) => u16::try_from(n).ok().filter(|p| PERCENTS.contains(p)).map_or(ScaleStep::Auto, ScaleStep::Percent),
-            Raw::Other(_) => ScaleStep::Auto,
-        })
+        match Raw::deserialize(d)? {
+            Raw::Number(n) => u16::try_from(n)
+                .ok()
+                .filter(|p| PERCENTS.contains(p))
+                .map(ScaleStep::Percent)
+                .ok_or_else(|| serde::de::Error::custom(format!("scale step {n} is not one of {PERCENTS:?}"))),
+            Raw::Text(t) if t == "auto" => Ok(ScaleStep::Auto),
+            Raw::Text(t) => Err(serde::de::Error::custom(format!("scale step \"{t}\" is not \"auto\" or a percentage"))),
+        }
     }
 }
 

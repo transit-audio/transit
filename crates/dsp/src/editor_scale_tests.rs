@@ -229,10 +229,11 @@ fn the_menu_lists_steps_and_modes_with_the_setting_each_picks() {
     assert!(matches!(m.last(), Some(ScaleEntry::Info(r)) if r.contains("stretched by Windows")));
 }
 
-/// The saved form: `{"step": "auto" | <percent>, "mode": null | "host_factor" | ...}`; anything
-/// unknown reads as the default instead of failing the settings file.
+/// The saved form: `{"step": "auto" | <percent>, "mode": null | "host_factor" | ...}`; a missing
+/// key takes its default, and a value that is not one of these does not load (as every other
+/// preference: the settings loader keeps that field at its default).
 #[test]
-fn the_setting_round_trips_and_unknown_values_read_as_auto() {
+fn the_setting_round_trips_and_unknown_values_do_not_load() {
     for s in every_setting() {
         let v = serde_json::to_value(s).unwrap();
         assert_eq!(serde_json::from_value::<EditorScale>(v).unwrap(), s);
@@ -242,8 +243,9 @@ fn the_setting_round_trips_and_unknown_values_read_as_auto() {
         serde_json::json!({"step": 150, "mode": "windows_stretch"})
     );
     assert_eq!(serde_json::to_value(EditorScale::default()).unwrap(), serde_json::json!({"step": "auto", "mode": null}));
-    for odd in [serde_json::json!({"step": 333}), serde_json::json!({"step": "huge"}), serde_json::json!({})] {
-        assert_eq!(serde_json::from_value::<EditorScale>(odd).unwrap(), EditorScale::default());
+    assert_eq!(serde_json::from_value::<EditorScale>(serde_json::json!({})).unwrap(), EditorScale::default());
+    for odd in [serde_json::json!({"step": 333}), serde_json::json!({"step": "huge"}), serde_json::json!({"mode": "sideways"})] {
+        assert!(serde_json::from_value::<EditorScale>(odd.clone()).is_err(), "{odd} loads");
     }
 }
 

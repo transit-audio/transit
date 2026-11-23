@@ -333,7 +333,7 @@ mod round_trip_tests {
                 let f = n.as_f64().unwrap();
                 vec![json!(f + 1.0), json!(f * 0.75), json!(1.5)]
             }
-            Value::String(_) => ["x", "dark", "light", "jump", "pickup", "C4"].iter().map(|s| json!(s)).collect(),
+            Value::String(_) => ["x", "dark", "light", "jump", "pickup", "C4", "host_factor"].iter().map(|s| json!(s)).collect(),
             Value::Null => vec![json!(1), json!("x")],
             Value::Array(_) | Value::Object(_) => Vec::new(),
         }
@@ -366,6 +366,7 @@ mod round_trip_tests {
         v["device_windows"] = json!({"plaits": [10.0, 20.0]});
         v["device_sections"] = json!({"plaits/env": true});
         v["plugin_load_ms"] = json!({"vst3:abc": 1200});
+        v["editor_scale"] = json!({"vst3:abc": {"step": 150, "mode": "plugin_zoom"}});
         let loaded = save(&load(&v).unwrap());
         assert_eq!(loaded, v, "the filled collections load and save unchanged");
         v
