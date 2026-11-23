@@ -299,3 +299,142 @@ fn a_paste_behind_a_dialog_does_nothing() {
     paste(&mut t);
     assert_eq!(clips(&t), before + 1, "the paste works with no dialog up");
 }
+
+/// #770 round 3: a browser drag in progress when a dialog comes up is cancelled, and its release
+/// behind the dialog lands nowhere.
+#[test]
+fn a_browser_drag_is_cancelled_when_a_dialog_comes_up() {
+    let mut t = T::new();
+    let at = pos2(1250.0, 700.0);
+    let tracks = t.app.engine.session().tracks.len();
+    let status = t.app.status.clone();
+    t.app.browser.drag = Some(crate::browser::Drag { payload: crate::browser::Payload::Files(vec!["a dragged file.wav".into()]), target: None });
+    t.frame(vec![Event::PointerMoved(at), T::button(at, true)]);
+    t.app.about.open = true;
+    t.frames(3);
+    assert!(t.app.browser.drag.is_none(), "the drag was cancelled when the dialog came up");
+    t.frame(vec![T::button(at, false)]);
+    t.frames(2);
+    assert_eq!(t.app.engine.session().tracks.len(), tracks, "no track made by the drop");
+    assert_eq!(t.app.status, status, "nothing was dropped");
+}
+
+/// #770 round 3: a browser drop queued for a Sampler view is refused with the file drops while a
+/// dialog is up.
+#[test]
+fn a_queued_sampler_offer_is_refused_behind_a_dialog() {
+    let mut t = T::new();
+    t.app.about.open = true;
+    t.frames(3);
+    let key = (transit_model::TrackId(1), 0);
+    crate::drops::offer_next(&mut t.app, key, "a queued file.wav".into(), None);
+    t.frames(1);
+    assert!(crate::drops::take(&mut t.app, key).is_none(), "the queued offer went with the refused drop");
+}
+
+/// Every dialog's flag is in `StudioApp::modal_mask`, each its own bit, and every place that draws
+/// a dialog is counted below: a new dialog fails the census until its flag is added to the mask
+/// and a row here (#770 round 3). The plug-in-not-responding message's flag needs a stuck host
+/// thread; `host_hang_tests` covers it.
+#[test]
+fn every_dialog_flag_is_in_the_mask() {
+    use crate::sampler_panel::{PadsView, kit_load, kit_presets};
+    type Set = fn(&mut StudioApp);
+    let sets: [(&str, Set); 17] = [
+        ("save changes", |a| a.dialog = Some(Dialog::SaveChanges { then: ("session.new".into(), json!({})) })),
+        ("delete tracks", |a| a.dialog = Some(Dialog::DeleteTracks { tracks: Vec::new(), clips: false })),
+        ("export audio", |a| a.dialog = Some(Dialog::Bounce)),
+        ("dawproject export", |a| a.dialog = Some(Dialog::DawprojectExport)),
+        ("bounce in place", |a| a.dialog = Some(Dialog::BounceInPlace)),
+        ("hidden tracks", |a| a.dialog = Some(Dialog::HiddenTracks)),
+        ("delete take", |a| a.dialog = Some(Dialog::DeleteTake { track: transit_model::TrackId(1), take: 1 })),
+        ("about", |a| a.about.open = true),
+        ("quantize", |a| a.keys.quantize_open = true),
+        ("hardware insert", |a| a.mixer.hw_picker = Some(transit_model::TrackId(1))),
+        ("keyboard shortcuts", |a| a.ui.show_shortcuts = true),
+        ("recover", |a| {
+            a.leftovers = vec![transit_engine::autosave::Leftover {
+                dir: "no such folder".into(),
+                name: "x".into(),
+                origin: None,
+                saved: std::time::SystemTime::UNIX_EPOCH,
+                recording: false,
+                midi_journal: None,
+                midi_placed: false,
+            }];
+        }),
+        ("kit file question", |a| {
+            let mut v = PadsView::default();
+            v.kit.confirm = Some((kit_presets::Confirm::Delete { file: "k".into(), name: "k".into() }, false));
+            a.builtin_editor.devices.sampler.views.insert(1, v);
+        }),
+        ("load kit", |a| {
+            let mut v = PadsView::default();
+            v.kit_preview = Some(kit_load::Preview::for_test("3 files"));
+            a.builtin_editor.devices.sampler.views.insert(1, v);
+        }),
+        ("remove zone", |a| {
+            let mut v = PadsView::default();
+            v.instrument.confirm = Some(1);
+            a.builtin_editor.devices.sampler.views.insert(1, v);
+        }),
+        ("replace the loaded pads", |a| {
+            let mut v = PadsView::default();
+            v.kit.pending = Some(kit_presets::Pending { file: "k".into(), name: "k".into(), step: false, detail: String::new() });
+            a.builtin_editor.devices.sampler.views.insert(1, v);
+        }),
+        ("none", |_| {}),
+    ];
+    let mut seen = Vec::new();
+    for (name, set) in sets {
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
+        set(&mut app);
+        let m = app.modal_mask();
+        if name == "none" {
+            assert_eq!(m, 0, "no dialog, no bit");
+            continue;
+        }
+        assert_eq!(m.count_ones(), 1, "{name}: one bit, got {m:#b}");
+        assert!(!seen.contains(&m), "{name}: its own bit");
+        seen.push(m);
+    }
+    // The census: every call that draws a dialog, by file. A new one changes a count here.
+    let calls = ["theme::modal_window(", "chrome::modal(", "modal_with(", "chrome::raw_modal("];
+    let expected: [(&str, usize); 12] = [
+        ("about.rs", 1),
+        ("bounce_in_place.rs", 2),
+        ("dawproject.rs", 1),
+        ("finish.rs", 5),
+        ("hardware_ui.rs", 1),
+        ("host_hang.rs", 1),
+        ("keys/quantize.rs", 1),
+        ("menus.rs", 5),
+        ("sampler_panel/instrument/keyboard.rs", 1),
+        ("sampler_panel/kit_load.rs", 2),
+        ("sampler_panel/kit_presets.rs", 2),
+        ("chrome.rs", 0),
+    ];
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let mut found = std::collections::BTreeMap::new();
+    let mut stack = vec![root.clone()];
+    while let Some(dir) = stack.pop() {
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let path = e.unwrap().path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+            let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+            if !rel.ends_with(".rs") || rel.contains("tests") || rel == "chrome.rs" || rel == "theme.rs" {
+                continue;
+            }
+            let code = std::fs::read_to_string(&path).unwrap();
+            let n: usize = calls.iter().map(|c| code.matches(c).count()).sum();
+            if n > 0 {
+                found.insert(rel, n);
+            }
+        }
+    }
+    let want: std::collections::BTreeMap<String, usize> = expected.iter().filter(|(_, n)| *n > 0).map(|(f, n)| ((*f).to_string(), *n)).collect();
+    assert_eq!(found, want, "a dialog was added or removed: give it a bit in StudioApp::modal_mask and update this census");
+}

@@ -26,7 +26,7 @@ pub mod bar;
 mod behavior;
 mod grid;
 pub mod instrument;
-mod kit_load;
+pub(crate) mod kit_load;
 pub mod kit_presets;
 mod live;
 pub(crate) mod pad_actions;

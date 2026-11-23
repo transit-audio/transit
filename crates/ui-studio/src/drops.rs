@@ -93,6 +93,8 @@ pub(crate) fn step(app: &mut StudioApp, ctx: &egui::Context) {
         }
         r.pending.clear();
         r.gone_frames = None;
+        // A browser drop queued for a Sampler view goes too: it is a drop as much as a file is.
+        r.offer = None;
         return;
     }
     r.pending.extend(files);

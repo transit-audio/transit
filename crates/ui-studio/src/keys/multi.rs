@@ -171,7 +171,7 @@ impl StudioApp {
     }
 
     /// Window blur cancels a held N and restores the mode it found.
-    pub(super) fn keys_focus_cancel(&mut self) {
+    pub(crate) fn keys_focus_cancel(&mut self) {
         if let Some((_, was)) = self.keys.focus_down.take() {
             self.keys_focus_set(was);
         }

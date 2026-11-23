@@ -170,6 +170,14 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
+impl HostHang {
+    /// Forgets every Later (tests: the message comes back at once, as at the watchdog's relog).
+    #[cfg(test)]
+    pub(crate) fn forget_later(&mut self) {
+        self.later.clear();
+    }
+}
+
 impl StudioApp {
     /// "Give up on <plug-in>" (issue #205): quarantines every stuck host thread's plug-ins and asks
     /// their windows to hide; the status line says what happened and how many plug-ins it took.

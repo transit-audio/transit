@@ -654,3 +654,18 @@ fn step_entry_enter_and_space_wait_behind_a_dialog() {
     t.app.step_message_at(Note(60), 0, 100);
     assert_eq!(t.notes()[0].length, 2 * SIXTEENTH, "Enter ties with no dialog up");
 }
+
+/// #770 round 3: a dialog coming up while step entry's Enter is held cancels the hold: no rest is
+/// written behind it, then or later.
+#[test]
+fn a_dialog_cancels_a_held_step_control() {
+    let mut t = T::open();
+    t.step_on();
+    let cursor = t.app.keys.step.cursor;
+    t.app.step_keyboard_control(true);
+    t.app.about.open = true;
+    t.frames(3);
+    t.app.step_tick_at(u64::MAX);
+    t.frames(2);
+    assert_eq!(t.app.keys.step.cursor, cursor, "no rest is written behind the dialog");
+}

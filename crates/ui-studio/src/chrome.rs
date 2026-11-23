@@ -358,6 +358,7 @@ fn modal_keys(ctx: &egui::Context, id: egui::Id, default: bool) -> Option<Choice
 /// [`crate::modal::escape`] and [`crate::modal::enter`] with [`crate::modal::layer_of`]`(id)`.
 pub fn raw_modal(ctx: &egui::Context, id: egui::Id) -> egui::Modal {
     crate::modal::mark(ctx);
+    crate::modal::register(ctx, crate::modal::layer_of(id));
     egui::Modal::new(id).backdrop_color(TOKENS.overlay)
 }
 

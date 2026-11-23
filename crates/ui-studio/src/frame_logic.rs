@@ -455,6 +455,20 @@ impl StudioApp {
     /// while a modal is open or opening (#770: `ui` asks [`crate::modal::up`] first); the frame's
     /// modal fact is brought up to date after each one that can ask for a dialog, so the handlers
     /// after it wait too.
+    /// What the background key handlers hold, kept up every frame whether or not they may take
+    /// new presses (#770): held auditions released when stale, a pad drag ended once no button is
+    /// down. While a dialog holds the app (`modal`), every held background key or button counts as
+    /// let go at once: Sampler auditions stop, a pad drag ends, step entry's held Enter or Space
+    /// (and its repeating rests) is cancelled, a momentary Focus Mode (N held) ends.
+    fn background_releases(&mut self, ctx: &egui::Context, modal: bool) {
+        crate::sampler_panel::slices::release_held(self, ctx, modal);
+        crate::sampler_panel::pad_actions::drag_release(self, ctx, modal);
+        if modal {
+            self.step_keyboard_cancel();
+            self.keys_focus_cancel();
+        }
+    }
+
     fn background_keys(&mut self, ctx: &egui::Context) {
         type Keys = fn(&mut StudioApp, &egui::Context);
         let handlers: [Keys; 16] = [
@@ -486,6 +500,8 @@ impl StudioApp {
             keys(self, ctx);
             self.sync_modal(ctx);
             if crate::modal::up(ctx) {
+                // A dialog asked for by this handler: what the handlers hold is let go now.
+                self.background_releases(ctx, true);
                 return;
             }
         }
@@ -499,7 +515,9 @@ impl StudioApp {
         // The Instrument view's remove question is a dialog drawn here, before the keys it holds.
         crate::sampler_panel::instrument::keyboard::confirm(self, &ctx);
         self.sync_modal(&ctx);
-        if !crate::modal::up(&ctx) {
+        let modal = crate::modal::up(&ctx);
+        self.background_releases(&ctx, modal);
+        if !modal {
             self.background_keys(&ctx);
         }
         if let Some(delay) = self.midi_learn_feed(ctx.input(|i| i.time)) {

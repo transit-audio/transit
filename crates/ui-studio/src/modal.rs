@@ -32,10 +32,61 @@ pub fn mark(ctx: &Context) {
     ctx.data_mut(|d| d.insert_temp(flag(), frame));
 }
 
-/// Whether the modal on `layer` was the top modal last frame (the one that owns the keys).
+/// The modals drawn in the current frame and the one before it (each registers as it is shown).
+#[derive(Clone, Default)]
+struct Drawn {
+    frame: u64,
+    now: Vec<LayerId>,
+    last: Vec<LayerId>,
+}
+
+fn drawn_id() -> Id {
+    Id::new("transit-modal-drawn")
+}
+
+/// Registers the modal on `layer` as drawn this frame (the window wrapper and `chrome::raw_modal`
+/// call it).
+pub fn register(ctx: &Context, layer: LayerId) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| {
+        let r = d.get_temp_mut_or_default::<Drawn>(drawn_id());
+        if r.frame != frame {
+            r.last = if r.frame + 1 == frame { std::mem::take(&mut r.now) } else { Vec::new() };
+            r.now.clear();
+            r.frame = frame;
+        }
+        if !r.now.contains(&layer) {
+            r.now.push(layer);
+        }
+    });
+}
+
+/// The modal that owns the keys this frame: of the modals drawn last frame, the one highest in the
+/// layer order as it stands now. egui's own modal layer was settled against the order of the frame
+/// before, so for one frame after a dialog is raised over another (the plug-in-not-responding
+/// message coming back over About) it still names the covered one; the order already has the
+/// raised one on top (#770 round 3).
+#[must_use]
+pub fn owner(ctx: &Context) -> Option<LayerId> {
+    let frame = ctx.cumulative_frame_nr();
+    let r = ctx.data(|d| d.get_temp::<Drawn>(drawn_id())).unwrap_or_default();
+    let last = if r.frame == frame {
+        r.last
+    } else if r.frame + 1 == frame {
+        r.now
+    } else {
+        Vec::new()
+    };
+    ctx.memory(|m| {
+        let order: Vec<LayerId> = m.layer_ids().collect();
+        last.into_iter().filter_map(|l| order.iter().position(|o| *o == l).map(|at| (at, l))).max_by_key(|(at, _)| *at).map(|(_, l)| l)
+    })
+}
+
+/// Whether the modal on `layer` owns the keys this frame ([`owner`]).
 #[must_use]
 pub fn is_top(ctx: &Context, layer: LayerId) -> bool {
-    ctx.memory(|m| m.top_modal_layer()) == Some(layer)
+    owner(ctx) == Some(layer)
 }
 
 /// Whether the dialog's own keys are held back this frame: a text field (or a drag value's text
@@ -127,7 +178,7 @@ pub fn opening_drops(event: &egui::Event) -> bool {
 
 impl crate::StudioApp {
     /// The modal dialogs asked for now, one bit each (the app's dialog slot by its kind, so a new
-    /// question in the slot counts as a new dialog).
+    /// question in the slot counts as a new dialog). Every dialog the app draws has its flag here.
     #[must_use]
     pub(crate) fn modal_mask(&self) -> u64 {
         use crate::Dialog as D;
@@ -153,15 +204,19 @@ impl crate::StudioApp {
         bit(!self.leftovers.is_empty(), 12);
         bit(crate::host_hang::shown(self), 13);
         let views = self.builtin_editor.devices.sampler.views.values();
-        let (mut kit, mut load, mut zone) = (false, false, false);
+        let (mut kit, mut load, mut zone, mut replace) = (false, false, false, false);
         for v in views {
             kit |= v.kit.confirm.is_some();
+            replace |= v.kit.pending.is_some();
             load |= v.kit_preview.is_some();
             zone |= v.instrument.confirm.is_some();
         }
         bit(kit, 14);
         bit(load, 15);
         bit(zone, 16);
+        bit(replace, 17);
+        // A new dialog: give it a bit here and a row in `modal_hold_tests::every_dialog_flag_is_in_the_mask`
+        // (its call-site census fails until both are done).
         m
     }
 
@@ -202,5 +257,17 @@ impl crate::StudioApp {
 #[must_use]
 pub fn reaches(ui: &egui::Ui) -> bool {
     let ctx = ui.ctx();
-    !up(ctx) || ctx.memory(|m| m.top_modal_layer().is_some() && m.is_above_modal_layer(ui.layer_id()))
+    if !up(ctx) {
+        return true;
+    }
+    let Some(top) = owner(ctx) else { return false };
+    let layer = ui.layer_id();
+    ctx.memory(|m| {
+        let order: Vec<LayerId> = m.layer_ids().collect();
+        match (order.iter().position(|o| *o == layer), order.iter().position(|o| *o == top)) {
+            (Some(at), Some(owner)) => at >= owner,
+            // A layer new this frame (a list just opened): egui's own answer.
+            _ => m.top_modal_layer().is_some() && m.is_above_modal_layer(layer),
+        }
+    })
 }

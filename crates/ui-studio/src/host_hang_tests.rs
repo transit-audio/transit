@@ -70,11 +70,19 @@ impl T {
 
     fn frames(&mut self, n: usize) {
         for _ in 0..n {
+            self.frame(Vec::new());
+        }
+    }
+
+    /// One frame carrying `events`.
+    fn frame(&mut self, events: Vec<egui::Event>) {
+        {
             self.app.player.as_ref().unwrap().step_device_free();
             self.time += 1.0 / 60.0;
             let mut raw = egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
                 time: Some(self.time),
+                events,
                 ..Default::default()
             };
             self.app.raw_input_hook(&mut raw);
@@ -193,4 +201,32 @@ fn give_up_works_over_an_open_dialog() {
     t.click(give_up);
     assert_eq!(t.host.given_up(), 1, "Give up, clicked over About, gave up on the thread");
     assert!(t.app.about.open);
+}
+
+/// #770 round 3: the message coming back over About and a save question is the dialog that owns
+/// the keys from the frame it is raised: neither on that frame nor the next does Escape close About
+/// or cancel the question, nor Enter answer it.
+#[test]
+fn the_message_owns_the_keys_from_the_frame_it_comes_back() {
+    let mut t = T::stuck_with("Guitar Rig 7", 1.0, |_| {});
+    let later = t.app.host_hang.layout.later.expect("Later");
+    t.click(later);
+    assert!(t.app.host_hang.layout.lines.is_empty(), "Later hid the message");
+    t.app.about.open = true;
+    t.frames(3);
+    t.app.dialog = Some(crate::Dialog::SaveChanges { then: ("session.new".into(), json!({})) });
+    t.frames(3);
+    t.app.host_hang.forget_later();
+    let keys = || {
+        vec![
+            egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE },
+            egui::Event::Key { key: egui::Key::Enter, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE },
+        ]
+    };
+    t.frame(keys());
+    assert!(!t.app.host_hang.layout.lines.is_empty(), "the message is back");
+    t.frame(keys());
+    t.frames(2);
+    assert!(t.app.about.open, "About stays open under the message");
+    assert!(matches!(t.app.dialog, Some(crate::Dialog::SaveChanges { .. })), "the save question is neither cancelled nor answered");
 }

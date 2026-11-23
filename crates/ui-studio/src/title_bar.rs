@@ -197,6 +197,9 @@ impl<'a> Window<'a> {
                     }
                 });
             }
+            if modal.is_some() {
+                crate::modal::register(ctx, layer);
+            }
             swap_controls(ctx, layer, r.response.rect, r.inner.is_some(), collapsible, closable);
         }
         shown

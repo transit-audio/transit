@@ -909,6 +909,11 @@ pub fn panel(app: &mut StudioApp, ui: &mut Ui) {
 /// A drag out of the browser: while held, show where it would land; on release, drop it there.
 fn drive_drag(app: &mut StudioApp, ctx: &egui::Context) {
     let Some(drag) = app.browser.drag.clone() else { return };
+    // A dialog holds the app (#770): the drag is cancelled at once and lands nowhere.
+    if crate::modal::up(ctx) {
+        app.browser.drag = None;
+        return;
+    }
     let (down, pos, shift) = ctx.input(|i| (i.pointer.primary_down(), i.pointer.latest_pos(), i.modifiers.shift));
     let audio = matches!(&drag.payload, Payload::Files(f) if first_audio(f).is_some());
     let target = pos.and_then(|p| app.drop_target(ctx, p, !shift, audio));
