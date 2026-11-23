@@ -659,13 +659,19 @@ fn step_entry_enter_and_space_wait_behind_a_dialog() {
 /// written behind it, then or later.
 #[test]
 fn a_dialog_cancels_a_held_step_control() {
-    let mut t = T::open();
-    t.step_on();
-    let cursor = t.app.keys.step.cursor;
-    t.app.step_keyboard_control(true);
-    t.app.about.open = true;
-    t.frames(3);
-    t.app.step_tick_at(u64::MAX);
-    t.frames(2);
-    assert_eq!(t.app.keys.step.cursor, cursor, "no rest is written behind the dialog");
+    let held_rests = |about: bool| {
+        let mut t = T::open();
+        t.step_on();
+        t.app.ui.keys.step_hold.enabled = true;
+        t.app.keys.active = true;
+        let cursor = t.app.keys.step.cursor;
+        t.app.step_keyboard_control_at(true, 0);
+        t.app.about.open = about;
+        t.frames(3);
+        // Held 700 ms on the step clock (rests repeat from there, as the pedal test shows).
+        t.app.step_tick_at(700);
+        t.app.keys.step.cursor != cursor
+    };
+    assert!(held_rests(false), "control: a held Enter repeats rests with no dialog up");
+    assert!(!held_rests(true), "no rest is written behind the dialog");
 }
