@@ -65,10 +65,10 @@ pub mod midi_fx_panel;
 mod midi_input;
 pub mod midi_learn;
 pub mod midi_monitor;
-pub mod modal;
 mod midi_output;
 mod midi_transport;
 pub mod mixer;
+pub mod modal;
 pub mod modal_voice_panel;
 pub mod modulator_panel;
 pub mod panel;
@@ -811,9 +811,9 @@ mod midi_record_tests;
 #[cfg(test)]
 mod midi_reopen_tests;
 #[cfg(test)]
-mod modal_voice_panel_tests;
-#[cfg(test)]
 mod modal_hold_tests;
+#[cfg(test)]
+mod modal_voice_panel_tests;
 #[cfg(test)]
 mod modal_window_tests;
 #[cfg(test)]

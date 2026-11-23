@@ -37,7 +37,10 @@ impl T {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SCREEN)),
             time: Some(self.time),
             events: std::iter::once(Event::ModifiersChanged(self.mods)).chain(events).collect(),
-            dropped_files: std::mem::take(&mut self.dropped).into_iter().map(|p| std::sync::Arc::new(Dropped(p)) as egui::DroppedFileHandle).collect(),
+            dropped_files: std::mem::take(&mut self.dropped)
+                .into_iter()
+                .map(|p| std::sync::Arc::new(Dropped(p)) as egui::DroppedFileHandle)
+                .collect(),
             ..Default::default()
         };
         self.app.raw_input_hook(&mut raw);

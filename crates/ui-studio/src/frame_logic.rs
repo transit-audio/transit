@@ -458,9 +458,9 @@ impl StudioApp {
     fn background_keys(&mut self, ctx: &egui::Context) {
         type Keys = fn(&mut StudioApp, &egui::Context);
         let handlers: [Keys; 16] = [
-            midi_learn::keys,    // an armed MIDI Learn takes Escape first
-            finish::rename_keys, // slice 6: a name being typed owns Escape and Enter
-            tempo_edit::keys,    // the tempo and meter fields own Escape and Enter
+            midi_learn::keys,     // an armed MIDI Learn takes Escape first
+            finish::rename_keys,  // slice 6: a name being typed owns Escape and Enter
+            tempo_edit::keys,     // the tempo and meter fields own Escape and Enter
             clip_inspector::keys, // Escape in a fade field gives its draft up
             // A Slices bench drag takes Escape first (it cancels the drag; the window stays).
             crate::sampler_panel::slices::keys,

@@ -1000,7 +1000,8 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     }
     let s = app.engine.session_arc();
     let mut lay = BounceLayout::default();
-    let (mut go, mut cancel, mut choose) = (false, crate::modal::answers(ctx, crate::modal::layer_of(egui::Id::new("bounce_form")), A::DialogCancel), false);
+    let (mut go, mut cancel, mut choose) =
+        (false, crate::modal::answers(ctx, crate::modal::layer_of(egui::Id::new("bounce_form")), A::DialogCancel), false);
     let path_id = egui::Id::new("bounce_path");
     let resp = crate::chrome::raw_modal(ctx, egui::Id::new("bounce_form")).show(ctx, |ui| {
         ui.set_width(420.0);
