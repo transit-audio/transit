@@ -14,6 +14,8 @@ struct T {
     ctx: egui::Context,
     time: f64,
     dropped: Vec<std::path::PathBuf>,
+    /// The modifiers the next frames hold.
+    mods: Modifiers,
 }
 
 impl T {
@@ -23,6 +25,7 @@ impl T {
             ctx: egui::Context::default(),
             time: 0.0,
             dropped: Vec::new(),
+            mods: Modifiers::NONE,
         };
         t.frames(3);
         t
@@ -33,7 +36,7 @@ impl T {
         let mut raw = egui::RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, SCREEN)),
             time: Some(self.time),
-            events,
+            events: std::iter::once(Event::ModifiersChanged(self.mods)).chain(events).collect(),
             dropped_files: std::mem::take(&mut self.dropped).into_iter().map(|p| std::sync::Arc::new(Dropped(p)) as egui::DroppedFileHandle).collect(),
             ..Default::default()
         };
@@ -261,4 +264,35 @@ fn no_dialog_builds_an_egui_modal_by_hand() {
         }
     }
     assert!(found.is_empty(), "build modals with chrome::raw_modal: {found:?}");
+}
+
+/// The keyboard handlers behind a dialog wait as a group (#770 round 2): a paste (egui's Paste
+/// event, read directly, not through the shortcut table) does nothing behind About.
+#[test]
+fn a_paste_behind_a_dialog_does_nothing() {
+    let mut t = T::new();
+    let tr = t.app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let c = t.app.run("midi.new_clip", json!({"tracks": [tr], "start": 0, "end": 3840})).unwrap()["clip"].as_u64().unwrap();
+    t.app.run("edit.select", json!({"clips": [c]})).unwrap();
+    t.frames(2);
+    t.app.copy_selected(false).unwrap();
+    // Paste lands at the cursor: put it well past the clip, so a paste adds a clip of its own.
+    t.app.set_cursor(480_000, None);
+    let clips = |t: &T| t.app.engine.session().tracks.iter().map(|tr| tr.clips().len()).sum::<usize>();
+    let before = clips(&t);
+    let paste = |t: &mut T| {
+        t.mods = Modifiers::COMMAND;
+        t.frame(vec![Event::Paste(String::new())]);
+        t.mods = Modifiers::NONE;
+        t.frames(2);
+    };
+    t.app.about.open = true;
+    t.frames(3);
+    paste(&mut t);
+    assert_eq!(clips(&t), before, "a paste behind About adds no clip");
+    // Negative control: the same paste with About closed adds one.
+    t.app.about.open = false;
+    t.frames(3);
+    paste(&mut t);
+    assert_eq!(clips(&t), before + 1, "the paste works with no dialog up");
 }
