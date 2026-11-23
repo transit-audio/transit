@@ -369,8 +369,7 @@ fn every_dialog_flag_is_in_the_mask() {
             a.builtin_editor.devices.sampler.views.insert(1, v);
         }),
         ("load kit", |a| {
-            let mut v = PadsView::default();
-            v.kit_preview = Some(kit_load::Preview::for_test("3 files"));
+            let v = PadsView { kit_preview: Some(kit_load::Preview::for_test("3 files")), ..PadsView::default() };
             a.builtin_editor.devices.sampler.views.insert(1, v);
         }),
         ("remove zone", |a| {
