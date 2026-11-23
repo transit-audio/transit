@@ -451,7 +451,7 @@ pub fn menu(setting: EditorScale, inputs: ScaleInputs, in_use: Option<&ScalePlan
 /// One editor's scale state on its own thread: the format hosts keep one per editor and drive it
 /// through an open (`before_open`, then `opened` with the editor's answer), a setting change while
 /// open (`set_setting`), a DPI change (`dpi_changed`) and the menu (`menu`, `pick`).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct ScaleState {
     /// The user's setting (from the app's header).
     pub setting: EditorScale,
@@ -467,6 +467,23 @@ pub struct ScaleState {
     pub entries: Vec<ScaleEntry>,
     /// Windows can stretch here (see [`ScaleInputs::stretch_available`]).
     pub stretch_available: bool,
+    /// The platform the editor runs on ([`Platform::current`]; tests set another).
+    pub platform: Platform,
+}
+
+impl Default for ScaleState {
+    fn default() -> Self {
+        ScaleState {
+            setting: EditorScale::default(),
+            support: None,
+            kept_size: false,
+            display: 1.0,
+            in_use: None,
+            entries: Vec::new(),
+            stretch_available: false,
+            platform: Platform::current(),
+        }
+    }
 }
 
 impl ScaleState {
@@ -476,7 +493,7 @@ impl ScaleState {
         ScaleInputs {
             support: self.support.unwrap_or(ScaleSupport::Unasked),
             display: self.display,
-            platform: Platform::current(),
+            platform: self.platform,
             kept_size: self.kept_size,
             stretch_available: self.stretch_available,
         }

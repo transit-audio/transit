@@ -263,7 +263,7 @@ fn without_the_mixed_hosting_windows_offers_no_stretch() {
 /// One editor's state through an open, a change while open, a DPI change and a menu pick.
 #[test]
 fn the_editor_state_follows_an_open_a_change_a_dpi_change_and_a_pick() {
-    let mut s = ScaleState { stretch_available: true, ..ScaleState::default() };
+    let mut s = ScaleState { stretch_available: true, platform: Platform::Windows, ..ScaleState::default() };
     // Auto on an editor with the call: ask with the display's factor; it accepts.
     let first = s.before_open(1.5, true);
     assert_eq!(first.factor, Some(1.5));
@@ -299,7 +299,7 @@ fn the_editor_state_follows_an_open_a_change_a_dpi_change_and_a_pick() {
     let plan = s.opened(None);
     assert_eq!((plan.factor, plan.stretch), (None, Some(1.5)));
     // An editor without the call refuses without being asked.
-    let mut r = ScaleState { stretch_available: true, ..ScaleState::default() };
+    let mut r = ScaleState { stretch_available: true, platform: Platform::Windows, ..ScaleState::default() };
     assert_eq!(r.before_open(1.5, false).stretch, Some(1.5));
     assert_eq!(r.opened(None).factor, None);
     assert!(r.log_line().starts_with("accepts a factor: no; factor in use: none; Windows stretch: 1.5"));
