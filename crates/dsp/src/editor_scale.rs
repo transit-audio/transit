@@ -552,6 +552,10 @@ impl ScaleState {
     /// A new setting. While the editor is open: [`Applies::Now`] means send the plan's factor now
     /// (the caller then calls [`ScaleState::applied`]); [`Applies::NextOpen`] leaves the editor as
     /// it is. While it is closed: [`Applies::NextOpen`] (or `Unchanged`).
+    ///
+    /// A pick that changes nothing on screen (the same factor and the same stretch state, say Auto
+    /// on a 150% display and then 150%) is in use at once: the editor's policy (Auto follows the
+    /// display, a fixed step does not; review round 3 of #153) is the new setting's from now on.
     pub fn set_setting(&mut self, setting: EditorScale) -> (Applies, ScalePlan) {
         let changed = setting != self.setting;
         self.setting = setting;
@@ -561,6 +565,9 @@ impl ScaleState {
             Some(now) => applies(now, &wanted),
             None => Applies::NextOpen,
         };
+        if changed && applies == Applies::Unchanged && self.in_use.is_some() {
+            self.in_use = Some(wanted.clone());
+        }
         (applies, wanted)
     }
 
@@ -613,9 +620,15 @@ impl ScaleState {
     pub fn dpi_answer(&mut self, accepted: bool, kept_size: bool) {
         self.record(accepted, kept_size);
         let display = self.display;
-        if accepted && let Some(p) = &mut self.in_use {
-            p.factor = Some(display);
-            retext(p);
+        let windows = self.platform == Platform::Windows && self.stretch_available;
+        let (support, kept) = (self.support.unwrap_or(ScaleSupport::Unasked), self.kept_size);
+        if let Some(p) = &mut self.in_use {
+            if accepted {
+                p.factor = Some(display);
+                retext(p);
+            }
+            // The kept-size hint follows the latest answer (review round 3).
+            p.hint = p.factor.and_then(|f| hint_for(f, support, kept, windows));
         }
     }
 

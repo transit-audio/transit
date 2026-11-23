@@ -79,6 +79,12 @@ struct FakeView<const SCALES: bool> {
     /// view that reads the DPI at `createView` and was made in a per-monitor-aware context (as on
     /// a 150% display), 1.0 otherwise. Its size is 200×100 times this, times any host factor.
     born: f32,
+    /// Asks for this width (×120) through `resizeView` from inside `setFrame`, while `getSize`
+    /// still reports its own size (review round 3, note 4: a size asked for before `onSize`).
+    ask: Option<i32>,
+    /// The size the host last gave in `onSize`: `getSize` reports it from then on (the SDK: the
+    /// view takes the size `onSize` gives).
+    sized: Mutex<Option<(i32, i32)>>,
 }
 
 #[cfg(windows)]
@@ -111,6 +117,11 @@ impl<const S: bool> IPlugViewTrait for FakeView<S> {
         sb::kResultFalse
     }
     unsafe fn getSize(&self, size: *mut sb::ViewRect) -> sb::tresult {
+        if let Some((w, h)) = *self.sized.lock().unwrap() {
+            // SAFETY: the host's writable rect.
+            unsafe { *size = sb::ViewRect { left: 0, top: 0, right: w, bottom: h } };
+            return sb::kResultOk;
+        }
         let s = *self.scale.lock().unwrap() * self.born;
         // SAFETY: the host's writable rect.
         unsafe { *size = sb::ViewRect { left: 0, top: 0, right: (200.0 * s) as i32, bottom: (100.0 * s) as i32 } };
@@ -120,6 +131,7 @@ impl<const S: bool> IPlugViewTrait for FakeView<S> {
         // SAFETY: the host's rect for this call.
         let mut r = unsafe { *s };
         self.log(format!("onSize {}", r.right - r.left));
+        *self.sized.lock().unwrap() = Some((r.right - r.left, r.bottom - r.top));
         let frame = self.frame.load(Ordering::Relaxed);
         if self.nest.load(Ordering::Relaxed) > 0
             // SAFETY: the frame the host set and keeps alive while set (or null).
@@ -138,6 +150,16 @@ impl<const S: bool> IPlugViewTrait for FakeView<S> {
     }
     unsafe fn setFrame(&self, f: *mut sb::IPlugFrame) -> sb::tresult {
         self.frame.store(f, Ordering::Relaxed);
+        if let Some(w) = self.ask
+            // SAFETY: the frame the host just set (or null).
+            && let Some(frame) = unsafe { vst3::ComRef::from_raw(f) }
+        {
+            let mut r = sb::ViewRect { left: 0, top: 0, right: w, bottom: 120 };
+            // SAFETY: the host's live frame; our own live view and a rect on this frame.
+            let res = unsafe { frame.resizeView(self.me.load(Ordering::Relaxed), &mut r) };
+            let ctx = if thread_unaware() { "unaware" } else { "aware" };
+            self.log(format!("asked {w} {ctx} -> {res}"));
+        }
         sb::kResultOk
     }
     unsafe fn canResize(&self) -> sb::tresult {
@@ -180,13 +202,23 @@ type Spec = (bool, u32, bool, Arc<Mutex<Vec<String>>>);
 #[cfg(windows)]
 thread_local! {
     static SPECS: std::cell::RefCell<std::collections::HashMap<usize, Spec>> = std::cell::RefCell::new(std::collections::HashMap::new());
+    /// Review round 3: the controller keeps a reference to the view it made and hands that same
+    /// view back to a second `createView` while it lives.
+    static SAME_VIEW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Review round 3: views made in the DPI-unaware context ask for this width from `setFrame`.
+    static ASK_WHEN_UNAWARE: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
 }
 
-/// Makes another view like `view` (a fake made by [`make_fake`]), as the controller would.
+/// Makes another view like `view` (a fake made by [`make_fake`]), as the controller would; with
+/// [`SAME_VIEW`] it holds `view` and gives it back.
 #[cfg(windows)]
 fn sibling_of(view: &ComPtr<sb::IPlugView>) -> impl FnMut() -> Option<ComPtr<sb::IPlugView>> + use<> {
     let spec = SPECS.with(|s| s.borrow().get(&(view.as_ptr() as usize)).cloned());
-    move || spec.as_ref().map(|(scales, nest, reads, calls)| make_fake(*scales, *nest, *reads, Arc::clone(calls)))
+    let kept = SAME_VIEW.with(std::cell::Cell::get).then(|| view.clone());
+    move || match &kept {
+        Some(v) => Some(v.clone()),
+        None => spec.as_ref().map(|(scales, nest, reads, calls)| make_fake(*scales, *nest, *reads, Arc::clone(calls))),
+    }
 }
 
 /// Opens `view` in a window at `dpi` with the Scale `setting`, changes it to `then`, and returns
@@ -241,18 +273,19 @@ fn thread_unaware() -> bool {
 fn make_fake(scales: bool, nest: u32, reads_dpi: bool, calls: Arc<Mutex<Vec<String>>>) -> ComPtr<sb::IPlugView> {
     use std::sync::atomic::AtomicPtr;
     let born = if reads_dpi && !thread_unaware() { 1.5 } else { 1.0 };
+    let ask = if thread_unaware() { ASK_WHEN_UNAWARE.with(std::cell::Cell::get) } else { None };
     if reads_dpi {
         calls.lock().unwrap().push(if born > 1.0 { "made aware".into() } else { "made unaware".into() });
     }
     let (c, scale) = (Arc::clone(&calls), Mutex::new(1.0));
     let (frame, me, nest_left) = (AtomicPtr::new(std::ptr::null_mut()), AtomicPtr::new(std::ptr::null_mut()), AtomicU32::new(nest));
     let view = if scales {
-        let w = ComWrapper::new(FakeView::<true> { calls: c, scale, frame, me, nest: nest_left, born });
+        let w = ComWrapper::new(FakeView::<true> { calls: c, scale, frame, me, nest: nest_left, born, ask, sized: Mutex::new(None) });
         let p = w.to_com_ptr::<sb::IPlugView>().unwrap();
         w.me.store(p.as_ptr(), Ordering::Relaxed);
         p
     } else {
-        let w = ComWrapper::new(FakeView::<false> { calls: c, scale, frame, me, nest: nest_left, born });
+        let w = ComWrapper::new(FakeView::<false> { calls: c, scale, frame, me, nest: nest_left, born, ask, sized: Mutex::new(None) });
         let p = w.to_com_ptr::<sb::IPlugView>().unwrap();
         w.me.store(p.as_ptr(), Ordering::Relaxed);
         p
@@ -564,15 +597,69 @@ fn a_scale_change_applies_at_once_or_on_the_next_open_through_the_editor_link() 
 #[cfg(windows)]
 #[test]
 fn a_view_that_reads_the_dpi_when_made_is_made_again_inside_the_unaware_scope() {
-    use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext};
-    // The thread per-monitor aware, as transit's are (a test binary is not).
-    // SAFETY: a predefined context value; this thread's context only, put back below.
-    let previous = unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+    let pm = PerMonitor::enter();
     let calls = Arc::new(Mutex::new(Vec::new()));
     let view = make_fake(false, 0, true, Arc::clone(&calls));
     let (opened, moved, stretched) = open_fake_with(&view, EditorScale::default(), 144, 144);
-    // SAFETY: the context this thread had.
-    unsafe { SetThreadDpiAwarenessContext(previous) };
+    drop(pm);
     assert_eq!(*calls.lock().unwrap(), ["made aware", "made unaware", "attached", "removed"], "made again, the second one attached");
     assert_eq!((opened, moved, stretched), ((200, 100), (200, 100), Some(1.5)), "its 100% size, stretched once");
+}
+
+/// The thread per-monitor aware for one test, as transit's are (a test binary is not).
+#[cfg(windows)]
+struct PerMonitor(windows_sys::Win32::UI::HiDpi::DPI_AWARENESS_CONTEXT);
+
+#[cfg(windows)]
+impl PerMonitor {
+    fn enter() -> PerMonitor {
+        use windows_sys::Win32::UI::HiDpi::{DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetThreadDpiAwarenessContext};
+        // SAFETY: a predefined context value; this thread's context only, put back on drop.
+        PerMonitor(unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) })
+    }
+}
+
+#[cfg(windows)]
+impl Drop for PerMonitor {
+    fn drop(&mut self) {
+        // SAFETY: the context this thread had, on this thread.
+        unsafe { windows_sys::Win32::UI::HiDpi::SetThreadDpiAwarenessContext(self.0) };
+    }
+}
+
+/// Review round 3, finding 2: a controller that hands back its existing view while that view
+/// lives (it kept a reference) gives the view that read 150% when it was made. The host sees the
+/// same object, does not stretch it, and attaches it to a window of the normal kind: drawn at its
+/// own 150% (300×150), never 150% stretched again.
+#[cfg(windows)]
+#[test]
+fn a_controller_that_gives_back_the_same_view_is_not_stretched() {
+    let _pm = PerMonitor::enter();
+    SAME_VIEW.with(|s| s.set(true));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let view = make_fake(false, 0, true, Arc::clone(&calls));
+    let (opened, _, stretched) = open_fake_with(&view, EditorScale::default(), 144, 144);
+    SAME_VIEW.with(|s| s.set(false));
+    assert_eq!(*calls.lock().unwrap(), ["made aware", "attached", "removed"]);
+    assert_eq!((opened, stretched), ((300, 150), None), "its own drawing, not stretched on top");
+}
+
+/// Review round 3, note 4: the new view asks for 260×120 from `setFrame`, before it is attached,
+/// while it still reports 200×100; that request is kept and applied once it is attached, with its
+/// `onSize`.
+#[cfg(windows)]
+#[test]
+fn a_size_the_new_view_asks_for_before_attached_is_applied() {
+    let _pm = PerMonitor::enter();
+    ASK_WHEN_UNAWARE.with(|a| a.set(Some(260)));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let view = make_fake(false, 0, true, Arc::clone(&calls));
+    let (opened, _, stretched) = open_fake_with(&view, EditorScale::default(), 144, 144);
+    ASK_WHEN_UNAWARE.with(|a| a.set(None));
+    let calls = calls.lock().unwrap().clone();
+    assert!(stretched.is_some());
+    assert_eq!(opened, (260, 120), "{calls:?}");
+    assert!(calls.contains(&"onSize 260".to_owned()), "{calls:?}");
+    // Review round 3, note 3: `setFrame` on the stretched view runs in the DPI-unaware scope.
+    assert!(calls.contains(&format!("asked 260 unaware -> {}", sb::kResultTrue)), "{calls:?}");
 }

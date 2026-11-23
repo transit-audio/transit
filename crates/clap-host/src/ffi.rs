@@ -534,6 +534,26 @@ mod tests {
         link.close();
     }
 
+    /// Review round 3, note 5: a hide an earlier GUI left pending is dropped when an editor is
+    /// opened again; the next idle keeps the new GUI shown.
+    #[cfg(windows)]
+    #[test]
+    fn a_hide_left_by_an_earlier_gui_does_not_reach_the_next_one() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
+        let inst = embedded_gain(&[b"CMD:gui-quiet-show"]);
+        let link = inst.gui().unwrap();
+        link.host().gui_hide.store(true, Ordering::Relaxed);
+        link.open_with("reopen", |_| {}).unwrap();
+        {
+            let g = link.lock();
+            // SAFETY: a live window of this thread (idle keeps only a visible one).
+            unsafe { ShowWindow(g.window.as_ref().unwrap().raw().cast(), SW_SHOWNOACTIVATE) };
+        }
+        let _ = link.idle();
+        assert!(link.lock().visible, "the old hide was dropped");
+        link.close();
+    }
+
     /// Issue #153 through the fixture's GUI link: the user's own-zoom mode sends no `set_scale`
     /// (the GUI keeps 400×300) and nothing is stretched; a percentage while open is sent at once
     /// and the window takes the size the GUI then reports; a change to the stretch waits for the

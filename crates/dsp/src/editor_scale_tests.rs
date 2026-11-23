@@ -403,7 +403,14 @@ fn no_factor_is_applied_twice_through_the_editor_state() {
                         assert_eq!(p.stretch.is_some(), stretched, "{what}: the stretch changed while open");
                     };
                     check(&s, &what);
+                    let factor_before = s.in_use.as_ref().unwrap().factor;
                     let (applies, wanted) = s.set_setting(pick);
+                    if applies == Applies::Unchanged && pick != open {
+                        // A pick equal to what is in use (the same factor, the same stretch) is
+                        // in use at once with its own policy.
+                        let p = s.in_use.as_ref().unwrap();
+                        assert_eq!((p.step, p.factor), (wanted.step, factor_before), "{what}: the policy of an equal pick");
+                    }
                     if applies == Applies::Now {
                         assert!(s.support != Some(ScaleSupport::Refuses) && wanted.factor.is_some(), "{what}");
                         s.applied(reply, false);
@@ -422,4 +429,50 @@ fn no_factor_is_applied_twice_through_the_editor_state() {
             }
         }
     }
+}
+
+/// Review round 3, finding 1: a pick with the same factor (Auto on a 150% display, then 150%)
+/// changes nothing on screen but is in use at once: on a 200% display no factor is sent, the
+/// editor stays at 150%, and the menu checks 150% with "In use" at 150%. The reverse (fixed 150%,
+/// then Auto) follows the display: factor 2 is sent.
+#[test]
+fn a_pick_with_the_same_factor_takes_its_policy_at_once() {
+    let mut s = open_accepting(1.5);
+    let (applies, _) = s.set_setting(EditorScale { step: ScaleStep::Percent(150), mode: None });
+    assert_eq!(applies, Applies::Unchanged, "nothing to send");
+    assert_eq!(s.dpi_changed(2.0), None, "a fixed 150% does not follow the display");
+    assert_eq!(first_line(&mut s), "In use: drawn by the plug-in at 150%");
+    let checked: Vec<String> = s
+        .menu()
+        .iter()
+        .filter_map(|e| match e {
+            ScaleEntry::Choice { label, checked: true, .. } => Some(label.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(checked[0], "150%", "{checked:?}");
+    let mut r = ScaleState {
+        stretch_available: true,
+        platform: Platform::Windows,
+        setting: EditorScale { step: ScaleStep::Percent(150), mode: None },
+        ..ScaleState::default()
+    };
+    r.before_open(1.5, true);
+    r.opened(Some((true, false)));
+    assert_eq!(r.set_setting(EditorScale::default()).0, Applies::Unchanged);
+    assert_eq!(r.dpi_changed(2.0), Some(2.0), "Auto follows the display");
+    r.dpi_answer(true, false);
+    assert_eq!(first_line(&mut r), "In use: drawn by the plug-in at 200%");
+}
+
+/// Review round 3, note 5: the kept-size hint follows the latest answer after a DPI change.
+#[test]
+fn the_kept_size_hint_follows_a_dpi_change() {
+    let mut s = ScaleState { stretch_available: true, platform: Platform::Windows, ..ScaleState::default() };
+    s.before_open(1.5, true);
+    s.opened(Some((true, true)));
+    assert!(s.in_use.as_ref().unwrap().hint.is_some(), "accepted 1.5 and kept its size");
+    assert_eq!(s.dpi_changed(2.0), Some(2.0));
+    s.dpi_answer(true, false);
+    assert_eq!(s.in_use.as_ref().unwrap().hint, None, "it resized for 2.0: no hint");
 }

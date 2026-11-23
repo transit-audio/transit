@@ -178,10 +178,11 @@ impl GuiLink {
         let embedded = unsafe { supported(g.plugin, api.as_ptr(), false) };
         probe.support(&g, vt, api, embedded, floating);
         if g.created {
-            probe.created(&g, vt, g.window.as_ref().and_then(hostwin::content_scale), g.window.is_none());
+            in_gui_scope(&g, || probe.created(&g, vt, g.window.as_ref().and_then(hostwin::content_scale), g.window.is_none()));
             if let Some(show) = vt.show {
-                // SAFETY: live plugin with a created GUI; main thread (checked).
-                if !unsafe { show(g.plugin) } {
+                // SAFETY: live plugin with a created GUI; main thread (checked); in the window's
+                // plug-in scope when it is stretched (review round 3).
+                if !in_gui_scope(&g, || unsafe { show(g.plugin) }) {
                     return Err("show failed".into());
                 }
             }
@@ -201,8 +202,8 @@ impl GuiLink {
         if !floating {
             return Err(format!("{} embedding not supported (neither)", api.to_string_lossy()));
         }
-        self.host.gui_closed.store(false, Ordering::Relaxed);
-        self.host.gui_destroyed.store(false, Ordering::Relaxed);
+        // What an earlier GUI left pending goes, show and hide included (review round 3).
+        self.host.forget_gui_requests();
         // SAFETY: as above; no GUI exists yet.
         if !unsafe { create(g.plugin, api.as_ptr(), true) } {
             return Err("create failed".into());
@@ -254,9 +255,8 @@ impl GuiLink {
     ) -> Result<(), String> {
         let Some(create) = vt.create else { return Err("create failed".into()) };
         let Some(set_parent) = vt.set_parent else { return Err("set_parent failed".into()) };
-        self.host.gui_closed.store(false, Ordering::Relaxed);
-        self.host.gui_destroyed.store(false, Ordering::Relaxed);
-        self.host.gui_resize.store(0, Ordering::Relaxed);
+        // What an earlier GUI left pending goes, show and hide included (review round 3).
+        self.host.forget_gui_requests();
         // SAFETY: live plugin; `api` is a static NUL-terminated string; main thread; no GUI yet.
         if !unsafe { create(g.plugin, api.as_ptr(), false) } {
             return Err("create failed".into());
@@ -311,7 +311,8 @@ impl GuiLink {
                 }
             }
         }
-        probe.created(g, vt, display, false);
+        // Every call into a stretched GUI runs in the window's plug-in scope (review round 3).
+        hostwin::in_plugin_scope(&win, || probe.created(g, vt, display, false));
         let Some((w, h)) = probe.size else {
             win.close();
             GuiLink::destroy(g);
@@ -440,8 +441,8 @@ impl GuiLink {
         if g.created
             && let Some(f) = GuiLink::vt(g).and_then(|v| v.destroy)
         {
-            // SAFETY: live plugin with a created GUI; destroyed exactly once.
-            unsafe { f(g.plugin) };
+            // SAFETY: live plugin with a created GUI; destroyed exactly once; scoped as above.
+            in_gui_scope(g, || unsafe { f(g.plugin) });
         }
         g.created = false;
         g.visible = false;
@@ -521,8 +522,9 @@ impl GuiLink {
                 hostwin::resize(win.raw(), f64::from(w), f64::from(h));
                 log::info!("clap: editor window resized to {w}×{h} (request_resize)");
                 if let Some(f) = GuiLink::vt(&g).and_then(|v| v.set_size) {
-                    // SAFETY: live plugin with a created embedded GUI, main thread.
-                    unsafe { f(g.plugin, w, h) };
+                    // SAFETY: live plugin with a created embedded GUI, main thread; in the
+                    // stretched window's plug-in scope (review round 3).
+                    hostwin::in_plugin_scope(win, || unsafe { f(g.plugin, w, h) });
                 }
             }
             if g.window.as_ref().is_some_and(hostwin::HostWindow::is_visible) && GuiLink::follow_scale(&mut g) {
@@ -545,14 +547,14 @@ impl GuiLink {
                 if self.host.gui_show.swap(false, Ordering::Relaxed)
                     && let Some(f) = vt.show
                 {
-                    // SAFETY: live plugin with a created GUI, main thread.
-                    g.visible = unsafe { f(g.plugin) };
+                    // SAFETY: live plugin with a created GUI, main thread; scoped as above.
+                    g.visible = in_gui_scope(&g, || unsafe { f(g.plugin) });
                 }
                 if self.host.gui_hide.swap(false, Ordering::Relaxed)
                     && let Some(f) = vt.hide
                 {
                     // SAFETY: as above.
-                    unsafe { f(g.plugin) };
+                    in_gui_scope(&g, || unsafe { f(g.plugin) });
                     g.visible = false;
                 }
             }
@@ -579,6 +581,15 @@ impl GuiLink {
             }
         }
         g.alive = false;
+    }
+}
+
+/// Runs `f` (a call into the GUI) in its window's plug-in scope: the DPI-unaware context for a
+/// stretched window (review round 3), nothing otherwise or without a window.
+fn in_gui_scope<R>(g: &GuiInner, f: impl FnOnce() -> R) -> R {
+    match &g.window {
+        Some(w) => hostwin::in_plugin_scope(w, f),
+        None => f(),
     }
 }
 

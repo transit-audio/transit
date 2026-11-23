@@ -232,19 +232,35 @@ pub(super) fn view_size(view: &ComPtr<sb::IPlugView>) -> Option<(f64, f64)> {
 ///
 /// Issue #153: the factor `scale`'s plan asks for is sent before `attached`; the answer settles
 /// the plan. A plan that stretches makes the window again with a DPI-unaware content container
-/// (the plug-in has no window yet), releases the view (made outside that context, so it may have
-/// read the monitor's DPI and sized itself by it) and has `recreate` make another inside the
-/// window's plug-in scope, then attaches that one there; it sends no factor, so none is ever
-/// applied twice. When no view can be made again, the editor is not stretched (the first view is
-/// attached to a window of the normal kind). Only a plan that sends a factor sends it again after
-/// `attached` (issue #105). Returns the frame, the window and the view that was attached.
+/// (the plug-in has no window yet), takes our frame off the view and releases it (it was made
+/// outside that context, so it may have read the monitor's DPI and sized itself by it), then has
+/// `recreate` make another inside the window's plug-in scope and attaches that one there; it sends
+/// no factor, so none is ever applied twice. Every call into a stretched view is made in that
+/// scope. Only a plan that sends a factor sends it again after `attached` (issue #105). Returns the
+/// frame, the window and the view that was attached.
 ///
-/// The VST3 calls, in order, for a stretch: `createView` (outside the scope, by the caller),
-/// `setFrame(frame)`, `setContentScaleFactor` (when the plan asks), `setFrame(null)` and the last
-/// release of that view (never attached: the SDK's lifecycle allows releasing a view at any point
-/// before `attached`), then inside the scope `createView`, `isPlatformTypeSupported`, `getSize`,
-/// `setFrame(frame)` and `attached`. The edit controller that makes both views is held by the
-/// editor link for the instance's life, so it outlives either view.
+/// The VST3 calls, in order, for a stretch, as implemented: `createView` (outside the scope, by
+/// the caller), `isPlatformTypeSupported`, `canResize`, `getSize` (the caller's probe), `getSize`,
+/// `setFrame(frame)`, `setContentScaleFactor` (when the plan asks; the answer settles the plan),
+/// `getSize`, then `setFrame(null)` and our last reference released (the view was never attached:
+/// the SDK's lifecycle allows releasing a view at any point before `attached`), then inside the
+/// stretched window's scope `createView`, `isPlatformTypeSupported`, `setFrame(frame)`, `getSize`,
+/// `attached`, and the `onSize` of a size the new view asked for before it was attached. The edit
+/// controller that makes both views is held by the editor link for the instance's life, so it
+/// outlives either view.
+///
+/// Review round 3: the first view is released before the second `createView`, and its pointer
+/// value is kept only to compare (never used). What can be told once it is released: a second
+/// view at another address is another object, made in the DPI-unaware context. A second view at
+/// the same address is either the first one (the controller kept a reference and handed it back)
+/// or a new object the allocator put where the first was (seen with the test fixture); a third
+/// `createView` while the second is held tells them apart for a controller that makes a new view
+/// each time (another address: the second is new). Otherwise it is taken as the first: that view
+/// read the DPI in the per-monitor-aware context, so the editor is not stretched and is attached
+/// to a window of the normal kind (never scaled twice), as is a view the second `createView` does
+/// not give or that does not support this platform (then made once more outside the scope). Not
+/// detectable: a controller whose new view is another object reusing what it cached from the
+/// first (the monitor's DPI); that is the remaining assumption (K74).
 pub(super) fn attach_view(
     mut view: ComPtr<sb::IPlugView>,
     platform: sb::FIDString,
@@ -287,34 +303,75 @@ pub(super) fn attach_view(
         let (w, h) = view_size(&view).unwrap_or((w, h));
         match window::new_stretched(title, w, h, header.clone()) {
             Ok(stretched) => {
-                // Issue #153 review: the view is made again inside the stretched window's scope.
-                let fresh = window::in_plugin_scope(&stretched, || {
-                    let v = recreate()?;
+                let supported = |v: ComPtr<sb::IPlugView>| {
                     // SAFETY: a live view just made; `platform` is a static NUL-terminated string.
                     (unsafe { v.isPlatformTypeSupported(platform) } == sb::kResultTrue).then_some(v)
-                });
+                };
+                // Review round 3: the first view goes before the second is asked for. Its address
+                // is kept to compare only.
+                let first = view.as_ptr() as usize;
+                // SAFETY: valid view, never attached; our frame is taken off it before our last
+                // reference to it is released on the next line.
+                unsafe { view.setFrame(std::ptr::null_mut()) };
+                drop(view);
+                // What the first view asked for goes; what the new view asks for from now on is
+                // kept until it is attached (review round 3, note 4).
+                frame.retarget(stretched.raw());
+                let fresh = window::in_plugin_scope(&stretched, || recreate().and_then(supported));
+                // `Ok`: a new view. `Err(Some)`: perhaps the first view handed back. `Err(None)`:
+                // none. A view at the released one's address is either the first (the controller
+                // kept it) or a new one the allocator put there; asked once more while that one is
+                // held, a controller that makes a new view each time gives another object, which
+                // shows the one held is new. Otherwise it is taken as the first.
+                let fresh = match fresh {
+                    Some(v) if v.as_ptr() as usize == first => {
+                        let third = window::in_plugin_scope(&stretched, || recreate().and_then(supported));
+                        let distinct = third.as_ref().is_some_and(|t| t.as_ptr() != v.as_ptr());
+                        window::in_plugin_scope(&stretched, || drop(third));
+                        if distinct { Ok(v) } else { Err(Some(v)) }
+                    }
+                    Some(v) => Ok(v),
+                    None => Err(None),
+                };
                 match fresh {
-                    Some(fresh) => {
-                        // SAFETY: valid view, never attached; our frame is taken off it before its
-                        // last reference goes (when `view` is replaced below).
-                        unsafe { view.setFrame(std::ptr::null_mut()) };
-                        view = fresh;
+                    Ok(v) => {
+                        view = v;
                         if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
-                            // SAFETY: valid view; the frame outlives its attachment, as above.
-                            unsafe { view.setFrame(f.as_ptr()) };
+                            // SAFETY: valid view; the frame outlives its attachment, as above. In
+                            // the stretched window's scope, as every call into this view.
+                            window::in_plugin_scope(&stretched, || unsafe { view.setFrame(f.as_ptr()) });
                         }
                         win.close();
                         win = stretched;
                         prepare(&win);
-                        frame.retarget(win.raw());
-                        if let Some((w, h)) = view_size(&view) {
+                        if let Some((w, h)) = window::in_plugin_scope(&win, || view_size(&view)) {
                             window::resize(win.raw(), w, h);
                         }
                         log::info!("vst3 editor \"{title}\": the view was made again in the DPI-unaware context for the stretch");
                     }
-                    None => {
+                    Err(other) => {
                         stretched.close();
-                        log::warn!("vst3 editor \"{title}\": the view could not be made again for the stretch; it keeps its own drawing");
+                        frame.retarget(win.raw());
+                        let why = if other.is_some() { "the controller gave back the same view" } else { "no new view" };
+                        let again = match other {
+                            Some(same) => Some(same),
+                            None => recreate().and_then(supported),
+                        };
+                        let Some(v) = again else {
+                            win.close();
+                            frame.close_run_loop();
+                            scale.closed();
+                            return Err("the view could not be made again".into());
+                        };
+                        view = v;
+                        if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
+                            // SAFETY: valid view; the frame outlives its attachment, as above.
+                            unsafe { view.setFrame(f.as_ptr()) };
+                        }
+                        if let Some((w, h)) = view_size(&view) {
+                            window::resize(win.raw(), w, h);
+                        }
+                        log::warn!("vst3 editor \"{title}\": not stretched ({why}); it keeps its own drawing");
                         scale.stretch_failed();
                     }
                 }
@@ -330,12 +387,13 @@ pub(super) fn attach_view(
     // stretched window's view makes its window in the DPI-unaware context (issue #153).
     if !ok(window::in_plugin_scope(&win, || unsafe { view.attached(parent, platform) })) {
         // SAFETY: valid view; detach our frame again.
-        unsafe { view.setFrame(std::ptr::null_mut()) };
+        window::in_plugin_scope(&win, || unsafe { view.setFrame(std::ptr::null_mut()) });
         win.close();
         frame.close_run_loop();
         return Err("set_parent failed".into());
     }
-    frame.attach(&view);
+    // A size the view asked for before it was attached, with its `onSize`: in the scope too.
+    window::in_plugin_scope(&win, || frame.attach(&view));
     // Issue #105: the same factor again once attached (the SDK allows "before or after"; some
     // plug-ins apply it only to an attached view). A view that scales asks through `resizeView`
     // (honored now); one that only reports its new size gets the window at that size. Only a plan
@@ -346,7 +404,7 @@ pub(super) fn attach_view(
         // compares with the size the view had before any factor.
         scale.after_attach(accepted, view_size(&view) == unscaled);
     }
-    follow_view_size(&view, &win, title, "after attached");
+    window::in_plugin_scope(&win, || follow_view_size(&view, &win, title, "after attached"));
     log::info!("vst3 editor \"{title}\": scale: {}", scale.log_line());
     Ok((frame, win, view))
 }
@@ -627,9 +685,14 @@ impl EditorLink {
         if let Some(view) = g.view.take() {
             // SAFETY: valid, attached view; main thread (callers check). `removed` before the
             // window goes, and the frame is detached before it is released.
-            unsafe {
+            let remove = || unsafe {
                 view.removed();
                 view.setFrame(std::ptr::null_mut());
+            };
+            // A stretched view is called in its window's DPI-unaware scope (review round 3).
+            match &g.window {
+                Some(w) => window::in_plugin_scope(w, remove),
+                None => remove(),
             }
         }
         if let Some(f) = g.frame.take() {
