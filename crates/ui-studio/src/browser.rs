@@ -916,6 +916,11 @@ pub fn panel(app: &mut StudioApp, ui: &mut Ui) {
 /// A drag out of the browser: while held, show where it would land; on release, drop it there.
 fn drive_drag(app: &mut StudioApp, ctx: &egui::Context) {
     let Some(drag) = app.browser.drag.clone() else { return };
+    // A dialog holds the app (#770): the drag is cancelled at once and lands nowhere.
+    if crate::modal::up(ctx) {
+        app.browser.drag = None;
+        return;
+    }
     let (down, pos, shift) = ctx.input(|i| (i.pointer.primary_down(), i.pointer.latest_pos(), i.modifiers.shift));
     let audio = matches!(&drag.payload, Payload::Files(f) if first_audio(f).is_some());
     let target = pos.and_then(|p| app.drop_target(ctx, p, !shift, audio));
@@ -1058,7 +1063,7 @@ fn locations_bar(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, area: Rect
         let fresp = crate::chrome::field(ui, |ui| {
             ui.put(field, egui::TextEdit::singleline(&mut text).id(id).hint_text("Folder path, e.g. D:\\").desired_width(field.width()))
         });
-        let enter = fresp.lost_focus() && ui.input(|i| crate::shortcuts::hit(i, A::BrowserAddFolder));
+        let enter = fresp.lost_focus() && crate::modal::reaches(ui) && ui.input(|i| crate::shortcuts::hit(i, A::BrowserAddFolder));
         let oresp = ui.interact(ok, ui.id().with("browser_add_ok"), Sense::click());
         p.rect_filled(ok, crate::theme::RADIUS, if oresp.hovered() { TOKENS.button_hover } else { TOKENS.button });
         p.text(ok.center(), Align2::CENTER_CENTER, "Add", FontId::proportional(11.5), TOKENS.text);

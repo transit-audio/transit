@@ -660,6 +660,10 @@ pub fn rows(action: Action) -> impl Iterator<Item = &'static Shortcut> {
 
 /// Consume both press and release edges of `action`, excluding OS key repeat.
 pub fn edges(ctx: &egui::Context, action: Action) -> Vec<bool> {
+    // A modal open or opening holds the keys (#770).
+    if crate::modal::up(ctx) {
+        return Vec::new();
+    }
     ctx.input_mut(|i| {
         let mut edges = Vec::new();
         i.events.retain(|event| {
@@ -680,8 +684,9 @@ pub fn edges(ctx: &egui::Context, action: Action) -> Vec<bool> {
 
 /// Consume a press of any of `action`'s keys. The held modifiers must be exactly the row's.
 pub fn pressed(ctx: &egui::Context, action: Action) -> bool {
-    // A modal owns its keys before editor and arrangement handlers can consume them.
-    if ctx.memory(|m| m.top_modal_layer().is_some()) && rows(action).all(|s| s.scope != Scope::Dialog) {
+    // A modal (open or opening, #770) owns its keys before editor and arrangement handlers can
+    // consume them.
+    if crate::modal::up(ctx) && rows(action).all(|s| s.scope != Scope::Dialog) {
         return false;
     }
     // An open popup (a menu, a dropdown's list) owns the keyboard, as system menus do: the
@@ -736,6 +741,9 @@ pub fn step_tie_rest_selector(ui: &mut egui::Ui, space: &mut bool) -> egui::Resp
 /// Consume both edges, excluding OS repeat: the step controller owns hold timing.
 /// The optional Space override is only called by the focused step piano roll.
 pub fn step_control_edges(ctx: &egui::Context, action: Action, space: bool) -> Vec<bool> {
+    if crate::modal::up(ctx) {
+        return Vec::new();
+    }
     let key = if space { Key::Space } else { rows(action).next().map_or(Key::Enter, |s| s.key) };
     ctx.input_mut(|i| {
         let mut edges = Vec::new();

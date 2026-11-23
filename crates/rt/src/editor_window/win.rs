@@ -31,11 +31,11 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
     EnumThreadWindows, GCW_ATOM, GW_CHILD, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetClassLongPtrW, GetClientRect, GetParent, GetWindow,
     GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IDC_ARROW, IsChild, IsWindow, IsWindowVisible, LoadCursorW, MF_CHECKED, MF_GRAYED,
-    MF_SEPARATOR, MF_STRING, MINMAXINFO, MoveWindow, NONCLIENTMETRICSW, RegisterClassExW, SPI_GETNONCLIENTMETRICS, SW_HIDE, SW_SHOW, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, ShowWindowAsync, TPM_LEFTALIGN,
-    TPM_NONOTIFY, TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenu, WA_INACTIVE, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND,
-    WM_GETMINMAXINFO, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_PAINT, WM_SETFOCUS, WM_SIZE, WNDCLASSEXW, WS_CAPTION, WS_CHILD,
-    WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
+    MF_POPUP, MF_SEPARATOR, MF_STRING, MINMAXINFO, MoveWindow, NONCLIENTMETRICSW, RegisterClassExW, SPI_GETNONCLIENTMETRICS, SW_HIDE, SW_SHOW,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, ShowWindowAsync,
+    TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenu, WA_INACTIVE, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CLOSE, WM_DPICHANGED,
+    WM_ERASEBKGND, WM_GETMINMAXINFO, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_PAINT, WM_SETFOCUS, WM_SIZE, WNDCLASSEXW,
+    WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
 };
 
 /// `WM_MOUSELEAVE` (winuser.h).
@@ -89,6 +89,10 @@ struct Data {
     /// Hidden by transit with the main window (issue #173, [`super::Group::Park`]), not by the
     /// user: the editor stays open and comes back with the main window.
     parked: Cell<bool>,
+    /// The content container is DPI-unaware and Windows stretches the plug-in (issue #153,
+    /// [`stretch`]): `size` is then in the plug-in's 96-DPI pixels, and the container is that
+    /// times the frame's DPI over 96.
+    stretch: bool,
 }
 
 impl Data {
@@ -189,10 +193,16 @@ fn font_for(dpi: u32) -> HFONT {
     unsafe { CreateFontIndirectW(&raw const m.lfMessageFont) }
 }
 
-/// Resizes the frame so its content area is `w`×`h` (plus the strip), keeping its position.
+/// Resizes the frame so its content area is `w`×`h` plug-in pixels (plus the strip), keeping its
+/// position. A stretched window's content area is that times its DPI over 96 (issue #153).
 fn set_content(hwnd: HWND, d: &Data, w: i32, h: i32) {
+    // A stretched plug-in's synchronous resize request reaches here from its DPI-unaware window
+    // procedure: the frame's work runs in the frame's own context (#153 review).
+    let _frame = stretch::ThreadDpi::of_window(hwnd, d.stretch);
+    let (w, h) = (w.clamp(1, 16_384), h.clamp(1, 16_384));
+    d.size.set((w, h));
+    let (w, h) = if d.stretch { (stretch::physical(w, d.dpi.get()), stretch::physical(h, d.dpi.get())) } else { (w, h) };
     let (cw, ch) = super::client_size(w, h, d.header_h());
-    d.size.set((cw, ch - d.header_h()));
     d.resized.set(Some(Instant::now()));
     let (ow, oh) = outer(hwnd, cw, ch, d.dpi.get());
     // SAFETY: a live frame of this thread; only its size changes (WM_SIZE lays the children out).
@@ -354,25 +364,50 @@ fn strip_width(hwnd: HWND) -> i32 {
     r.right - r.left
 }
 
-/// Shows a popup list under `at` and returns the click chosen (the call runs a modal loop).
-fn popup(hwnd: HWND, items: &[MenuItem], at: super::Rect) -> Option<HeaderClick> {
+/// A popup menu holding `items` (submenus included); null when one cannot be made. The caller
+/// destroys it, which destroys the submenus appended to it.
+fn build_menu(items: &[MenuItem]) -> windows_sys::Win32::UI::WindowsAndMessaging::HMENU {
     // SAFETY: no arguments; a new empty menu (null on failure).
     let menu = unsafe { CreatePopupMenu() };
     if menu.is_null() {
-        return None;
+        return menu;
     }
     for it in items {
         let (flags, id, text) = match it {
-            MenuItem::Heading(t) => (MF_STRING | MF_GRAYED, 0, wide(t)),
+            MenuItem::Heading(t) => (MF_STRING | MF_GRAYED, 0, wide(&t.replace('&', "&&"))),
             MenuItem::Item { id, label, checked, enabled } => (
                 MF_STRING | if *checked { MF_CHECKED } else { 0 } | if *enabled { 0 } else { MF_GRAYED },
                 *id as usize,
                 wide(&label.replace('&', "&&")),
             ),
             MenuItem::Separator => (MF_SEPARATOR, 0, wide("")),
+            MenuItem::Submenu { label, items } => {
+                let sub = build_menu(items);
+                if sub.is_null() {
+                    continue;
+                }
+                // Win32 `AppendMenuW`: with `MF_POPUP` the id "specifies the handle to the drop-down
+                // menu or submenu"; the submenu then belongs to `menu` and is destroyed with it.
+                (MF_POPUP | MF_STRING, sub as usize, wide(&label.replace('&', "&&")))
+            }
         };
-        // SAFETY: a live menu we own; `text` is NUL-terminated and outlives the call.
-        unsafe { AppendMenuW(menu, flags, id, text.as_ptr()) };
+        // SAFETY: a live menu we own; `text` is NUL-terminated and outlives the call; with
+        // MF_POPUP `id` is the live submenu just built.
+        let appended = unsafe { AppendMenuW(menu, flags, id, text.as_ptr()) } != 0;
+        if !appended && flags & MF_POPUP != 0 {
+            // Not attached, so not owned by `menu`: destroyed here (#153 review).
+            // SAFETY: the submenu built above, attached to nothing and shown nowhere.
+            unsafe { DestroyMenu(id as windows_sys::Win32::UI::WindowsAndMessaging::HMENU) };
+        }
+    }
+    menu
+}
+
+/// Shows a popup list under `at` and returns the click chosen (the call runs a modal loop).
+fn popup(hwnd: HWND, items: &[MenuItem], at: super::Rect) -> Option<HeaderClick> {
+    let menu = build_menu(items);
+    if menu.is_null() {
+        return None;
     }
     let mut p = POINT { x: at.left, y: at.bottom };
     // SAFETY: a live window of this thread; `p` is writable.
@@ -602,6 +637,25 @@ impl EditorWindow {
     /// # Errors
     /// When the window classes cannot be registered or the windows cannot be created.
     pub fn new(title: &str, w: f64, h: f64, header: Option<Arc<HeaderCell>>) -> Result<EditorWindow, String> {
+        EditorWindow::make(title, w, h, header, false)
+    }
+
+    /// [`EditorWindow::new`] for a plug-in Windows stretches (issue #153, [`stretch`]): the
+    /// content container is DPI-unaware, `w`×`h` are the plug-in's 96-DPI pixels and the content
+    /// area is that times the window's DPI over 96. The plug-in must make its window inside
+    /// [`EditorWindow::plugin_scope`].
+    ///
+    /// # Errors
+    /// As [`EditorWindow::new`], and when this Windows cannot host a DPI-unaware child (before
+    /// Windows 10 version 1803).
+    pub fn new_stretched(title: &str, w: f64, h: f64, header: Option<Arc<HeaderCell>>) -> Result<EditorWindow, String> {
+        if !stretch::available() {
+            return Err("this Windows cannot stretch an editor (it needs Windows 10 version 1803 or later)".into());
+        }
+        EditorWindow::make(title, w, h, header, true)
+    }
+
+    fn make(title: &str, w: f64, h: f64, header: Option<Arc<HeaderCell>>, stretched: bool) -> Result<EditorWindow, String> {
         let classes = classes().ok_or_else(|| "cannot register the editor window classes".to_string())?;
         let title = wide(title);
         // SAFETY: null asks for this process's module handle.
@@ -611,6 +665,8 @@ impl EditorWindow {
         // follow the main window (issue #173) take the tool-window style instead: no taskbar
         // button, not in Alt-Tab.
         let ex = if super::follows() { group::TOOL } else { 0 };
+        // A stretched editor's frame hosts a child of another DPI awareness (issue #153).
+        let mixed = if stretched { Some(stretch::Mixed::enter().ok_or_else(|| "cannot host a DPI-unaware editor".to_string())?) } else { None };
         // SAFETY: a registered class and NUL-terminated strings that outlive the call; `ex` is an
         // extended-style value only (0 or `WS_EX_TOOLWINDOW`); no owner and no parent (a top-level
         // window). Created hidden at a placeholder size.
@@ -630,6 +686,7 @@ impl EditorWindow {
                 std::ptr::null(),
             )
         };
+        drop(mixed);
         if hwnd.is_null() {
             return Err("cannot create the editor window".into());
         }
@@ -651,6 +708,7 @@ impl EditorWindow {
             focus: Cell::new(std::ptr::null_mut()),
             focusing: Cell::new(false),
             parked: Cell::new(false),
+            stretch: stretched,
         });
         let has_header = d.cell.is_some();
         // SAFETY: our frame, on this thread; the box is freed by its WM_NCDESTROY (module docs).
@@ -674,7 +732,11 @@ impl EditorWindow {
                 )
             }
         };
-        let content = child(classes.content, WS_CLIPCHILDREN);
+        // The stretched container is made in the DPI-unaware context (issue #153, `stretch`).
+        let content = {
+            let _unaware = stretch::ThreadDpi::unaware(stretched);
+            child(classes.content, WS_CLIPCHILDREN)
+        };
         let strip = if has_header { child(classes.header, 0) } else { std::ptr::null_mut() };
         if content.is_null() || (has_header && strip.is_null()) {
             // SAFETY: the live frame just made (its children go with it); destroying it frees its
@@ -743,12 +805,37 @@ impl EditorWindow {
         self.live().map_or(1.0, |d| f64::from(d.dpi.get()) / 96.0)
     }
 
+    /// The factor Windows stretches the plug-in by (the window's DPI over 96) when its content
+    /// container is DPI-unaware ([`EditorWindow::new_stretched`]); `None` otherwise, once the window
+    /// is gone, or on another thread.
+    #[must_use]
+    pub fn stretch(&self) -> Option<f64> {
+        self.live().filter(|d| d.stretch).map(|d| f64::from(d.dpi.get()) / 96.0)
+    }
+
+    /// The scope the plug-in makes its window in (VST3 `attached`, CLAP `set_parent` and `show`):
+    /// the DPI-unaware thread context for a stretched window, so its windows are DPI-unaware and
+    /// the DPI it reads is 96 (issue #153); inert otherwise.
+    #[must_use]
+    pub fn plugin_scope(&self) -> stretch::ThreadDpi {
+        stretch::ThreadDpi::unaware(self.live().is_some_and(|d| d.stretch))
+    }
+
     /// The new [`EditorWindow::scale`] when the window's DPI changed since the last call (it moved
     /// to a monitor with other scaling, or the scaling changed); `None` otherwise.
     #[must_use]
     pub fn take_scale_change(&self) -> Option<f64> {
         let d = self.live()?;
         d.scale_changed.replace(false).then(|| f64::from(d.dpi.get()) / 96.0)
+    }
+
+    /// Tests: as if the host's last resize were long past, so the size follow need not wait
+    /// [`Follow::GRACE`] on the real clock.
+    #[cfg(test)]
+    pub(crate) fn forget_resize(&self) {
+        if let Some(d) = self.live() {
+            d.resized.set(None);
+        }
     }
 
     /// The plug-in content's size in pixels (the strip excluded); `(0, 0)` once the window is gone
@@ -787,6 +874,9 @@ impl EditorWindow {
         let child = plugin_child(d);
         let size = (!child.is_null()).then(|| {
             let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            // A stretched plug-in's child is measured in its own (96-DPI) pixels, as Windows maps
+            // them for a DPI-unaware caller (issue #153).
+            let _unaware = stretch::ThreadDpi::unaware(d.stretch);
             // SAFETY: a window handle from GetWindow (any value is accepted); `r` is writable.
             unsafe { GetWindowRect(child, &raw mut r) };
             (r.right - r.left, r.bottom - r.top)
@@ -796,7 +886,7 @@ impl EditorWindow {
         let to = f.observe(size, d.size.get(), super::since(d.resized.get()));
         d.follow.set((f.seen, f.count));
         if let Some((w, h)) = to {
-            log::debug!("editor window: the plug-in's view is {w}×{h}, not {:?}; the window follows it", d.size.get());
+            log::info!("editor window: the plug-in's view is {w}×{h}, not {:?}; the window follows it", d.size.get());
             set_content(self.hwnd, d, w, h);
         }
     }
@@ -822,6 +912,10 @@ pub fn resize_content(window: *mut c_void, w: f64, h: f64) -> bool {
 
 mod group;
 pub use group::{apply, group, raise_window, take_created, window_state};
+#[cfg(test)]
+#[path = "win/scale_tests.rs"]
+mod scale_tests;
+pub mod stretch;
 
 /// The calling thread's id as Windows knows it, for [`hide_thread_windows`] from another thread.
 #[must_use]

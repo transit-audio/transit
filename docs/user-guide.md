@@ -19,7 +19,7 @@ Plain **+**, **=**, and **-** still zoom the arrangement's timeline.
 Interface zoom multiplies your operating system's display scale: 150% interface zoom on a
 200% display uses three physical pixels per UI point. At 100%, transit follows the display
 scale as before. Higher zoom leaves less space for panels; choose a smaller zoom if needed.
-Plug-in editor windows follow the display scale, not this zoom.
+Plug-in editor windows follow the display scale, not this zoom (each one has its own Scale menu, see [Plug-in windows](#plug-in-windows)).
 
 See the [shortcuts reference](shortcuts.md) and **Help > Keyboard Shortcuts** for key bindings.
 
@@ -617,6 +617,29 @@ responding does not hold transit up: its window simply stops following until it 
 Windows a plug-in opens by itself (its own preset browser or a licensing dialog) are not grouped.
 Returning to transit by clicking a plug-in window brings up only that window; the main window and
 the other plug-in windows come up on your next click on the main window.
+
+**Scale.** On a scaled Windows display (150% and so on) a plug-in window's menu (the ≡ button in
+its header strip) has a **Scale** submenu: **Auto**, 50%, 75%, 100%, 125%, 150% and 200%. The choice
+is remembered for that plug-in on this machine as soon as you pick it (it is not saved in the
+session). Its first line says how the editor is drawn now:
+
+- **Drawn by the plug-in at the host's factor**: the plug-in takes the scale transit sends and
+  draws itself sharp at it. Auto sends the display's scale; a percentage sends that.
+- **The plug-in's own zoom (no stretch)**: transit sends nothing; the plug-in's own zoom control
+  sets its size.
+- **Stretched by Windows**: for a plug-in that cannot take a scale from transit, Windows enlarges
+  its 100% drawing to the display's scale (softer than a sharp drawing, but the right size). Only
+  100% (its own drawing) and the display's scale are offered then; the other sizes are shown
+  disabled with the reason.
+
+Auto picks the first for a plug-in that takes the scale and the third for one that cannot. Some
+plug-ins take the scale and still draw at their own size: if one opens too small, choose
+**Stretched by Windows** or **The plug-in's own zoom** in the same submenu (a hint line appears when
+the plug-in kept its size). A new percentage applies at once where the plug-in allows it; a change
+between drawn and stretched applies the next time you open the editor, and the submenu says so
+("Next open: ..."). A plug-in is never scaled twice. On macOS the system scales plug-in windows
+itself, and on Linux only plug-ins that take a scale from transit can be scaled; neither has the
+header strip's menu yet.
 
 A plug-in preset name may contain dots: **Save As** keeps the whole name and adds the file
 extension after it, so "Bass v1.5" and "Bass v1.2" are two files (`Bass v1.5.vstpreset` and

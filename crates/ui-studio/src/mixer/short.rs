@@ -81,7 +81,8 @@ pub(super) fn list(
     let rect = area.response.rect;
     let (pressed, pos, escape) = ui.input(|i| (i.pointer.any_pressed(), i.pointer.interact_pos(), i.key_pressed(egui::Key::Escape)));
     let outside = pressed && pos.is_some_and(|p| !rect.contains(p) && !anchor.contains(p));
-    if escape || (outside && !menu_open) {
+    // Not while a dialog holds the app (#770): its Escape and its clicks are its own.
+    if !crate::modal::up(ui.ctx()) && (escape || (outside && !menu_open)) {
         app.mixer.short_list = None;
     }
     Some(rect)

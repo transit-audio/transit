@@ -79,7 +79,7 @@ pub struct State {
 /// Escape belongs to a field being typed in: it gives the draft up and must not also reach
 /// Select None. Call before the other key handlers.
 pub fn keys(app: &mut StudioApp, ctx: &egui::Context) {
-    if app.inspector.draft.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+    if app.inspector.draft.is_some() && !crate::modal::up(ctx) && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
         app.inspector.cancel = true;
     }
 }
@@ -223,7 +223,9 @@ fn row(app: &mut StudioApp, ui: &mut Ui, s: &Session, clip: ClipId) {
                 // field showed); Escape gives it up.
                 let typed = app.inspector.draft.take().map(|d| d.1);
                 let shown = value.map(|len| format_len(s, len, fmt));
-                if let Some(t) = typed.filter(|t| !ui.input(|i| i.key_pressed(egui::Key::Escape)) && shown.as_deref() != Some(t.trim())) {
+                if let Some(t) = typed
+                    .filter(|t| !(crate::modal::reaches(ui) && ui.input(|i| i.key_pressed(egui::Key::Escape))) && shown.as_deref() != Some(t.trim()))
+                {
                     let _ = apply(app, clip, field, &t);
                 }
             }

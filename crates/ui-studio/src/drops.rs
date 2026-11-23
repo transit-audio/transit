@@ -86,6 +86,19 @@ pub(crate) fn step(app: &mut StudioApp, ctx: &egui::Context) {
     // An offer no editor took last frame (its window closed) is refused; a browser drag's offer
     // made since is this frame's.
     r.offer = r.next.take();
+    // A dialog holds the app (#770): a file dropped now, or one still held from before it opened,
+    // changes nothing. No dialog takes dropped files, and no status line names refused drops, so
+    // it is let go without a word (the log notes it).
+    if crate::modal::up(ctx) {
+        if !files.is_empty() || !r.pending.is_empty() {
+            log::info!("drop: {} file(s) ignored while a dialog is open", files.len() + r.pending.len());
+        }
+        r.pending.clear();
+        r.gone_frames = None;
+        // A browser drop queued for a Sampler view goes too: it is a drop as much as a file is.
+        r.offer = None;
+        return;
+    }
     r.pending.extend(files);
     if r.pending.is_empty() {
         r.gone_frames = None;

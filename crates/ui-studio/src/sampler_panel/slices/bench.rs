@@ -204,7 +204,8 @@ pub struct BenchLayout {
 /// (a text field gives its focus up on Escape before the window's keys run; the field keeps
 /// Escape, and the window's handler consumes it so that it does not also close the window).
 pub(crate) fn escaped(ui: &Ui) -> bool {
-    ui.input(|i| i.raw.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. })))
+    crate::modal::reaches(ui)
+        && ui.input(|i| i.raw.events.iter().any(|e| matches!(e, egui::Event::Key { key: egui::Key::Escape, pressed: true, .. })))
 }
 
 /// The rename field's id on the insert `uid`.

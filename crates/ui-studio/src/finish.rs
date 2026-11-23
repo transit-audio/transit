@@ -5,7 +5,7 @@
 
 use crate::arrange::R4;
 use crate::mixer::MenuItem;
-use crate::shortcuts::{Action as A, hit, label, pressed};
+use crate::shortcuts::{Action as A, label, pressed};
 use crate::theme::TOKENS;
 use crate::{Dialog, StudioApp};
 use egui::{FontId, Rect, pos2, vec2};
@@ -942,8 +942,8 @@ fn choices_with_help(
 /// File > Export Audio: the form, then the progress window with Cancel (or Escape).
 pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     if let Some((bar, of, fraction)) = app.realtime_progress() {
-        let mut cancel = ctx.input(|i| hit(i, A::DialogCancel));
-        egui::Modal::new(egui::Id::new("bounce_realtime")).show(ctx, |ui| {
+        let mut cancel = crate::modal::escape(ctx, crate::modal::layer_of(egui::Id::new("bounce_realtime")));
+        crate::chrome::raw_modal(ctx, egui::Id::new("bounce_realtime")).show(ctx, |ui| {
             ui.set_width(340.0);
             ui.label(egui::RichText::new(realtime::progress_text(bar, of)).strong());
             ui.add(egui::ProgressBar::new(fraction));
@@ -968,8 +968,8 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         (None, None, None) => None,
     };
     if let Some((name, progress)) = running {
-        let mut cancel = ctx.input(|i| hit(i, A::DialogCancel));
-        egui::Modal::new(egui::Id::new("bounce_progress")).show(ctx, |ui| {
+        let mut cancel = crate::modal::escape(ctx, crate::modal::layer_of(egui::Id::new("bounce_progress")));
+        crate::chrome::raw_modal(ctx, egui::Id::new("bounce_progress")).show(ctx, |ui| {
             ui.set_width(320.0);
             ui.label(egui::RichText::new(format!("Exporting {name}")).strong());
             ui.add(egui::ProgressBar::new(progress));
@@ -1000,9 +1000,10 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     }
     let s = app.engine.session_arc();
     let mut lay = BounceLayout::default();
-    let (mut go, mut cancel, mut choose) = (false, ctx.input(|i| hit(i, A::DialogCancel)), false);
+    let (mut go, mut cancel, mut choose) =
+        (false, crate::modal::answers(ctx, crate::modal::layer_of(egui::Id::new("bounce_form")), A::DialogCancel), false);
     let path_id = egui::Id::new("bounce_path");
-    let resp = egui::Modal::new(egui::Id::new("bounce_form")).show(ctx, |ui| {
+    let resp = crate::chrome::raw_modal(ctx, egui::Id::new("bounce_form")).show(ctx, |ui| {
         ui.set_width(420.0);
         ui.spacing_mut().item_spacing = vec2(crate::theme::SPACE, crate::theme::SPACE);
         ui.label(egui::RichText::new("Export Audio").strong().size(15.0));
@@ -1190,7 +1191,7 @@ fn external_question(app: &mut StudioApp, ctx: &egui::Context, names: &[String])
     let blocker = app.form_realtime_blocker();
     app.finish.realtime_blocker.clone_from(&blocker);
     let mut form = app.finish.bounce_form.clone();
-    egui::Modal::new(egui::Id::new("bounce_external")).show(ctx, |ui| {
+    crate::chrome::raw_modal(ctx, egui::Id::new("bounce_external")).show(ctx, |ui| {
         ui.set_width(440.0);
         ui.label(egui::RichText::new("External Instrument").strong());
         ui.label(egui::RichText::new(format!("{}.", external_notice(names))).color(TOKENS.text_dim));
@@ -1219,7 +1220,7 @@ fn external_question(app: &mut StudioApp, ctx: &egui::Context, names: &[String])
     if form.is_some() {
         app.finish.bounce_form = form;
     }
-    no |= ctx.input(|i| hit(i, A::DialogCancel));
+    no |= crate::modal::escape(ctx, crate::modal::layer_of(egui::Id::new("bounce_external")));
     if realtime {
         let _ = app.bounce_in_realtime();
     } else if without {
@@ -1238,7 +1239,8 @@ fn replace_question(app: &mut StudioApp, ctx: &egui::Context, f: &BounceForm) {
     let name =
         if folder { "Some of the stem or MIDI files".to_string() } else { path.file_name().unwrap_or_default().to_string_lossy().into_owned() };
     let (mut yes, mut no) = (false, false);
-    egui::Modal::new(egui::Id::new("bounce_replace")).show(ctx, |ui| {
+    let enter = crate::modal::answers(ctx, crate::modal::layer_of(egui::Id::new("bounce_replace")), A::DialogConfirm);
+    crate::chrome::raw_modal(ctx, egui::Id::new("bounce_replace")).show(ctx, |ui| {
         ui.set_width(380.0);
         ui.label(egui::RichText::new("Replace existing file?").strong());
         ui.label(egui::RichText::new(format!("{name} already {}.", if folder { "exist" } else { "exists" })).color(TOKENS.text_dim));
@@ -1247,11 +1249,11 @@ fn replace_question(app: &mut StudioApp, ctx: &egui::Context, f: &BounceForm) {
             let r = ui.button("Replace");
             let c = ui.button("Cancel");
             app.finish.replace_buttons = (crate::arrange::r4(r.rect), crate::arrange::r4(c.rect));
-            yes = r.clicked() || ui.input(|i| hit(i, A::DialogConfirm));
+            yes = r.clicked() || enter;
             no = c.clicked();
         });
     });
-    no |= ctx.input(|i| hit(i, A::DialogCancel));
+    no |= crate::modal::escape(ctx, crate::modal::layer_of(egui::Id::new("bounce_replace")));
     if yes {
         app.finish.replace = Replace::Yes;
         let _ = app.start_bounce();

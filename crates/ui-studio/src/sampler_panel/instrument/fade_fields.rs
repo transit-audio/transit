@@ -135,7 +135,7 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, state: &State, z: &Zone, at: egui::Pos
     ui.data_mut(|d| d.insert_temp(had_id, focused));
     // All four let go: commit, or give the typing up on Escape.
     if had && !focused && draft.is_some() {
-        if !kept || ui.input(|i| crate::shortcuts::hit(i, crate::shortcuts::Action::CloseEditor)) {
+        if !kept || (crate::modal::reaches(ui) && ui.input(|i| crate::shortcuts::hit(i, crate::shortcuts::Action::CloseEditor))) {
             *draft = None;
         } else if let Some(d) = draft.take() {
             intent = params(&d, stored).map(|v| super::zone_panel::Intent::Fades(z.zone, v)).or(intent);

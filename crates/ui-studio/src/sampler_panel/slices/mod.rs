@@ -232,7 +232,7 @@ fn typing(ctx: &egui::Context, uid: u64) -> Option<egui::Id> {
 /// A menu, a modal or a dialog is open, or a field has the keyboard: the bench's press and
 /// double-click do nothing, as the view's keys do nothing (`keys`).
 fn held_off(app: &StudioApp, ctx: &egui::Context) -> bool {
-    ctx.egui_wants_keyboard_input() || app.dialog.is_some() || ctx.memory(|m| m.top_modal_layer().is_some()) || egui::Popup::is_any_open(ctx)
+    ctx.egui_wants_keyboard_input() || app.dialog.is_some() || crate::modal::up(ctx) || egui::Popup::is_any_open(ctx)
 }
 
 /// Sends what a completed bench gesture asks for.
@@ -312,12 +312,26 @@ fn release_stale(app: &mut StudioApp, ctx: &egui::Context) {
     }
 }
 
+/// The held auditions' upkeep, every frame whoever holds the keys (#770): the stale ones are
+/// released, and while a dialog holds the app every held one is released at once (a key or
+/// button held behind a dialog counts as let go; nothing waits for the dialog to close).
+pub(crate) fn release_held(app: &mut StudioApp, ctx: &egui::Context, modal: bool) {
+    if !modal {
+        release_stale(app, ctx);
+        return;
+    }
+    let held: Vec<u64> = app.builtin_editor.devices.sampler.views.iter().filter(|(_, v)| v.held.is_some()).map(|(uid, _)| *uid).collect();
+    for uid in held {
+        behavior::release_uid(app, uid);
+    }
+}
+
 /// The Slices view's keys on the focused Sampler (see the module's notes). Runs before the global
-/// shortcuts, so Space does not also play and the arrows do not reach the arrangement.
+/// shortcuts, so Space does not also play and the arrows do not reach the arrangement. Its held
+/// auditions are let go in [`release_held`], which runs every frame.
 pub(crate) fn keys(app: &mut StudioApp, ctx: &egui::Context) {
-    release_stale(app, ctx);
     let Some(uid) = super::key_owner(app) else { return };
-    let modal = ctx.memory(|m| m.top_modal_layer().is_some());
+    let modal = crate::modal::up(ctx);
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || modal {
         return;
     }

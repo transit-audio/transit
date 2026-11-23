@@ -374,7 +374,7 @@ pub(crate) fn show(ui: &mut Ui, uid: u64, state: &State, z: &Zone, inputs: Group
         }
         if resp.lost_focus() && had {
             let typed = inputs.seed_text.take();
-            let escape = !inputs.kept || ui.input(|i| crate::shortcuts::hit(i, crate::shortcuts::Action::CloseEditor));
+            let escape = !inputs.kept || (crate::modal::reaches(ui) && ui.input(|i| crate::shortcuts::hit(i, crate::shortcuts::Action::CloseEditor)));
             if let Some(typed) = typed.filter(|s| !escape && s.trim() != stored) {
                 let s = typed.trim();
                 intent = Some(Intent::Seed(match serde_json::from_str::<Value>(s) {

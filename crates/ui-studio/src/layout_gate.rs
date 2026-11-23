@@ -47,10 +47,15 @@ const TOLERANCE: f32 = 0.5;
 /// button's own content (a glyph overhangs the advance width by a fraction of a point).
 const NESTING: f32 = 2.0;
 
-/// The layer of a `theme::window` / `theme::modal_window` window with this title.
+/// The layer of a `theme::window` window with this title.
 pub(crate) fn window(title: &str) -> LayerId {
     // egui derives the id from `Atoms::text()`, which is an `Option`: the `Some` is part of the hash.
     LayerId::new(Order::Middle, Id::new(Some(title)))
+}
+
+/// The layer of a `theme::modal_window` dialog with this title (the foreground order, #770).
+pub(crate) fn modal_window(title: &str) -> LayerId {
+    LayerId::new(Order::Foreground, Id::new(Some(title)))
 }
 
 /// The layer of an `egui::Modal` created with this id.

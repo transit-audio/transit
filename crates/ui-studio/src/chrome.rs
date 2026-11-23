@@ -290,7 +290,9 @@ pub fn modal_with(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>, primary: Pri
     let inner_w = c::MODAL_WIDTH - 2.0 * c::MODAL_PADDING[1] - 2.0 * frame.stroke.width;
     let mut layout = ModalLayout { fill: t.surface_panel, edge: t.line_strong, scrim: t.overlay, ..ModalLayout::default() };
     let mut choice = None;
-    let shown = egui::Modal::new(id).frame(frame).backdrop_color(t.overlay).show(ctx, |ui| {
+    // Read before the body: whether this modal owns the keys this frame (#770).
+    let keys = modal_keys(ctx, id, primary == Primary::Enter);
+    let shown = raw_modal(ctx, id).frame(frame).show(ctx, |ui| {
         ui.set_width(inner_w);
         ui.spacing_mut().item_spacing.y = 6.0;
         let q = ui.label(egui::RichText::new(&ask.question).font(c::QUESTION_FONT.font_id(ui.ctx())).color(t.text));
@@ -333,20 +335,31 @@ pub fn modal_with(ctx: &egui::Context, id: egui::Id, ask: &Ask<'_>, primary: Pri
     });
     layout.rect = r4(shown.response.rect);
     ctx.data_mut(|d| d.insert_temp(modal_key(id), layout));
-    choice.or_else(|| modal_keys(ctx, primary == Primary::Enter))
+    choice.or(keys)
 }
 
-/// The modal's keys this frame: Enter is the default button (when there is one), Escape is Cancel.
-fn modal_keys(ctx: &egui::Context, default: bool) -> Option<Choice> {
-    use crate::shortcuts::{Action, hit};
-    let (enter, escape) = ctx.input(|i| (hit(i, Action::DialogConfirm), hit(i, Action::DialogCancel)));
-    if enter && default {
+/// The modal `id`'s keys this frame: Enter is the default button (when there is one), Escape is
+/// Cancel. Only the top modal reads them, and it consumes the key (#770: one press never answers
+/// a second dialog under it).
+fn modal_keys(ctx: &egui::Context, id: egui::Id, default: bool) -> Option<Choice> {
+    let layer = crate::modal::layer_of(id);
+    if default && crate::modal::enter(ctx, layer) {
         Some(Choice::Default)
-    } else if escape {
+    } else if crate::modal::escape(ctx, layer) {
         Some(Choice::Cancel)
     } else {
         None
     }
+}
+
+/// Every `egui::Modal` in the app starts here (a source-scan test forbids the plain constructor
+/// elsewhere, #770): the backdrop is the design language's scrim, `overlay`, and the frame is
+/// marked modal for the app's input handlers ([`crate::modal::mark`]). Its keys go through
+/// [`crate::modal::escape`] and [`crate::modal::enter`] with [`crate::modal::layer_of`]`(id)`.
+pub fn raw_modal(ctx: &egui::Context, id: egui::Id) -> egui::Modal {
+    crate::modal::mark(ctx);
+    crate::modal::register(ctx, crate::modal::layer_of(id));
+    egui::Modal::new(id).backdrop_color(TOKENS.overlay)
 }
 
 /// A tool window's footer: a 1 px `line` across the window above it, 10 px under the line, the
@@ -402,8 +415,41 @@ pub fn row_has_gutter(ui: &Ui) -> bool {
 /// popup with the row style ([`menu_style_for`]); its rows are [`MenuRow`]s and `checks` says
 /// whether any of them can carry a check (the gutter is reserved only then). Its submenus decide
 /// for themselves ([`submenu`]). Chain `.id(..)` for a menu that shares a response with another popup.
-pub fn context_menu(response: &Response, checks: bool) -> egui::Popup<'static> {
-    egui::Popup::context_menu(response).style(menu_style_for(checks))
+///
+/// A right-click on the widget while its own menu is open reopens the menu at the new pointer in
+/// that one click (#769), as Ableton and Logic do; see [`ContextMenu::show`].
+pub fn context_menu(response: &Response, checks: bool) -> ContextMenu {
+    ContextMenu { popup: egui::Popup::context_menu(response).style(menu_style_for(checks)), secondary: response.secondary_clicked() }
+}
+
+/// A context menu from [`context_menu`]: egui's popup and whether this frame's secondary click
+/// landed on the menu's widget.
+pub struct ContextMenu {
+    popup: egui::Popup<'static>,
+    secondary: bool,
+}
+
+impl ContextMenu {
+    /// The popup's own id, for a menu that shares its response with another popup.
+    pub fn id(self, id: egui::Id) -> Self {
+        Self { popup: self.popup.id(id), ..self }
+    }
+
+    /// Shows the menu while it is open.
+    ///
+    /// Seam for egui 0.36.2 (#769). `Popup::show` (egui `containers/popup.rs`, lines 513 and
+    /// 608-613) exempts the click that opens a popup from closing it only when the popup was not
+    /// open on the previous frame, so a secondary click that reopens an already open context menu
+    /// on its own widget moves it to the new pointer and closes it again in the same frame.
+    /// On exactly that frame the menu ignores clicks for closing (Escape still closes it); every
+    /// other frame keeps the normal close behavior. Remove this when egui exempts the reopening
+    /// click itself: `egui_still_closes_a_reopened_context_menu` in `context_menu_reclick_tests`
+    /// starts failing then.
+    pub fn show<R>(self, content: impl FnOnce(&mut Ui) -> R) -> Option<egui::InnerResponse<R>> {
+        let reopened = self.secondary && egui::Popup::is_id_open(self.popup.ctx(), self.popup.get_id());
+        let popup = if reopened { self.popup.close_behavior(egui::PopupCloseBehavior::IgnoreClicks) } else { self.popup };
+        popup.show(content)
+    }
 }
 
 /// A popup menu that a click on `response` opens and closes, flush under it, in the chrome's

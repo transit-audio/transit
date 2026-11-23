@@ -32,6 +32,7 @@ pub mod diagnostics;
 pub mod drops;
 pub mod edit_tools;
 mod editor_group;
+mod editor_scale;
 mod editors;
 mod external_instrument;
 mod external_measure;
@@ -68,6 +69,7 @@ pub mod midi_monitor;
 mod midi_output;
 mod midi_transport;
 pub mod mixer;
+pub mod modal;
 pub mod modal_voice_panel;
 pub mod modulator_panel;
 pub mod panel;
@@ -321,6 +323,11 @@ pub struct StudioApp {
     pending_shots: Vec<control::PendingShot>,
     pub synthetic: Vec<egui::Event>,
     synthetic_grace: u32,
+    /// The modal dialogs asked for when the frame began (`StudioApp::modal_mask`): one asked for
+    /// since then is opening (#770).
+    modal_seen: u64,
+    /// This frame began with a dialog asked for since the last one (its input was dropped).
+    modal_entering: bool,
     /// Modifiers held by the synthetic gesture being played (`ui.drag {alt: true}`).
     synthetic_mods: Option<egui::Modifiers>,
     /// The appearance last given to egui (re-applied when `ui.appearance` changes).
@@ -474,6 +481,8 @@ impl StudioApp {
             pending_shots: Vec::new(),
             synthetic: Vec::new(),
             synthetic_grace: 0,
+            modal_seen: 0,
+            modal_entering: false,
             synthetic_mods: None,
             theme_applied: None,
             zoom_applied: None,
@@ -751,6 +760,8 @@ mod chrome_pick_tests;
 #[cfg(test)]
 mod chrome_tests;
 #[cfg(test)]
+mod context_menu_reclick_tests;
+#[cfg(test)]
 mod context_menu_tests;
 #[cfg(test)]
 mod dialog_chrome_tests;
@@ -801,7 +812,11 @@ mod midi_record_tests;
 #[cfg(test)]
 mod midi_reopen_tests;
 #[cfg(test)]
+mod modal_hold_tests;
+#[cfg(test)]
 mod modal_voice_panel_tests;
+#[cfg(test)]
+mod modal_window_tests;
 #[cfg(test)]
 mod modulator_panel_tests;
 #[cfg(test)]

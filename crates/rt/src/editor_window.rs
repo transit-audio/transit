@@ -66,6 +66,9 @@ pub struct HeaderView {
     pub disabled: Option<String>,
     /// MIDI Learn waits for a parameter to be touched.
     pub learning: bool,
+    /// The menu's Scale submenu (issue #153), as the format host built it from the editor's scale
+    /// state: entries made with [`scale_item`], headings and separators. Empty: no Scale submenu.
+    pub scale: Vec<MenuItem>,
 }
 
 /// What the user did in the strip.
@@ -99,6 +102,8 @@ pub enum HeaderClick {
     ShowInChain,
     /// Arm or cancel MIDI Learn for the next parameter the plug-in reports as edited.
     LearnNext,
+    /// An entry of the Scale submenu, by its index in [`HeaderView::scale`] (issue #153).
+    Scale(usize),
 }
 
 /// The strip's model, shared by the editor handle (any thread) and the window (its thread).
@@ -159,6 +164,7 @@ impl HeaderCell {
             HeaderClick::Bypass => g.view.can_bypass,
             HeaderClick::Paste => g.view.can_paste,
             HeaderClick::Delete => g.view.can_delete,
+            HeaderClick::Scale(i) => matches!(g.view.scale.get(i), Some(MenuItem::Item { enabled: true, .. })),
             _ => true,
         };
         if g.view.disabled.is_none() && valid && g.clicks.len() < 64 {
@@ -324,6 +330,13 @@ pub enum MenuItem {
     },
     /// A separator line.
     Separator,
+    /// A submenu (issue #153: Scale).
+    Submenu {
+        /// What it reads.
+        label: String,
+        /// Its entries.
+        items: Vec<MenuItem>,
+    },
 }
 
 const ID_SAVE: u32 = 1;
@@ -338,9 +351,21 @@ const ID_SHOW: u32 = 9;
 const ID_LEARN: u32 = 10;
 const ID_USER: u32 = 1_000;
 const ID_FACTORY: u32 = 20_000;
+/// The Scale submenu's entries: `ID_SCALE + index` (issue #153), below `ID_FACTORY`'s range end.
+const ID_SCALE: u32 = 200_000;
+/// Most entries the Scale submenu may have.
+const SCALE_MAX: u32 = 100;
 
 fn item(id: u32, label: &str, checked: bool, enabled: bool) -> MenuItem {
     MenuItem::Item { id, label: label.to_owned(), checked, enabled }
+}
+
+/// The Scale submenu entry at `index` of [`HeaderView::scale`]: a click on it is
+/// [`HeaderClick::Scale`]`(index)` (issue #153).
+#[must_use]
+pub fn scale_item(index: usize, label: &str, checked: bool, enabled: bool) -> MenuItem {
+    let i = u32::try_from(index).unwrap_or(SCALE_MAX).min(SCALE_MAX);
+    item(ID_SCALE + i, label, checked, enabled && i < SCALE_MAX)
 }
 
 /// The preset dropdown: a User section and, when the format exposes one, a read-only Factory
@@ -385,6 +410,10 @@ pub fn menu_items(view: &HeaderView) -> Vec<MenuItem> {
     out.push(MenuItem::Separator);
     out.push(item(ID_LEARN, "MIDI Learn: next touched parameter", view.learning, true));
     out.push(item(ID_SHOW, "Show in Device Chain", false, true));
+    if !view.scale.is_empty() {
+        out.push(MenuItem::Separator);
+        out.push(MenuItem::Submenu { label: "Scale".into(), items: view.scale.clone() });
+    }
     out
 }
 
@@ -404,6 +433,7 @@ pub fn click_for(id: u32) -> Option<HeaderClick> {
         ID_LEARN => HeaderClick::LearnNext,
         i if (ID_USER..ID_FACTORY).contains(&i) => HeaderClick::User((i - ID_USER) as usize),
         i if (ID_FACTORY..ID_FACTORY + 100_000).contains(&i) => HeaderClick::Factory((i - ID_FACTORY) as usize),
+        i if (ID_SCALE..ID_SCALE + SCALE_MAX).contains(&i) => HeaderClick::Scale((i - ID_SCALE) as usize),
         _ => return None,
     })
 }
@@ -539,6 +569,18 @@ fn since(at: Option<std::time::Instant>) -> Duration {
 
 #[cfg(windows)]
 mod win;
+/// Whether this platform can stretch a plug-in editor that cannot scale itself (issue #153):
+/// Windows 10 version 1803 or later (a DPI-unaware content container, [`stretch`]); never elsewhere.
+#[must_use]
+pub fn stretch_available() -> bool {
+    #[cfg(windows)]
+    return win::stretch::available();
+    #[cfg(not(windows))]
+    false
+}
+
+#[cfg(windows)]
+pub use win::stretch;
 #[cfg(windows)]
 pub use win::{EditorWindow, apply, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
 
@@ -747,8 +789,34 @@ mod tests {
             assert!(menu.contains(&c), "{c:?} in the menu");
         }
         assert!(!menu.contains(&HeaderClick::Paste), "nothing copied: Paste is disabled");
+        assert!(!menu_items(&view).iter().any(|m| matches!(m, MenuItem::Submenu { .. })), "no Scale submenu without entries");
         assert_eq!(click_for(0), None);
         assert_eq!(click_for(12_345_678), None);
+    }
+
+    /// Issue #153: the Scale submenu is the last entry of the menu, its entries map back to their
+    /// index, and a click on a disabled entry (or one the view does not have) is dropped.
+    #[test]
+    fn the_scale_submenu_maps_back_to_its_entries_and_drops_disabled_ones() {
+        let scale = vec![
+            MenuItem::Heading("In use: stretched by Windows to 150%".into()),
+            MenuItem::Separator,
+            scale_item(2, "Auto (150%)", true, true),
+            scale_item(3, "50%", false, false),
+            scale_item(4, "100%", false, true),
+        ];
+        let view = HeaderView { scale: scale.clone(), ..HeaderView::default() };
+        let menu = menu_items(&view);
+        assert_eq!(menu.last(), Some(&MenuItem::Submenu { label: "Scale".into(), items: scale }));
+        assert_eq!(click_for(ID_SCALE + 4), Some(HeaderClick::Scale(4)));
+        assert_eq!(click_for(ID_SCALE + SCALE_MAX), None, "past the submenu's range");
+        assert!(matches!(scale_item(500, "far", false, true), MenuItem::Item { enabled: false, .. }), "an index past the range is disabled");
+        let cell = HeaderCell::new();
+        cell.set(&view);
+        for i in [2, 3, 4, 0, 9] {
+            cell.click(HeaderClick::Scale(i));
+        }
+        assert_eq!(cell.take_clicks(), vec![HeaderClick::Scale(2), HeaderClick::Scale(4)], "only enabled entries");
     }
 
     #[test]

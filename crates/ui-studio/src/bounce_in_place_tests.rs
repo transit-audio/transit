@@ -588,7 +588,7 @@ const LONG_NAME: &str = "A very long track name that runs past any sensible widt
 /// window, at 1x and 1.5x.
 #[test]
 fn the_bounce_in_place_form_keeps_its_buttons_whole_with_the_longest_content() {
-    let layer = crate::layout_gate::window("Bounce in Place");
+    let layer = crate::layout_gate::modal_window("Bounce in Place");
     for zoom in crate::layout_gate::SCALES {
         let mut t = T::new();
         crate::layout_gate::watch(&t.ctx, layer);
@@ -649,7 +649,7 @@ fn the_range_line_reads_in_bars_and_beats_with_the_pre_count_counting_down() {
 /// left of it, and a line under Source saying what the choice does.
 #[test]
 fn the_form_is_a_titled_window_with_sections_and_the_default_button_at_the_bottom_right() {
-    let layer = crate::layout_gate::window("Bounce in Place");
+    let layer = crate::layout_gate::modal_window("Bounce in Place");
     let mut t = T::new();
     t.source();
     t.app.open_bounce_in_place();
@@ -778,4 +778,23 @@ fn the_hidden_tracks_form_keeps_its_buttons_whole_with_many_long_names() {
         assert_eq!(t.ctx.pixels_per_point(), zoom);
         crate::layout_gate::assert_clean(&t.ctx, layer);
     }
+}
+
+/// One Escape closes the open destination list or the dialog, never both (#770 round 2).
+#[test]
+fn escape_with_the_destination_list_open_closes_the_list_only() {
+    let mut t = T::new();
+    let source = t.track("Source", "audio");
+    let _dest = t.track("Print", "audio");
+    t.app.focus_header(source, false);
+    t.app.open_bounce_in_place();
+    t.frames();
+    t.click(t.app.bounce_place.layout.existing_track);
+    t.click(t.app.bounce_place.layout.dropdown);
+    assert!(egui::Popup::is_any_open(&t.ctx), "the destination list is open");
+    t.key("Escape");
+    assert!(!egui::Popup::is_any_open(&t.ctx), "Escape closed the list");
+    assert!(matches!(t.app.dialog, Some(crate::Dialog::BounceInPlace)), "and only the list: the dialog stays");
+    t.key("Escape");
+    assert!(t.app.dialog.is_none(), "the next Escape closes the dialog");
 }

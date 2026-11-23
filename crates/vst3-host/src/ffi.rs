@@ -142,6 +142,21 @@ mod window {
     pub fn content_size(_win: &HostWindow) -> (f64, f64) {
         (0.0, 0.0)
     }
+
+    /// No stretch on macOS (it scales editors itself, issue #153).
+    pub fn new_stretched(
+        _title: &str,
+        _w: f64,
+        _h: f64,
+        _header: Option<std::sync::Arc<transit_rt::editor_window::HeaderCell>>,
+    ) -> Result<HostWindow, String> {
+        Err("macOS scales plug-in editors itself".into())
+    }
+
+    /// Runs `f`: nothing to scope on macOS.
+    pub fn in_plugin_scope<R>(_win: &HostWindow, f: impl FnOnce() -> R) -> R {
+        f()
+    }
 }
 
 /// The Windows and Linux host window: `transit_rt`'s editor window, a top-level window on the
@@ -181,6 +196,42 @@ mod window {
     /// thread.
     pub fn on_main_thread() -> bool {
         true
+    }
+
+    /// A window Windows stretches (issue #153): its content container is DPI-unaware.
+    #[cfg(windows)]
+    pub fn new_stretched(
+        title: &str,
+        w: f64,
+        h: f64,
+        header: Option<std::sync::Arc<transit_rt::editor_window::HeaderCell>>,
+    ) -> Result<HostWindow, String> {
+        HostWindow::new_stretched(title, w, h, header)
+    }
+
+    /// No stretch on Linux (issue #153: only editors that accept a factor are scaled there).
+    #[cfg(target_os = "linux")]
+    pub fn new_stretched(
+        _title: &str,
+        _w: f64,
+        _h: f64,
+        _header: Option<std::sync::Arc<transit_rt::editor_window::HeaderCell>>,
+    ) -> Result<HostWindow, String> {
+        Err("editors are not stretched on Linux".into())
+    }
+
+    /// Runs `f` (the view's `attached`) in the window's plug-in scope: the DPI-unaware thread
+    /// context for a stretched window (issue #153).
+    #[cfg(windows)]
+    pub fn in_plugin_scope<R>(win: &HostWindow, f: impl FnOnce() -> R) -> R {
+        let _scope = win.plugin_scope();
+        f()
+    }
+
+    /// Runs `f`: nothing to scope on Linux.
+    #[cfg(target_os = "linux")]
+    pub fn in_plugin_scope<R>(_win: &HostWindow, f: impl FnOnce() -> R) -> R {
+        f()
     }
 }
 /// Other platforms: no editor windows yet (opening reports "unsupported").
@@ -233,6 +284,19 @@ mod window {
 
     pub fn content_size(_win: &HostWindow) -> (f64, f64) {
         (0.0, 0.0)
+    }
+
+    pub fn new_stretched(
+        _title: &str,
+        _w: f64,
+        _h: f64,
+        _header: Option<std::sync::Arc<transit_rt::editor_window::HeaderCell>>,
+    ) -> Result<HostWindow, String> {
+        Err("VST3 editors are not hosted on this platform yet".into())
+    }
+
+    pub fn in_plugin_scope<R>(_win: &HostWindow, f: impl FnOnce() -> R) -> R {
+        f()
     }
 }
 

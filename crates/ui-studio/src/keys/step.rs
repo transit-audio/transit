@@ -235,8 +235,13 @@ impl StudioApp {
     }
 
     pub(crate) fn step_keyboard_control(&mut self, down: bool) {
-        self.keys.step.keyboard_down = down;
         let now = self.step_now_ms();
+        self.step_keyboard_control_at(down, now);
+    }
+
+    /// [`Self::step_keyboard_control`] at `now` on the step clock (tests time it exactly).
+    pub(crate) fn step_keyboard_control_at(&mut self, down: bool, now: u64) {
+        self.keys.step.keyboard_down = down;
         if let Some(action) = self.keys.step.input.control(StepControl::TieRest, down, now, self.ui.keys.step_hold) {
             self.step_action(action);
         }

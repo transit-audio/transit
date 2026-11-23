@@ -320,6 +320,7 @@ mod tests {
                 created: false,
                 visible: false,
                 window: None,
+                scale: transit_dsp::editor_scale::ScaleState::default(),
             }),
             host: Arc::clone(&state),
             header: transit_rt::editor_window::HeaderCell::new(),

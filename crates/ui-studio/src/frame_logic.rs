@@ -327,6 +327,8 @@ impl StudioApp {
         let dt = self.last_frame.replace(now).map_or(1.0 / 60.0, |t| (now - t) as f32).clamp(0.0, 0.25);
         self.frame_ms = self.frame_ms * 0.9 + dt * 1000.0 * 0.1;
         control::drain(self, ctx);
+        // A dialog asked for since the last frame holds this one from here on (#770).
+        self.sync_modal(ctx);
         let plugin_requests = service_plugin_requests();
         // E7: plug-in editors only work while `Player::idle` runs every frame.
         // The host step's blocks (`step_host`, ADR 0062) run here in its order, window work between.
@@ -339,6 +341,8 @@ impl StudioApp {
         self.step_host_clock();
         self.step_poll();
         editor_group::drive(self, ctx);
+        // The Scale setting reaches an editor before its open (issue #153).
+        self.send_headers_before_open();
         self.drive_editors();
         self.drive_plugin_headers();
         theme::probe_fonts(ctx);
@@ -383,6 +387,11 @@ impl StudioApp {
     /// modifiers a synthetic gesture holds (`ui.drag {alt: true}`) applied to the frame's input.
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
         arrange::track_height::bound_raw_wheel(raw);
+        // The frame a dialog opens in takes no input (#770); queued synthetic input waits for the
+        // next one.
+        if self.modal_input(raw) {
+            return;
+        }
         if !self.synthetic.is_empty() {
             self.synthetic_grace = 6;
         }
@@ -444,38 +453,81 @@ impl StudioApp {
         raw.events.extend(evs.into_iter().filter(|e| !matches!(e, egui::Event::PointerMoved(_))));
     }
 
+    /// The keyboard handlers of everything behind a dialog, in their order. None of them runs
+    /// while a modal is open or opening (#770: `ui` asks [`crate::modal::up`] first); the frame's
+    /// modal fact is brought up to date after each one that can ask for a dialog, so the handlers
+    /// after it wait too.
+    /// What the background key handlers hold, kept up every frame whether or not they may take
+    /// new presses (#770): held auditions released when stale, a pad drag ended once no button is
+    /// down. While a dialog holds the app (`modal`), every held background key or button counts as
+    /// let go at once: Sampler auditions stop, a pad drag ends, step entry's held Enter or Space
+    /// (and its repeating rests) is cancelled, a momentary Focus Mode (N held) ends.
+    fn background_releases(&mut self, ctx: &egui::Context, modal: bool) {
+        crate::sampler_panel::slices::release_held(self, ctx, modal);
+        crate::sampler_panel::pad_actions::drag_release(self, ctx, modal);
+        if modal {
+            self.step_keyboard_cancel();
+            self.keys_focus_cancel();
+        }
+    }
+
+    fn background_keys(&mut self, ctx: &egui::Context) {
+        type Keys = fn(&mut StudioApp, &egui::Context);
+        let handlers: [Keys; 16] = [
+            midi_learn::keys,     // an armed MIDI Learn takes Escape first
+            finish::rename_keys,  // slice 6: a name being typed owns Escape and Enter
+            tempo_edit::keys,     // the tempo and meter fields own Escape and Enter
+            clip_inspector::keys, // Escape in a fade field gives its draft up
+            // A Slices bench drag takes Escape first (it cancels the drag; the window stays).
+            crate::sampler_panel::slices::keys,
+            // An Instrument view drag takes Escape first too.
+            crate::sampler_panel::instrument::keys,
+            // And a Pads view pad drag (#481).
+            crate::sampler_panel::pad_actions::drag_keys,
+            crate::device_editor::window::keys, // 326-M: Escape closes the focused device editor
+            crate::sampler_panel::pad_actions::keys,
+            keys::shortcuts,       // slice 3: before the arrangement's keys
+            automation::shortcuts, // slice 7: selected points take Delete before clips
+            groups::shortcuts,
+            browser::shortcuts,
+            finish::shortcuts,
+            menus::shortcuts,
+            |app, ctx| {
+                if !ctx.egui_wants_keyboard_input() && app.dialog.is_none() && shortcuts::pressed(ctx, shortcuts::Action::ToggleInfo) {
+                    app.help.toggle();
+                }
+            },
+        ];
+        for keys in handlers {
+            keys(self, ctx);
+            self.sync_modal(ctx);
+            if crate::modal::up(ctx) {
+                // A dialog asked for by this handler: what the handlers hold is let go now.
+                self.background_releases(ctx, true);
+                return;
+            }
+        }
+    }
+
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         theme::follow(&ctx);
         ui.set_style(ctx.global_style());
-        midi_learn::keys(self, &ctx); // an armed MIDI Learn takes Escape first
+        // The Instrument view's remove question is a dialog drawn here, before the keys it holds.
+        crate::sampler_panel::instrument::keyboard::confirm(self, &ctx);
+        self.sync_modal(&ctx);
+        let modal = crate::modal::up(&ctx);
+        self.background_releases(&ctx, modal);
+        if !modal {
+            self.background_keys(&ctx);
+        }
         if let Some(delay) = self.midi_learn_feed(ctx.input(|i| i.time)) {
             ctx.request_repaint_after(delay);
         }
         self.midi_transport_feed();
         if self.player.is_some() {
             ctx.request_repaint_after(midi_learn::IDLE_POLL);
-        }
-        finish::rename_keys(self, &ctx); // slice 6: a name being typed owns Escape and Enter
-        tempo_edit::keys(self, &ctx); // the tempo and meter fields own Escape and Enter
-        clip_inspector::keys(self, &ctx); // Escape in a fade field gives its draft up
-        // A Slices bench drag takes Escape first (it cancels the drag; the window stays).
-        crate::sampler_panel::slices::keys(self, &ctx);
-        // An Instrument view drag takes Escape first too.
-        crate::sampler_panel::instrument::keys(self, &ctx);
-        // And a Pads view pad drag (#481).
-        crate::sampler_panel::pad_actions::drag_keys(self, &ctx);
-        crate::device_editor::window::keys(self, &ctx); // 326-M: Escape closes the focused device editor
-        crate::sampler_panel::pad_actions::keys(self, &ctx);
-        keys::shortcuts(self, &ctx); // slice 3: before the arrangement's keys
-        automation::shortcuts(self, &ctx); // slice 7: selected points take Delete before clips
-        groups::shortcuts(self, &ctx);
-        browser::shortcuts(self, &ctx);
-        finish::shortcuts(self, &ctx);
-        menus::shortcuts(self, &ctx);
-        if !ctx.egui_wants_keyboard_input() && self.dialog.is_none() && shortcuts::pressed(&ctx, shortcuts::Action::ToggleInfo) {
-            self.help.toggle();
         }
         self.help.layout.question_marks.clear();
         menus::menu_bar(self, ui);

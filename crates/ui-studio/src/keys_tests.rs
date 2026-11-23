@@ -1075,3 +1075,16 @@ impl T {
         bar
     }
 }
+
+/// #770 round 2 (F5): Enter is Quantize's default: it applies, as the Apply button does.
+#[test]
+fn enter_applies_quantize() {
+    let mut t = T::open();
+    t.add(60, 100, 220);
+    let undo = t.undo_len();
+    t.click(mid(t.app.keys.layout.quantize));
+    assert!(t.app.keys.quantize_open);
+    t.key("Enter", json!({}));
+    assert!(!t.app.keys.quantize_open, "Enter applied and closed the dialog");
+    assert_eq!(t.undo_len(), undo + 1, "one quantize step");
+}

@@ -606,7 +606,7 @@ fn path_row(ui: &mut egui::Ui, io: &IoMap, p: &IoPath, ed: &mut IoEditor, items:
         let r = crate::chrome::text_field(ui, egui::TextEdit::singleline(buf).desired_width(130.0));
         r.request_focus();
         if r.lost_focus() {
-            if ui.input(|i| i.key_pressed(egui::Key::Enter)) && *buf != p.name {
+            if crate::modal::reaches(ui) && ui.input(|i| i.key_pressed(egui::Key::Enter)) && *buf != p.name {
                 *edit = Some(IoEdit::Rename { name: p.name.clone(), direction: p.direction, new_name: buf.clone() });
             } else {
                 ed.rename = None;

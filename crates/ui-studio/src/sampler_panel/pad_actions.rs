@@ -68,21 +68,26 @@ pub(crate) fn menu(app: &mut StudioApp, response: &egui::Response, dev: Dev, ind
     }
 }
 
+/// A pad drag's upkeep, every frame whoever holds the keys (#770): once no button is down the drag
+/// ends (the release frame keeps it for the Pads view's own drop, `behavior::end_drag`), and while
+/// a dialog holds the app it ends at once (the button counts as let go).
+pub(crate) fn drag_release(app: &mut StudioApp, ctx: &egui::Context, modal: bool) {
+    let (down, released) = ctx.input(|i| (i.pointer.any_down(), i.pointer.primary_released()));
+    if modal || (!down && !released) {
+        app.builtin_editor.devices.sampler.views.values_mut().for_each(|v| v.drag = None);
+    }
+}
+
 /// A pad drag lives only while a button is down (#481): one whose release no Pads view saw (its
 /// window closed or its view switched under the held button) is dropped here, so it never swaps on
 /// a later click. Escape during a pad drag cancels it: nothing is sent, the window stays (as the
 /// Slices and Instrument views' drags). Runs every frame, before the device window's Escape.
 pub(crate) fn drag_keys(app: &mut StudioApp, ctx: &egui::Context) {
-    let (down, released) = ctx.input(|i| (i.pointer.any_down(), i.pointer.primary_released()));
-    if !down {
-        // The release frame keeps the drag for the Pads view's own drop (`behavior::end_drag`).
-        if !released {
-            app.builtin_editor.devices.sampler.views.values_mut().for_each(|v| v.drag = None);
-        }
+    if !ctx.input(|i| i.pointer.any_down()) {
         return;
     }
     let Some(uid) = app.builtin_editor.devices.focused else { return };
-    let modal = ctx.memory(|m| m.top_modal_layer().is_some());
+    let modal = crate::modal::up(ctx);
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() || modal {
         return;
     }

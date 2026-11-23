@@ -26,7 +26,7 @@ pub mod bar;
 mod behavior;
 mod grid;
 pub mod instrument;
-mod kit_load;
+pub(crate) mod kit_load;
 pub mod kit_presets;
 mod live;
 pub(crate) mod pad_actions;
@@ -62,6 +62,8 @@ mod new_sampler_tests;
 mod pad_actions_tests;
 #[cfg(test)]
 mod pad_drag_tests;
+#[cfg(test)]
+mod reclick_tests;
 #[cfg(test)]
 mod test_rig;
 #[cfg(test)]

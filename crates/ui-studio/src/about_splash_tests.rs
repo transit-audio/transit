@@ -10,6 +10,8 @@ struct T {
     ctx: egui::Context,
     time: f64,
     copied: Vec<String>,
+    /// The screen in points (1400x800 unless a test sets it).
+    screen: egui::Vec2,
 }
 
 fn mid(r: [f32; 4]) -> (f32, f32) {
@@ -19,7 +21,7 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
 impl T {
     fn new() -> T {
         let app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
-        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, copied: Vec::new() };
+        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, copied: Vec::new(), screen: egui::vec2(1400.0, 800.0) };
         t.frames(3);
         t
     }
@@ -28,7 +30,7 @@ impl T {
         for _ in 0..n {
             self.time += 1.0 / 60.0;
             let mut raw = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.screen)),
                 time: Some(self.time),
                 ..Default::default()
             };
@@ -249,7 +251,7 @@ fn the_splash_reports_the_device_stage_before_the_scan_stage() {
 /// The dialog layout gate (#735) on About transit, at 1x and 1.5x.
 #[test]
 fn the_about_window_keeps_its_buttons_whole() {
-    let layer = crate::layout_gate::window("About transit");
+    let layer = crate::layout_gate::modal_window("About transit");
     for zoom in crate::layout_gate::SCALES {
         let mut t = T::new();
         crate::layout_gate::watch(&t.ctx, layer);
@@ -260,5 +262,82 @@ fn the_about_window_keeps_its_buttons_whole() {
         assert_eq!(t.ctx.pixels_per_point(), zoom);
         assert_eq!(t.inspect()["about"]["open"], true);
         crate::layout_gate::assert_clean(&t.ctx, layer);
+    }
+}
+
+/// Reads, at the end of every pass, how many rows each text shape on one layer painted (keyed by its text).
+struct RowCounter {
+    layer: egui::LayerId,
+    rows: std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>>,
+}
+
+impl egui::Plugin for RowCounter {
+    fn debug_name(&self) -> &'static str {
+        "about_row_counter"
+    }
+
+    fn on_end_pass(&mut self, ui: &mut egui::Ui) {
+        fn walk(s: &egui::Shape, out: &mut std::collections::HashMap<String, usize>) {
+            match s {
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                egui::Shape::Text(t) => {
+                    out.insert(t.galley.job.text.clone(), t.galley.rows.len());
+                }
+                _ => {}
+            }
+        }
+        let mut found = std::collections::HashMap::new();
+        ui.ctx().graphics(|g| {
+            if let Some(list) = g.get(self.layer) {
+                list.all_entries().for_each(|e| walk(&e.shape, &mut found));
+            }
+        });
+        *self.rows.lock().unwrap() = found;
+    }
+}
+
+/// Count the rows the About window paints for each paragraph: install before the frames that draw it.
+fn count_rows(ctx: &egui::Context, layer: egui::LayerId) -> std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, usize>>> {
+    let rows = std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    ctx.add_plugin(RowCounter { layer, rows: rows.clone() });
+    rows
+}
+
+/// The About window is a fixed 560 points of content wide (the window about 594 with the body padding), its
+/// small print wraps to that width, and the whole window fits a 1366x768 screen at 1x and a 1920x1080 screen at 150
+/// percent (1280x720 points) with the third-party notices collapsed and expanded.
+#[test]
+fn the_about_window_is_wide_and_fits_small_screens() {
+    for (zoom, screen) in [(1.0, egui::vec2(1366.0, 768.0)), (1.5, egui::vec2(1280.0, 720.0))] {
+        for expanded in [false, true] {
+            let layer = crate::layout_gate::modal_window("About transit");
+            let mut t = T::new();
+            let rows = count_rows(&t.ctx, layer);
+            crate::layout_gate::watch(&t.ctx, layer);
+            t.screen = screen;
+            t.app.ui.ui_zoom = zoom;
+            t.app.about.app_version = "9.9.9-a-version-string-that-is-longer-than-any-release".into();
+            t.menu("Help");
+            t.menu("About transit…");
+            if expanded {
+                let h = rect(&t.inspect()["about"]["notices"]);
+                t.click(mid(h));
+            }
+            let what = format!("zoom {zoom}, expanded {expanded}");
+            let about = t.inspect()["about"].clone();
+            let w = rect(&about["window"]);
+            // 560 of content plus the tool window's 16 a side and the 1 point edge: about 594 (it was 340).
+            assert!((w[2] - w[0] - 594.0).abs() < 2.0, "{what}: {w:?}");
+            assert!(w[0] >= 0.0 && w[1] >= 0.0 && w[2] <= screen.x && w[3] <= screen.y, "{what}: {w:?} must fit {screen:?}");
+            let wm = rect(&about["wordmark"]);
+            assert!(((wm[0] + wm[2]) / 2.0 - (w[0] + w[2]) / 2.0).abs() < 2.0, "{what}: the wordmark stays centered");
+            // Before the widening the credits took 18 rows, the trademark lines 6 and the privacy line 2.
+            let rows = rows.lock().unwrap();
+            assert!(rows[crate::about::THIRD_PARTY] <= 10, "{what}: credits rows {}", rows[crate::about::THIRD_PARTY]);
+            assert_eq!(rows[crate::about::TRADEMARKS], 3, "{what}: one row a trademark line");
+            assert_eq!(rows[crate::update::PRIVACY], 1, "{what}: the privacy line on one row");
+            drop(rows);
+            crate::layout_gate::assert_clean(&t.ctx, layer);
+        }
     }
 }

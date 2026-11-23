@@ -276,7 +276,7 @@ pub(crate) fn list(ui: &mut Ui, ins: &Insert, info: &'static PluginInfo, root: O
     ui.horizontal(|ui| {
         let field = ui.add(egui::TextEdit::singleline(name).hint_text("Save As…").desired_width(100.0));
         let can_save = root.is_some() && !file_name(name).is_empty();
-        let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+        let entered = field.lost_focus() && crate::modal::reaches(ui) && ui.input(|i| i.key_pressed(egui::Key::Enter));
         if ui.add_enabled(can_save, egui::Button::new("Save")).clicked() || (can_save && entered) {
             out.save = Some(name.clone());
         }

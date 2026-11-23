@@ -52,7 +52,7 @@ fn the_scan_sees_the_interface() {
 
 #[test]
 fn every_command_is_reachable_or_listed() {
-    let listed: BTreeSet<&str> = exceptions::EXCEPTIONS.iter().map(|(id, _)| *id).collect();
+    let listed: BTreeSet<&str> = exceptions::all().map(|(id, _)| *id).collect();
     let missing: Vec<String> = unreachable_commands().into_iter().filter(|c| !listed.contains(c.id)).map(describe).collect();
     assert!(
         missing.is_empty(),
@@ -69,10 +69,27 @@ fn the_exceptions_list_holds_only_unreachable_commands() {
     let unreachable: BTreeSet<&str> = unreachable_commands().into_iter().map(|c| c.id).collect();
     let registered: BTreeSet<&str> = command_specs().iter().map(|c| c.id).collect();
     let mut seen = BTreeSet::new();
-    for (id, reason) in exceptions::EXCEPTIONS {
+    for (id, reason) in exceptions::all() {
         assert!(registered.contains(id), "exception `{id}` is not a registered command: remove it");
         assert!(unreachable.contains(id), "exception `{id}` now has an interface surface: remove it from the list");
         assert!(seen.insert(*id), "exception `{id}` is listed twice");
         assert!(!reason.trim().is_empty() && !reason.contains('\n'), "exception `{id}` needs a one-line reason");
+    }
+}
+
+#[test]
+fn the_two_sections_are_what_they_say() {
+    // The decided section gives a reason; only the undecided one may still say so (and must).
+    for (id, reason) in exceptions::decided() {
+        assert!(
+            !reason.to_ascii_lowercase().contains("undecided"),
+            "decided exception `{id}` still says undecided: move it to undecided.rs or give it its reason"
+        );
+    }
+    for (id, reason) in exceptions::undecided() {
+        assert!(
+            reason.starts_with("undecided"),
+            "exception `{id}` is in undecided.rs but its reason does not say undecided: move it to control_only.rs"
+        );
     }
 }

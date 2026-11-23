@@ -625,3 +625,53 @@ fn step_on_polls_at_30_ms_when_idle_and_full_rate_while_holding() {
     assert!(pedal < idle && pedal <= ms(1), "a held pedal repaints at full rate: {pedal:?}");
     t.app.step_message_at(Cc(64), 0, 10);
 }
+
+/// #770 round 2: behind a dialog (About is not one of the app's dialog slot), step entry's Enter and
+/// its Space override do nothing: a held note is not tied and no rest is entered.
+#[test]
+fn step_entry_enter_and_space_wait_behind_a_dialog() {
+    use transit_engine::step_input::StepBinding::Note;
+    let mut t = T::open();
+    t.step_on();
+    t.app.ui.keys.step_hold.enabled = false;
+    t.app.ui.keys.step_tie_rest_space = true;
+    t.app.about.open = true;
+    t.frames(3);
+    t.app.step_message_at(Note(60), 90, 0);
+    t.key("Enter", json!({}));
+    t.key("Space", json!({}));
+    t.app.step_message_at(Note(60), 0, 100);
+    t.frames(2);
+    assert_eq!(t.notes()[0].length, SIXTEENTH, "Enter and Space behind About tie nothing");
+    assert_eq!(t.app.keys.step.cursor, SIXTEENTH, "and enter no rest");
+    assert!(t.app.about.open);
+    // Negative control: the same presses with no dialog up tie the note.
+    let mut t = T::open();
+    t.step_on();
+    t.app.ui.keys.step_hold.enabled = false;
+    t.app.step_message_at(Note(60), 90, 0);
+    t.key("Enter", json!({}));
+    t.app.step_message_at(Note(60), 0, 100);
+    assert_eq!(t.notes()[0].length, 2 * SIXTEENTH, "Enter ties with no dialog up");
+}
+
+/// #770 round 3: a dialog coming up while step entry's Enter is held cancels the hold: no rest is
+/// written behind it, then or later.
+#[test]
+fn a_dialog_cancels_a_held_step_control() {
+    let held_rests = |about: bool| {
+        let mut t = T::open();
+        t.step_on();
+        t.app.ui.keys.step_hold.enabled = true;
+        t.app.keys.active = true;
+        let cursor = t.app.keys.step.cursor;
+        t.app.step_keyboard_control_at(true, 0);
+        t.app.about.open = about;
+        t.frames(3);
+        // Held 700 ms on the step clock (rests repeat from there, as the pedal test shows).
+        t.app.step_tick_at(700);
+        t.app.keys.step.cursor != cursor
+    };
+    assert!(held_rests(false), "control: a held Enter repeats rests with no dialog up");
+    assert!(!held_rests(true), "no rest is written behind the dialog");
+}

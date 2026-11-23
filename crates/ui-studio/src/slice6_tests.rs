@@ -1208,6 +1208,10 @@ fn the_export_form_and_undo_history_keep_their_buttons_whole_with_the_longest_co
         t.key("A", json!({"command": true}));
         t.typed(&format!("{}/{}.wav", "C:/Users/someone/Music/Projects/A Very Long Project Folder Name".repeat(3), long));
         layout_gate::assert_clean(&t.ctx, form);
+        // The first Escape ends the typing in the path field, the second cancels the form (#770:
+        // a field being typed keeps Escape).
+        t.key("Escape", json!({}));
+        assert!(t.app.finish.bounce_form.is_some(), "the path field kept the first Escape");
         t.key("Escape", json!({}));
         t.frames(3);
         t.menu("Edit");

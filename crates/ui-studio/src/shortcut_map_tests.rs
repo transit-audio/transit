@@ -286,7 +286,7 @@ fn export_audio_command_lists_the_shortcut_the_table_binds() {
 /// refuses to pass on a dialog with no button on screen).
 #[test]
 fn the_shortcuts_window_keeps_its_buttons_whole_on_the_step_scope() {
-    let layer = crate::layout_gate::window("Keyboard Shortcuts");
+    let layer = crate::layout_gate::modal_window("Keyboard Shortcuts");
     for zoom in crate::layout_gate::SCALES {
         let mut t = T::new();
         crate::layout_gate::watch(&t.ctx, layer);

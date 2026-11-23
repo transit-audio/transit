@@ -94,6 +94,9 @@ pub fn lines(s: &StuckCall, others: usize) -> Vec<String> {
     out
 }
 
+/// The message's title (its window's id).
+pub(crate) const TITLE: &str = "A plug-in is not responding";
+
 #[derive(Clone, Copy)]
 enum Act {
     Save,
@@ -101,8 +104,16 @@ enum Act {
     Later,
 }
 
+/// Whether the message shows now: a host thread is stuck in a call nobody gave up on or chose
+/// Later for (#770: the message is a modal, so the app's modal fact asks).
+pub(crate) fn shown(app: &StudioApp) -> bool {
+    let Some(p) = &app.player else { return false };
+    p.plugin_host_stuck().iter().any(|s| !s.given_up && !app.host_hang.later.iter().any(|l| l.hides(s)))
+}
+
 /// Draws the message while a host thread is stuck and the user has neither given up on it nor
-/// chosen Later for this call in the last minute.
+/// chosen Later for this call in the last minute. It is a modal that sits above any other dialog
+/// (#770): its Save now, Give up and Later are always within reach.
 pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     app.host_hang.layout = HostHangLayout::default();
     let Some(p) = &app.player else { return };
@@ -115,11 +126,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let give_up_label = give_up_label(first);
     let mut layout = HostHangLayout { lines: lines.clone(), give_up_label: give_up_label.clone(), ..HostHangLayout::default() };
     let mut act = None;
-    crate::theme::window(ctx, "A plug-in is not responding")
-        .collapsible(false)
-        .resizable(false)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
-        .show(ctx, |ui| {
+    crate::theme::modal_window(ctx, TITLE).on_top().collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(
+        ctx,
+        |ui| {
             ui.set_max_width(460.0);
             for l in &lines {
                 ui.label(l);
@@ -138,7 +147,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     }
                 }
             });
-        });
+        },
+    );
     app.host_hang.layout = layout;
     let later = Later { thread: first.thread.clone(), plugin: Arc::clone(&first.plugin), call: first.call, at: first.stuck_for };
     let plugin = Arc::clone(&first.plugin);
@@ -157,6 +167,14 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         Some(Act::GiveUp) => app.give_up_on_stuck_plugins(),
         Some(Act::Later) => app.host_hang.later.push(later),
         None => {}
+    }
+}
+
+impl HostHang {
+    /// Forgets every Later (tests: the message comes back at once, as at the watchdog's relog).
+    #[cfg(test)]
+    pub(crate) fn forget_later(&mut self) {
+        self.later.clear();
     }
 }
 

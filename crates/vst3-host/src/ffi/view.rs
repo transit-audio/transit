@@ -1,6 +1,7 @@
 //! The editor view: the plug frame, content scaling and the editor link.
 
 use super::*;
+use transit_dsp::editor_scale::{Applies, EditorScale, ScaleEntry, ScaleState};
 
 // ---- editor (IPlugView) --------------------------------------------------------------------
 
@@ -69,6 +70,14 @@ impl PlugFrame {
             self.apply(Some(view.as_com_ref()), &mut r, " (asked before attached)");
             self.depth.fetch_sub(1, Ordering::Relaxed);
         }
+    }
+
+    /// The window was made again (stretched, issue #153) before the view was attached: requests
+    /// go to `window` from now on, and a size asked for meanwhile (in the other window's pixels)
+    /// is dropped.
+    pub(super) fn retarget(&self, window: *mut c_void) {
+        self.window.store(window, Ordering::Relaxed);
+        *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = None;
     }
 
     /// Called before the view's `removed`: requests from now on are only kept.
@@ -217,20 +226,55 @@ pub(super) fn view_size(view: &ComPtr<sb::IPlugView>) -> Option<(f64, f64)> {
 }
 
 /// Makes the host window for `view` (`prepare` sees it first; tests change its DPI there), sets
-/// our frame, passes the window's content scale (issue #101) and attaches the view. On success the
-/// caller keeps the frame and window and detaches the view before dropping them.
+/// our frame, settles the editor's scale (issue #153: the factor sent, if any, and whether Windows
+/// stretches it; issue #101 for the factor) and attaches the view. On success the caller keeps the
+/// frame and window and detaches the view before dropping them.
+///
+/// Issue #153: the factor `scale`'s plan asks for is sent before `attached`; the answer settles
+/// the plan. A plan that stretches makes the window again with a DPI-unaware content container
+/// (the plug-in has no window yet), takes our frame off the view and releases it (it was made
+/// outside that context, so it may have read the monitor's DPI and sized itself by it), then has
+/// `recreate` make another inside the window's plug-in scope and attaches that one there; it sends
+/// no factor, so none is ever applied twice. Every call into a stretched view is made in that
+/// scope. Only a plan that sends a factor sends it again after `attached` (issue #105). Returns the
+/// frame, the window and the view that was attached.
+///
+/// The VST3 calls, in order, for a stretch, as implemented: `createView` (outside the scope, by
+/// the caller), `isPlatformTypeSupported`, `canResize`, `getSize` (the caller's probe), `getSize`,
+/// `setFrame(frame)`, `setContentScaleFactor` (when the plan asks; the answer settles the plan),
+/// `getSize`, then `setFrame(null)` and our last reference released (the view was never attached:
+/// the SDK's lifecycle allows releasing a view at any point before `attached`), then inside the
+/// stretched window's scope `createView`, `isPlatformTypeSupported`, `setFrame(frame)`, `getSize`,
+/// `attached`, and the `onSize` of a size the new view asked for before it was attached. The edit
+/// controller that makes both views is held by the editor link for the instance's life, so it
+/// outlives either view.
+///
+/// Review round 3: the first view is released before the second `createView`, and its pointer
+/// value is kept only to compare (never used). What can be told once it is released: a second
+/// view at another address is another object, made in the DPI-unaware context. A second view at
+/// the same address is either the first one (the controller kept a reference and handed it back)
+/// or a new object the allocator put where the first was (seen with the test fixture); a third
+/// `createView` while the second is held tells them apart for a controller that makes a new view
+/// each time (another address: the second is new). Otherwise it is taken as the first: that view
+/// read the DPI in the per-monitor-aware context, so the editor is not stretched and is attached
+/// to a window of the normal kind (never scaled twice), as is a view the second `createView` does
+/// not give or that does not support this platform (then made once more outside the scope). Not
+/// detectable: a controller whose new view is another object reusing what it cached from the
+/// first (the monitor's DPI); that is the remaining assumption (K74).
 pub(super) fn attach_view(
-    view: &ComPtr<sb::IPlugView>,
+    mut view: ComPtr<sb::IPlugView>,
     platform: sb::FIDString,
     title: &str,
     header: Option<Arc<transit_rt::editor_window::HeaderCell>>,
-    prepare: impl FnOnce(&window::HostWindow),
-) -> Result<(ComWrapper<PlugFrame>, window::HostWindow), String> {
-    let (w, h) = view_size(view).unwrap_or_else(|| {
+    scale: &mut ScaleState,
+    recreate: &mut dyn FnMut() -> Option<ComPtr<sb::IPlugView>>,
+    mut prepare: impl FnMut(&window::HostWindow),
+) -> Result<(ComWrapper<PlugFrame>, window::HostWindow, ComPtr<sb::IPlugView>), String> {
+    let (w, h) = view_size(&view).unwrap_or_else(|| {
         log::info!("vst3 editor \"{title}\": size unknown before attached: default window 400×300, following the view's size after attached");
         (400.0, 300.0)
     });
-    let win = window::HostWindow::new(title, w, h, header).map_err(|e| format!("host window failed: {e}"))?;
+    let mut win = window::HostWindow::new(title, w, h, header.clone()).map_err(|e| format!("host window failed: {e}"))?;
     prepare(&win);
     let frame = ComWrapper::new(PlugFrame::new(win.raw(), title));
     if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
@@ -238,32 +282,154 @@ pub(super) fn attach_view(
         // `g.frame`, and detaches it in `teardown`).
         unsafe { view.setFrame(f.as_ptr()) };
     }
-    // Issue #101: the window's scale before `attached`, then the size the view reports at
+    // Issue #101 and #153: the plan's factor before `attached`, then the size the view reports at
     // that scale (a `resizeView` it sends now is kept until it is attached, issue #105).
-    let scale = window::content_scale(&win);
-    if let Some(scale) = scale
-        && set_content_scale(view, scale, title, "before attached")
-        && let Some((w, h)) = view_size(view)
-    {
-        window::resize(win.raw(), w, h);
+    let display = window::content_scale(&win);
+    let unscaled = view_size(&view);
+    let has_call = view.cast::<sb::IPlugViewContentScaleSupport>().is_some();
+    let first = scale.before_open(display.unwrap_or(1.0), has_call);
+    let mut answer = None;
+    if let (Some(factor), Some(_)) = (first.factor, display) {
+        let before = view_size(&view);
+        let accepted = set_content_scale(&view, factor, title, "before attached");
+        let after = view_size(&view);
+        answer = Some((accepted, before == after && (factor - 1.0).abs() > 0.005));
+        if accepted && let Some((w, h)) = after {
+            window::resize(win.raw(), w, h);
+        }
     }
-    // SAFETY: valid view; the parent is the live content view of `win`, of the type named.
-    if !ok(unsafe { view.attached(win.parent(), platform) }) {
+    let plan = scale.opened(answer);
+    if plan.stretch.is_some() {
+        let (w, h) = view_size(&view).unwrap_or((w, h));
+        match window::new_stretched(title, w, h, header.clone()) {
+            Ok(stretched) => {
+                let supported = |v: ComPtr<sb::IPlugView>| {
+                    // SAFETY: a live view just made; `platform` is a static NUL-terminated string.
+                    (unsafe { v.isPlatformTypeSupported(platform) } == sb::kResultTrue).then_some(v)
+                };
+                // Review round 3: the first view goes before the second is asked for. Its address
+                // is kept to compare only.
+                let first = view.as_ptr() as usize;
+                // SAFETY: valid view, never attached; our frame is taken off it before our last
+                // reference to it is released on the next line.
+                unsafe { view.setFrame(std::ptr::null_mut()) };
+                drop(view);
+                // What the first view asked for goes; what the new view asks for from now on is
+                // kept until it is attached (review round 3, note 4).
+                frame.retarget(stretched.raw());
+                let fresh = window::in_plugin_scope(&stretched, || recreate().and_then(supported));
+                // `Ok`: a new view. `Err(Some)`: perhaps the first view handed back. `Err(None)`:
+                // none. A view at the released one's address is either the first (the controller
+                // kept it) or a new one the allocator put there; asked once more while that one is
+                // held, a controller that makes a new view each time gives another object, which
+                // shows the one held is new. Otherwise it is taken as the first.
+                let fresh = match fresh {
+                    Some(v) if v.as_ptr() as usize == first => {
+                        let third = window::in_plugin_scope(&stretched, || recreate().and_then(supported));
+                        let distinct = third.as_ref().is_some_and(|t| t.as_ptr() != v.as_ptr());
+                        window::in_plugin_scope(&stretched, || drop(third));
+                        if distinct { Ok(v) } else { Err(Some(v)) }
+                    }
+                    Some(v) => Ok(v),
+                    None => Err(None),
+                };
+                match fresh {
+                    Ok(v) => {
+                        view = v;
+                        if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
+                            // SAFETY: valid view; the frame outlives its attachment, as above. In
+                            // the stretched window's scope, as every call into this view.
+                            window::in_plugin_scope(&stretched, || unsafe { view.setFrame(f.as_ptr()) });
+                        }
+                        win.close();
+                        win = stretched;
+                        prepare(&win);
+                        if let Some((w, h)) = window::in_plugin_scope(&win, || view_size(&view)) {
+                            window::resize(win.raw(), w, h);
+                        }
+                        log::info!("vst3 editor \"{title}\": the view was made again in the DPI-unaware context for the stretch");
+                    }
+                    Err(other) => {
+                        stretched.close();
+                        frame.retarget(win.raw());
+                        let why = if other.is_some() { "the controller gave back the same view" } else { "no new view" };
+                        let again = match other {
+                            Some(same) => Some(same),
+                            None => recreate().and_then(supported),
+                        };
+                        let Some(v) = again else {
+                            win.close();
+                            frame.close_run_loop();
+                            scale.closed();
+                            return Err("the view could not be made again".into());
+                        };
+                        view = v;
+                        if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
+                            // SAFETY: valid view; the frame outlives its attachment, as above.
+                            unsafe { view.setFrame(f.as_ptr()) };
+                        }
+                        if let Some((w, h)) = view_size(&view) {
+                            window::resize(win.raw(), w, h);
+                        }
+                        log::warn!("vst3 editor \"{title}\": not stretched ({why}); it keeps its own drawing");
+                        scale.stretch_failed();
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("vst3 editor \"{title}\": cannot stretch the editor ({e}); it keeps its own drawing");
+                scale.stretch_failed();
+            }
+        }
+    }
+    let parent = win.parent();
+    // SAFETY: valid view; the parent is the live content view of `win`, of the type named. A
+    // stretched window's view makes its window in the DPI-unaware context (issue #153).
+    if !ok(window::in_plugin_scope(&win, || unsafe { view.attached(parent, platform) })) {
         // SAFETY: valid view; detach our frame again.
-        unsafe { view.setFrame(std::ptr::null_mut()) };
+        window::in_plugin_scope(&win, || unsafe { view.setFrame(std::ptr::null_mut()) });
         win.close();
         frame.close_run_loop();
         return Err("set_parent failed".into());
     }
-    frame.attach(view);
+    // A size the view asked for before it was attached, with its `onSize`: in the scope too.
+    window::in_plugin_scope(&win, || frame.attach(&view));
     // Issue #105: the same factor again once attached (the SDK allows "before or after"; some
     // plug-ins apply it only to an attached view). A view that scales asks through `resizeView`
-    // (honored now); one that only reports its new size gets the window at that size.
-    if let Some(scale) = scale {
-        set_content_scale(view, scale, title, "after attached");
+    // (honored now); one that only reports its new size gets the window at that size. Only a plan
+    // that sends a factor sends it (issue #153).
+    if let (Some(factor), Some(_)) = (scale.in_use.as_ref().and_then(|p| p.factor), display) {
+        let accepted = set_content_scale(&view, factor, title, "after attached");
+        // The answer is kept (#153 review): a refusal stops later factors; the kept-size hint
+        // compares with the size the view had before any factor.
+        scale.after_attach(accepted, view_size(&view) == unscaled);
     }
-    follow_view_size(view, &win, title, "after attached");
-    Ok((frame, win))
+    window::in_plugin_scope(&win, || follow_view_size(&view, &win, title, "after attached"));
+    log::info!("vst3 editor \"{title}\": scale: {}", scale.log_line());
+    Ok((frame, win, view))
+}
+
+/// A new view of the edit controller `c` (`createView("editor")`); `None` when it gives none.
+pub(super) fn view_of(c: &ComPtr<sv::IEditController>) -> Option<ComPtr<sb::IPlugView>> {
+    // SAFETY: valid controller (held by the editor link while it is used); the name is a static
+    // NUL-terminated string.
+    let raw = unsafe { c.createView(c"editor".as_ptr()) };
+    // SAFETY: a non-null view comes with one reference owned by the caller.
+    unsafe { ComPtr::from_raw(raw) }
+}
+
+/// The Scale submenu's rows as the editor window shows them (issue #153).
+pub(super) fn scale_rows(entries: &[ScaleEntry]) -> Vec<transit_rt::editor_window::MenuItem> {
+    use transit_rt::editor_window::{MenuItem, scale_item};
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| match e {
+            ScaleEntry::Info(t) => MenuItem::Heading(t.clone()),
+            ScaleEntry::Separator => MenuItem::Separator,
+            ScaleEntry::Choice { label, checked, enabled, .. } => scale_item(i, label, *checked, *enabled),
+        })
+        .collect()
 }
 
 /// Width and height of a view rect, clamped to a sane window size.
@@ -284,6 +450,8 @@ pub(super) struct EditorInner {
     pub(super) view: Option<ComPtr<sb::IPlugView>>,
     pub(super) frame: Option<ComWrapper<PlugFrame>>,
     pub(super) window: Option<window::HostWindow>,
+    /// The editor's Scale setting, its last answer and the plan in use (issue #153).
+    pub(super) scale: ScaleState,
 }
 
 /// The link between an instance and its editor and state handles. The instance may process on
@@ -348,10 +516,7 @@ impl EditorLink {
 
     fn create_view(g: &EditorInner) -> Result<ComPtr<sb::IPlugView>, String> {
         let c = g.controller.as_ref().ok_or_else(|| "no gui extension".to_string())?;
-        // SAFETY: valid controller; the name is a static NUL-terminated string.
-        let raw = unsafe { c.createView(c"editor".as_ptr()) };
-        // SAFETY: a non-null view comes with one reference owned by the caller.
-        unsafe { ComPtr::from_raw(raw) }.ok_or_else(|| "no gui extension".to_string())
+        view_of(c).ok_or_else(|| "no gui extension".to_string())
     }
 
     /// Creates the view, checks it supports this platform's window type and reads its size,
@@ -437,32 +602,97 @@ impl EditorLink {
         let shown = self.header.view().title;
         let title = if shown.is_empty() { title } else { shown.as_str() };
         let mut scale = None;
-        let attached = attach_view(&view, platform, title, Some(Arc::clone(&self.header)), |win| {
-            prepare(win);
-            scale = window::content_scale(win);
+        let mut prepare = Some(prepare);
+        g.scale.stretch_available = transit_rt::editor_window::stretch_available();
+        // A view made again inside the stretched window's DPI-unaware scope (issue #153 review).
+        let controller = g.controller.clone();
+        let mut recreate = || controller.as_ref().and_then(view_of);
+        let attached = attach_view(view, platform, title, Some(Arc::clone(&self.header)), &mut g.scale, &mut recreate, |win| {
+            // The test hook sees the first window only (a stretched one is made again after it).
+            if let Some(p) = prepare.take() {
+                p(win);
+            }
+            if scale.is_none() {
+                scale = window::content_scale(win);
+            }
         });
         *facts = format!(
             "embedded={embedded} floating=n/a preferred_api=n/a size={probed_size} resizable={resizable} timer-support=n/a posix-fd-support=n/a host_run_loop={} scale={}",
             cfg!(target_os = "linux"),
             scale.map_or_else(|| "unknown".into(), |s| s.to_string())
         );
-        let (frame, win) = attached?;
+        let (frame, win, view) = match attached {
+            Ok(x) => x,
+            Err(e) => {
+                g.scale.closed();
+                return Err(e);
+            }
+        };
         g.view = Some(view);
         g.frame = Some(frame);
         g.window = Some(win);
+        self.show_scale_menu(&mut g);
         Ok(())
     }
 
+    /// Puts the Scale submenu for the current state into the header strip's view (issue #153).
+    fn show_scale_menu(&self, g: &mut EditorInner) {
+        let mut view = self.header.view();
+        view.scale = scale_rows(g.scale.menu());
+        self.header.set(&view);
+    }
+
+    /// The header the app sent (issue #68) with this plug-in's Scale setting (issue #153): a new
+    /// setting reaches an open editor at once where the plug-in allows (a new factor for an editor
+    /// that takes one) and otherwise on the next open, and the log says which.
+    pub fn set_header(&self, mut view: transit_rt::editor_window::HeaderView, setting: EditorScale) {
+        let mut g = self.lock();
+        let (applies, wanted) = g.scale.set_setting(setting);
+        let name = g.frame.as_ref().map_or_else(|| view.title.clone(), |f| f.name.clone());
+        let open = g.window.is_some() && g.view.is_some();
+        match applies {
+            Applies::Now if open && self.on_main_thread() => {
+                if let (Some(factor), Some(v), Some(w)) = (wanted.factor, &g.view, &g.window) {
+                    let before = view_size(v);
+                    let accepted = set_content_scale(v, factor, &name, "on a Scale change");
+                    let after = view_size(v);
+                    if accepted {
+                        follow_view_size(v, w, &name, "on a Scale change");
+                    }
+                    g.scale.applied(accepted, before == after && (factor - 1.0).abs() > 0.005);
+                }
+                log::info!("vst3 editor \"{name}\": Scale {setting:?} applied at once; scale: {}", g.scale.log_line());
+            }
+            Applies::Now | Applies::NextOpen if open => {
+                log::info!("vst3 editor \"{name}\": Scale {setting:?} applies the next time the editor opens");
+            }
+            _ => {}
+        }
+        view.scale = scale_rows(g.scale.menu());
+        self.header.set(&view);
+    }
+
+    /// The Scale setting the menu entry at `index` stores (issue #153).
+    pub fn scale_pick(&self, index: usize) -> Option<EditorScale> {
+        self.lock().scale.pick(index)
+    }
+
     pub(super) fn teardown(g: &mut EditorInner) {
+        g.scale.closed();
         if let Some(f) = &g.frame {
             f.detach();
         }
         if let Some(view) = g.view.take() {
             // SAFETY: valid, attached view; main thread (callers check). `removed` before the
             // window goes, and the frame is detached before it is released.
-            unsafe {
+            let remove = || unsafe {
                 view.removed();
                 view.setFrame(std::ptr::null_mut());
+            };
+            // A stretched view is called in its window's DPI-unaware scope (review round 3).
+            match &g.window {
+                Some(w) => window::in_plugin_scope(w, remove),
+                None => remove(),
             }
         }
         if let Some(f) = g.frame.take() {
@@ -540,8 +770,11 @@ impl EditorLink {
         let mut g = self.lock();
         match &g.window {
             Some(w) if !w.is_visible() => EditorLink::teardown(&mut g),
-            Some(w) => {
-                EditorLink::follow_scale(&g);
+            Some(_) => {
+                if EditorLink::follow_scale(&mut g) {
+                    self.show_scale_menu(&mut g);
+                }
+                let Some(w) = &g.window else { return };
                 // The strip's changes and the size follow (issue #68).
                 w.sync();
                 #[cfg(target_os = "linux")]
@@ -555,14 +788,25 @@ impl EditorLink {
 
     /// Issue #101: the window moved to a monitor with other scaling (or the scaling changed):
     /// the view gets the new factor, and the window the size it then reports (normally the view
-    /// already asked for it through `resizeView`).
-    pub(super) fn follow_scale(g: &EditorInner) {
-        let (Some(w), Some(view)) = (&g.window, &g.view) else { return };
-        let Some(scale) = window::scale_change(w) else { return };
+    /// already asked for it through `resizeView`). Issue #153: only an editor drawn at the host's
+    /// factor under Auto gets one (a chosen percentage stays; Windows re-stretches a stretched
+    /// editor itself). Returns whether the DPI changed.
+    pub(super) fn follow_scale(g: &mut EditorInner) -> bool {
+        let Some(scale) = g.window.as_ref().and_then(window::scale_change) else { return false };
+        let send = g.scale.dpi_changed(scale);
+        let (Some(w), Some(view)) = (&g.window, &g.view) else { return true };
         let name = g.frame.as_ref().map_or("", |f| f.name.as_str());
-        if set_content_scale(view, scale, name, "on a DPI change") {
+        log::info!("vst3 editor \"{name}\": the window's display scale is now {scale}");
+        let Some(factor) = send else { return true };
+        let before = view_size(view);
+        let accepted = set_content_scale(view, factor, name, "on a DPI change");
+        if accepted {
             follow_view_size(view, w, name, "on a DPI change");
         }
+        let kept = before == view_size(view) && (factor - 1.0).abs() > 0.005;
+        // Issue #153 review: the answer is recorded; a refusal keeps the factor the view had.
+        g.scale.dpi_answer(accepted, kept);
+        true
     }
 
     /// Normalized → plain through the controller (main thread).

@@ -597,3 +597,14 @@ fn focus_mode_and_foreground_edits_stay_on_an_admitted_clip_at_the_cap() {
         assert_eq!(new[0].start, old[0].start, "{clip:?}");
     }
 }
+
+/// #770 round 3: a dialog coming up while N is held ends the momentary Focus Mode at once.
+#[test]
+fn a_dialog_ends_a_momentary_focus_mode() {
+    let (mut t, _) = two();
+    t.n_edge(true);
+    assert!(t.app.keys.focus, "N focuses while held");
+    t.app.about.open = true;
+    t.frames(3);
+    assert!(!t.app.keys.focus, "the dialog let go of N: the previous mode is back");
+}

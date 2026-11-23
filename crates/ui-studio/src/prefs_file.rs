@@ -5,6 +5,21 @@
 /// Replaces `keys` in the settings file at `path`, keeping every other saved key. With no file
 /// yet, `ui` is the starting point (its open editors left out). `tag` names the temporary file.
 pub(crate) fn merge_keys(path: &std::path::Path, ui: &crate::UiState, tag: &str, keys: Vec<(&str, serde_json::Value)>) -> Result<(), String> {
+    merge_with(path, ui, tag, |obj| {
+        for (key, v) in keys {
+            obj.insert(key.into(), v);
+        }
+    })
+}
+
+/// [`merge_keys`] with the change made by `change` on the file's top-level object as it is on
+/// disk (for one entry of a map: issue #153's `editor_scale`).
+pub(crate) fn merge_with(
+    path: &std::path::Path,
+    ui: &crate::UiState,
+    tag: &str,
+    change: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>),
+) -> Result<(), String> {
     use std::io::{Read, Write};
     let mut value = match std::fs::File::open(path) {
         Ok(f) => {
@@ -23,9 +38,7 @@ pub(crate) fn merge_keys(path: &std::path::Path, ui: &crate::UiState, tag: &str,
         Err(e) => return Err(e.to_string()),
     };
     let obj = value.as_object_mut().ok_or("Settings must be an object")?;
-    for (key, v) in keys {
-        obj.insert(key.into(), v);
-    }
+    change(obj);
     let bytes = serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;

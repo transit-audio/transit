@@ -64,6 +64,8 @@ transit-state-record = { workspace = true, optional = true }
 # the test-only items (`spectrum`, `offline::non_silent_ranges`).
 transit-dsp = { workspace = true, features = ["testing"] }
 proptest.workspace = true
+# The editor Scale setting's saved form (issue #153).
+serde_json.workspace = true
 # The transplant harness keeps lossless state records (ADR 0029, #742).
 transit-state-record.workspace = true
 # Portable FFT and analysis math for the offline Macro Oscillator quality audit.

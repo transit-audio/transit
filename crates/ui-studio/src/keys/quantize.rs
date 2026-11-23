@@ -94,6 +94,8 @@ pub(super) fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let mut open = true;
     let mut apply = false;
     let mut cancel = false;
+    // Enter is Apply, the dialog's default (the design language's modal rule; #770 F5).
+    let enter = crate::modal::enter(ctx, crate::theme::modal_window_layer("Quantize notes"));
     crate::theme::modal_window(ctx, "Quantize notes").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
         ui.label(match (app.keys.selection.is_empty(), app.keys.others.is_empty()) {
             (false, _) => "Selected notes only",
@@ -126,7 +128,7 @@ pub(super) fn window(app: &mut StudioApp, ctx: &egui::Context) {
         ui.horizontal(|ui| {
             let response = ui.button("Apply");
             app.keys.layout.quantize_apply = r4(response.rect);
-            apply = response.clicked();
+            apply = response.clicked() || enter;
             let response = ui.button("Cancel");
             app.keys.layout.quantize_cancel = r4(response.rect);
             cancel = response.clicked();

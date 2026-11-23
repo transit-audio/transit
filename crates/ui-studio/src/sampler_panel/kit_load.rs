@@ -26,6 +26,14 @@ pub struct Preview {
     pub ask: Option<Ask>,
 }
 
+impl Preview {
+    /// A preview of `count` with no question (tests that need a load waiting to be confirmed).
+    #[cfg(test)]
+    pub(crate) fn for_test(count: &str) -> Preview {
+        Preview { folder: String::new(), count: count.into(), ask: None }
+    }
+}
+
 /// The question's state: whether Fill free pads is available (else the engine's reason).
 #[derive(Debug, Clone)]
 pub struct Ask {

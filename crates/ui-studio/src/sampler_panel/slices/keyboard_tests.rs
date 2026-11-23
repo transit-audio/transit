@@ -238,3 +238,20 @@ fn a_click_in_and_out_of_the_beat_and_bpm_fields_changes_nothing() {
     assert!(view(&t).detect.pending.is_none(), "the panel's settings stay the stored ones");
     assert_eq!(sent(&t, log), Vec::<String>::new(), "no Detect is sent");
 }
+
+/// #770 round 3: a dialog coming up while the audition key is held releases the audition at once,
+/// before the key comes up.
+#[test]
+fn a_dialog_releases_a_held_audition_at_once() {
+    let (mut t, tr) = sliced();
+    let cell = bench(&t, tr).cells.iter().find(|c| c.0 == 3).unwrap().1;
+    t.click(mid(cell), 1);
+    t.input(vec![key(Key::Space, true, Modifiers::NONE)]);
+    let held = |t: &T| t.app.builtin_editor.devices.sampler.views.values().next().unwrap().held;
+    assert_eq!(held(&t), Some(39), "Space auditions the selected slice");
+    t.app.about.open = true;
+    t.input(Vec::new());
+    assert_eq!(held(&t), None, "the note-off went when the dialog came up, Space still down");
+    t.input(vec![key(Key::Space, false, Modifiers::NONE)]);
+    assert_eq!(held(&t), None);
+}
