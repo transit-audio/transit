@@ -310,7 +310,7 @@ fn count_rows(ctx: &egui::Context, layer: egui::LayerId) -> std::sync::Arc<std::
 fn the_about_window_is_wide_and_fits_small_screens() {
     for (zoom, screen) in [(1.0, egui::vec2(1366.0, 768.0)), (1.5, egui::vec2(1280.0, 720.0))] {
         for expanded in [false, true] {
-            let layer = crate::layout_gate::window("About transit");
+            let layer = crate::layout_gate::modal_window("About transit");
             let mut t = T::new();
             let rows = count_rows(&t.ctx, layer);
             crate::layout_gate::watch(&t.ctx, layer);
