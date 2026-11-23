@@ -21,14 +21,15 @@
 //!
 //! So the frame is made with the mixed hosting behavior (it hosts the unaware container), the
 //! container in the unaware context with the default behavior (the plug-in's windows under it
-//! cannot differ from it), and the plug-in makes its windows inside [`Unaware`] (VST3 `attached`,
+//! cannot differ from it), and the plug-in makes its windows inside [`ThreadDpi::unaware`] (VST3 `attached`,
 //! CLAP `set_parent` and `show`), so the DPI it reads is 96. Only that frame and container are
 //! touched; editors that are not stretched are made exactly as before.
 
 use std::sync::OnceLock;
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleW, GetProcAddress};
 use windows_sys::Win32::UI::HiDpi::{
-    DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT_UNAWARE, DPI_HOSTING_BEHAVIOR, DPI_HOSTING_BEHAVIOR_MIXED, SetThreadDpiAwarenessContext,
+    DPI_AWARENESS_CONTEXT, DPI_AWARENESS_CONTEXT_UNAWARE, DPI_HOSTING_BEHAVIOR, DPI_HOSTING_BEHAVIOR_MIXED, GetWindowDpiAwarenessContext,
+    SetThreadDpiAwarenessContext,
 };
 
 /// `SetThreadDpiHostingBehavior` (user32, Windows 10 version 1803).
@@ -86,23 +87,34 @@ impl Drop for Mixed {
     }
 }
 
-/// While alive, this thread runs in the DPI-unaware context: windows it creates are DPI-unaware
-/// and DPI queries answer 96. The previous context comes back on drop. Inert (changes nothing)
+/// While alive, this thread runs in another DPI awareness context; the previous one comes back
+/// on drop. [`ThreadDpi::unaware`]: the DPI-unaware context (windows the thread creates are
+/// DPI-unaware and DPI queries answer 96). [`ThreadDpi::of_window`]: the context of a window of
+/// ours, for frame work reached from a DPI-unaware window procedure (a plug-in's synchronous
+/// resize request, #153 review), so physical sizes are not virtualized. Inert (changes nothing)
 /// when made with `on == false`.
-pub struct Unaware {
+pub struct ThreadDpi {
     previous: Option<DPI_AWARENESS_CONTEXT>,
 }
 
-impl Unaware {
-    pub(super) fn enter(on: bool) -> Unaware {
-        if !on {
-            return Unaware { previous: None };
-        }
-        // SAFETY: a predefined context value; it changes the calling thread's context only and
-        // returns the previous one (null if the value were invalid, which leaves the thread as it
-        // was: nothing to restore then).
-        let previous = unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_UNAWARE) };
-        Unaware { previous: (!previous.is_null()).then_some(previous) }
+impl ThreadDpi {
+    pub(super) fn unaware(on: bool) -> ThreadDpi {
+        ThreadDpi::set(on.then_some(DPI_AWARENESS_CONTEXT_UNAWARE))
+    }
+
+    pub(super) fn of_window(hwnd: windows_sys::Win32::Foundation::HWND, on: bool) -> ThreadDpi {
+        // SAFETY: accepts any window handle (null context for an invalid one, then nothing is set).
+        let ctx = if on { unsafe { GetWindowDpiAwarenessContext(hwnd) } } else { std::ptr::null_mut() };
+        ThreadDpi::set((!ctx.is_null()).then_some(ctx))
+    }
+
+    fn set(ctx: Option<DPI_AWARENESS_CONTEXT>) -> ThreadDpi {
+        let Some(ctx) = ctx else { return ThreadDpi { previous: None } };
+        // SAFETY: a predefined context value or one Windows returned for a live window; it changes
+        // the calling thread's context only and returns the previous one (null if the value were
+        // invalid, which leaves the thread as it was: nothing to restore then).
+        let previous = unsafe { SetThreadDpiAwarenessContext(ctx) };
+        ThreadDpi { previous: (!previous.is_null()).then_some(previous) }
     }
 
     /// Whether the scope changed the thread's context.
@@ -112,7 +124,7 @@ impl Unaware {
     }
 }
 
-impl Drop for Unaware {
+impl Drop for ThreadDpi {
     fn drop(&mut self) {
         if let Some(previous) = self.previous {
             // SAFETY: the context `SetThreadDpiAwarenessContext` returned on this thread (a scope

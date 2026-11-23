@@ -208,6 +208,14 @@ pub struct ScalePlan {
     pub hint: Option<String>,
 }
 
+/// The hint for an editor that accepted `factor` and kept its size ("accepted is not applied").
+fn hint_for(factor: f64, support: ScaleSupport, kept_size: bool, windows: bool) -> Option<String> {
+    (kept_size && support == ScaleSupport::Accepts && !near(factor, 1.0)).then(|| {
+        let other = if windows { "Stretched by Windows or the plug-in's own zoom" } else { "the plug-in's own zoom" };
+        format!("The plug-in accepted the factor but kept its size: if it draws too small, choose {other}")
+    })
+}
+
 /// The display's scale as a whole percentage.
 #[must_use]
 pub fn percent_of(scale: f64) -> u16 {
@@ -276,10 +284,7 @@ pub fn decide(setting: EditorScale, inputs: ScaleInputs) -> ScalePlan {
     match mode {
         ScaleMode::HostFactor => {
             let factor = setting.step.factor(display);
-            let hint = (inputs.kept_size && inputs.support == ScaleSupport::Accepts && !near(factor, 1.0)).then(|| {
-                let other = if windows { "Stretched by Windows or the plug-in's own zoom" } else { "the plug-in's own zoom" };
-                format!("The plug-in accepted the factor but kept its size: if it draws too small, choose {other}")
-            });
+            let hint = hint_for(factor, inputs.support, inputs.kept_size, windows);
             ScalePlan {
                 factor: Some(factor),
                 stretch: None,
@@ -449,8 +454,15 @@ pub fn menu(setting: EditorScale, inputs: ScaleInputs, in_use: Option<&ScalePlan
 }
 
 /// One editor's scale state on its own thread: the format hosts keep one per editor and drive it
-/// through an open (`before_open`, then `opened` with the editor's answer), a setting change while
-/// open (`set_setting`), a DPI change (`dpi_changed`) and the menu (`menu`, `pick`).
+/// through an open (`before_open`, then `opened` with the editor's answer, and for VST3
+/// `after_attach`), a setting change while open (`set_setting`, then `applied`), a DPI change
+/// (`dpi_changed`, then `dpi_answer`) and the menu (`menu`, `pick`).
+///
+/// Two things are kept apart (review of #153): `in_use` is what is really applied to the open
+/// window (the factor the editor took, whether its window is stretched), and `setting` is the
+/// user's choice, which may be pending until the next open. Only an open, an accepted live factor
+/// and an accepted DPI factor change `in_use`; a refusal is recorded in `support` and changes
+/// nothing on screen, and no factor is sent to an editor whose last answer was a refusal.
 #[derive(Debug)]
 pub struct ScaleState {
     /// The user's setting (from the app's header).
@@ -461,7 +473,8 @@ pub struct ScaleState {
     pub kept_size: bool,
     /// The display's scale at the window.
     pub display: f64,
-    /// The plan of the open editor; `None` while it is closed.
+    /// What is applied to the open editor (its factor and stretch, described for the menu and the
+    /// log); `None` while it is closed. Never the pending setting's plan.
     pub in_use: Option<ScalePlan>,
     /// The Scale submenu last built ([`ScaleState::menu`]); a click's index maps into it.
     pub entries: Vec<ScaleEntry>,
@@ -551,31 +564,59 @@ impl ScaleState {
         (applies, wanted)
     }
 
-    /// The editor took `plan`'s factor at once (after [`Applies::Now`]); `accepted` is its answer.
+    /// The editor's answer to the factor sent at once after [`Applies::Now`]. Accepted: the open
+    /// editor is drawn at the setting's plan from now on (its stretch state is the same, which
+    /// `Now` guarantees). Refused: recorded; the editor keeps what it had.
     pub fn applied(&mut self, accepted: bool, kept_size: bool) {
-        self.support = Some(if accepted { ScaleSupport::Accepts } else { ScaleSupport::Refuses });
-        self.kept_size = accepted && kept_size;
-        let plan = decide(self.setting, self.inputs());
-        if self.in_use.is_some() {
-            self.in_use = Some(plan);
+        self.record(accepted, kept_size);
+        if accepted && self.in_use.is_some() {
+            self.in_use = Some(decide(self.setting, self.inputs()));
         }
     }
 
-    /// The window's DPI changed to `display`: the factor to send now (only when the editor is
-    /// drawn at the host's factor under Auto; a chosen percentage stays, and Windows re-stretches
-    /// a stretched editor by itself).
+    /// VST3: the answer to the factor sent again after `attached` (issue #105). Kept: a refusal is
+    /// recorded (no later factor is sent), an acceptance updates the kept-size hint. What is on
+    /// screen does not change: the factor accepted before `attached` stays.
+    pub fn after_attach(&mut self, accepted: bool, kept_size: bool) {
+        self.record(accepted, kept_size);
+        let windows = self.platform == Platform::Windows && self.stretch_available;
+        let (support, kept) = (self.support.unwrap_or(ScaleSupport::Unasked), self.kept_size);
+        if let Some(p) = &mut self.in_use
+            && let Some(f) = p.factor
+        {
+            p.hint = hint_for(f, support, kept, windows);
+        }
+    }
+
+    fn record(&mut self, accepted: bool, kept_size: bool) {
+        self.support = Some(if accepted { ScaleSupport::Accepts } else { ScaleSupport::Refuses });
+        self.kept_size = accepted && kept_size;
+    }
+
+    /// The window's DPI changed to `display`: the factor to send now, only when the open editor is
+    /// drawn at the host's factor under Auto and did not refuse (a chosen percentage stays;
+    /// Windows re-stretches a stretched editor by itself). Report the answer to
+    /// [`ScaleState::dpi_answer`]. The pending setting plays no part.
     pub fn dpi_changed(&mut self, display: f64) -> Option<f64> {
         self.display = display;
-        let now = self.in_use.as_ref()?;
-        let send = (now.factor.is_some() && self.setting.step == ScaleStep::Auto && now.mode == ScaleMode::HostFactor).then_some(display);
-        let mut plan = decide(self.setting, self.inputs());
-        if now.factor.is_none() {
-            // Nothing is sent: the editor keeps what it was opened with, at the new display.
-            plan = ScalePlan { factor: None, ..now.clone() };
-            plan.stretch = now.stretch.map(|_| display);
+        let refused = self.support == Some(ScaleSupport::Refuses);
+        let now = self.in_use.as_mut()?;
+        if now.stretch.is_some() {
+            now.stretch = Some(display);
+            retext(now);
         }
-        self.in_use = Some(plan);
-        send
+        (now.factor.is_some() && now.step == ScaleStep::Auto && now.mode == ScaleMode::HostFactor && !refused).then_some(display)
+    }
+
+    /// The editor's answer to the factor [`ScaleState::dpi_changed`] asked for: accepted, it is
+    /// drawn at the new display's factor; refused, recorded, and it keeps the factor it had.
+    pub fn dpi_answer(&mut self, accepted: bool, kept_size: bool) {
+        self.record(accepted, kept_size);
+        let display = self.display;
+        if accepted && let Some(p) = &mut self.in_use {
+            p.factor = Some(display);
+            retext(p);
+        }
     }
 
     /// Builds the Scale submenu (kept for [`ScaleState::pick`]).
@@ -611,6 +652,15 @@ impl ScaleState {
             self.setting,
             self.display
         )
+    }
+}
+
+/// The in-use line of `p` after its factor or stretch changed.
+fn retext(p: &mut ScalePlan) {
+    if let Some(s) = p.stretch {
+        p.in_use = format!("In use: stretched by Windows to {}%", percent_of(s));
+    } else if let Some(f) = p.factor {
+        p.in_use = format!("In use: drawn by the plug-in at {}%", percent_of(f));
     }
 }
 

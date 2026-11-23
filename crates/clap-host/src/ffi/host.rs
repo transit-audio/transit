@@ -167,6 +167,19 @@ unsafe extern "C" fn host_state_mark_dirty(host: *const clap_host) {
     }
 }
 
+impl HostState {
+    /// Drops the `clap_host_gui` requests a GUI left pending (resize, show, hide, closed,
+    /// destroyed): the GUI they came from is gone and another takes its place (issue #153, the
+    /// stretched GUI made again). Resize hints keep no state here.
+    pub fn forget_gui_requests(&self) {
+        self.gui_resize.store(0, Ordering::Relaxed);
+        self.gui_show.store(false, Ordering::Relaxed);
+        self.gui_hide.store(false, Ordering::Relaxed);
+        self.gui_closed.store(false, Ordering::Relaxed);
+        self.gui_destroyed.store(false, Ordering::Relaxed);
+    }
+}
+
 unsafe extern "C" fn host_gui_resize_hints_changed(_host: *const clap_host) {}
 
 unsafe extern "C" fn host_gui_request_resize(host: *const clap_host, width: u32, height: u32) -> bool {

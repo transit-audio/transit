@@ -510,6 +510,30 @@ mod tests {
         assert_eq!(open_scaled_stretch(&inst, 144, 192), ((400, 300), (400, 300), true));
     }
 
+    /// Issue #153 review, item 4: a resize the discarded GUI asked for (600×450, in `create`,
+    /// before it refused `set_scale` and was made again for the stretch) does not reach the
+    /// replacement, which reports 400×300: the next idle leaves the window at 400×300.
+    #[cfg(windows)]
+    #[test]
+    fn a_resize_the_discarded_gui_asked_for_does_not_reach_its_replacement() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
+        let inst = embedded_gain(&[b"CMD:gui-self-scaling", b"CMD:gui-resize-on-create-once", b"CMD:gui-quiet-show"]);
+        let link = inst.gui().unwrap();
+        link.open_with("replaced", |w| set_dpi(w, 144)).unwrap();
+        {
+            let g = link.lock();
+            let win = g.window.as_ref().expect("embedded");
+            assert!(win.stretch().is_some(), "made again for the stretch");
+            assert_eq!(hostwin::content_size(win), (400, 300));
+            // SAFETY: a live window of this thread (idle keeps only a visible one).
+            unsafe { ShowWindow(win.raw().cast(), SW_SHOWNOACTIVATE) };
+        }
+        let _ = link.idle();
+        assert!(link.is_open());
+        assert_eq!(hostwin::content_size(link.lock().window.as_ref().unwrap()), (400, 300), "the old 600×450 request was dropped");
+        link.close();
+    }
+
     /// Issue #153 through the fixture's GUI link: the user's own-zoom mode sends no `set_scale`
     /// (the GUI keeps 400×300) and nothing is stretched; a percentage while open is sent at once
     /// and the window takes the size the GUI then reports; a change to the stretch waits for the

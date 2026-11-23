@@ -64,7 +64,7 @@ pub struct UiState {
     /// Each plug-in's editor Scale setting by plug-in id (issue #153, `crate::editor_scale`):
     /// written into `ui.json` as soon as it is picked; per machine, never in the session. Plug-ins
     /// at the default (Auto, automatic mode) have no entry.
-    pub editor_scale: std::collections::BTreeMap<String, transit_dsp::EditorScale>,
+    pub editor_scale: std::collections::BTreeMap<String, crate::editor_scale::SavedScale>,
     /// Width of the track list.
     pub header_width: f32,
     /// The main window's size (logical points) and maximized state.
@@ -333,7 +333,7 @@ mod round_trip_tests {
                 let f = n.as_f64().unwrap();
                 vec![json!(f + 1.0), json!(f * 0.75), json!(1.5)]
             }
-            Value::String(_) => ["x", "dark", "light", "jump", "pickup", "C4", "host_factor"].iter().map(|s| json!(s)).collect(),
+            Value::String(_) => ["x", "dark", "light", "jump", "pickup", "C4"].iter().map(|s| json!(s)).collect(),
             Value::Null => vec![json!(1), json!("x")],
             Value::Array(_) | Value::Object(_) => Vec::new(),
         }

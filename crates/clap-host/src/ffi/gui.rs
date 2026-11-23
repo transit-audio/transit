@@ -293,6 +293,9 @@ impl GuiLink {
                         unsafe { f(g.plugin) };
                     }
                     g.created = false;
+                    // Issue #153 review: what the discarded GUI asked for (a resize, show, hide,
+                    // closed) must not reach its replacement.
+                    self.host.forget_gui_requests();
                     // SAFETY: live plugin; `api` is a static NUL-terminated string; main thread; no
                     // GUI now. Inside the stretched window's plug-in scope (DPI-unaware context).
                     if !hostwin::in_plugin_scope(&win, || unsafe { create(g.plugin, api.as_ptr(), false) }) {
@@ -416,14 +419,19 @@ impl GuiLink {
         let send = g.scale.dpi_changed(scale);
         let (Some(win), Some(vt)) = (&g.window, GuiLink::vt(g)) else { return true };
         log::info!("clap: the editor window's display scale is now {scale}");
-        if let Some(factor) = send
-            && GuiLink::set_scale(g, vt, factor, "on a DPI change")
-            && let Some((w, h)) = GuiLink::size(g, vt)
+        let Some(factor) = send else { return true };
+        let before = GuiLink::size(g, vt);
+        let accepted = GuiLink::set_scale(g, vt, factor, "on a DPI change");
+        let after = GuiLink::size(g, vt);
+        if accepted
+            && let Some((w, h)) = after
             && hostwin::content_size(win) != (w, h)
         {
             hostwin::resize(win.raw(), f64::from(w), f64::from(h));
             log::info!("clap: editor window resized to {w}×{h} after the DPI change");
         }
+        // Issue #153 review: the answer is recorded; a refusal keeps the factor the GUI had.
+        g.scale.dpi_answer(accepted, before == after && (factor - 1.0).abs() > 0.005);
         true
     }
 

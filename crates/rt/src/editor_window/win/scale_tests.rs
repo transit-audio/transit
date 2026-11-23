@@ -126,7 +126,7 @@ fn the_plugin_window_is_dpi_unaware_and_followed_in_its_own_pixels() {
     assert!(thread_is(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2), "the scope puts the thread's context back");
     assert!(context_is(child, DPI_AWARENESS_CONTEXT_UNAWARE));
     assert_eq!(dpi_of(child), 96);
-    std::thread::sleep(Follow::GRACE + std::time::Duration::from_millis(20));
+    win.forget_resize();
     for _ in 0..Follow::STABLE {
         win.sync();
     }
@@ -135,6 +135,26 @@ fn the_plugin_window_is_dpi_unaware_and_followed_in_its_own_pixels() {
     assert_eq!(outer_size(win.parent()), (stretch::physical(700, dpi), stretch::physical(480, dpi)));
     let later = plugin_window(child, 50, 50);
     assert!(context_is(later, DPI_AWARENESS_CONTEXT_UNAWARE), "a later window of the plug-in takes the container's awareness");
+    win.close();
+}
+
+/// #153 review, item 6: a stretched plug-in's synchronous resize request arrives from its
+/// DPI-unaware window procedure; `resize_content` called from a DPI-unaware caller sizes the frame
+/// in the frame's own (physical) pixels all the same, and the caller's context is put back.
+#[test]
+fn a_resize_from_a_dpi_unaware_caller_sizes_the_stretched_window_right() {
+    let _pm = PerMonitor::enter();
+    let win = EditorWindow::new_stretched("unaware caller", 320.0, 200.0, Some(HeaderCell::new())).unwrap();
+    {
+        let _plugin = win.plugin_scope();
+        assert!(thread_is(DPI_AWARENESS_CONTEXT_UNAWARE));
+        assert!(resize_content(win.raw(), 400.0, 300.0));
+        assert!(thread_is(DPI_AWARENESS_CONTEXT_UNAWARE), "the caller's context is put back");
+    }
+    let dpi = dpi_of(win.raw());
+    assert_eq!(win.content_size(), (400, 300));
+    assert_eq!(outer_size(win.parent()), (stretch::physical(400, dpi), stretch::physical(300, dpi)), "at {dpi} DPI");
+    assert_eq!(client(win.raw()), (stretch::physical(400, dpi), stretch::physical(300, dpi) + super::super::header_height(dpi)));
     win.close();
 }
 

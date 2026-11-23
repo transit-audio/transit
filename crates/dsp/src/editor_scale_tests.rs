@@ -304,3 +304,122 @@ fn the_editor_state_follows_an_open_a_change_a_dpi_change_and_a_pick() {
     assert_eq!(r.opened(None).factor, None);
     assert!(r.log_line().starts_with("accepts a factor: no; factor in use: none; Windows stretch: 1.5"));
 }
+
+fn open_accepting(display: f64) -> ScaleState {
+    let mut s = ScaleState { stretch_available: true, platform: Platform::Windows, ..ScaleState::default() };
+    assert_eq!(s.before_open(display, true).factor, Some(display));
+    s.opened(Some((true, false)));
+    s
+}
+
+fn first_line(s: &mut ScaleState) -> String {
+    match &s.menu()[0] {
+        ScaleEntry::Info(t) => t.clone(),
+        e => panic!("{e:?}"),
+    }
+}
+
+/// Review of #153, item 2: a stretch picked while open waits for the next open, and a DPI change
+/// meanwhile acts on what is applied (the host factor), not on the pending choice: moved to a
+/// 200% monitor and back, the editor gets 2 and then 1.5 again, and the menu and the log say host
+/// factor throughout.
+#[test]
+fn a_pending_stretch_leaves_the_open_editor_at_the_host_factor_through_dpi_changes() {
+    let mut s = open_accepting(1.5);
+    let (applies, _) = s.set_setting(EditorScale { step: ScaleStep::Auto, mode: Some(ScaleMode::WindowsStretch) });
+    assert_eq!(applies, Applies::NextOpen);
+    assert_eq!(s.dpi_changed(2.0), Some(2.0));
+    s.dpi_answer(true, false);
+    assert_eq!(first_line(&mut s), "In use: drawn by the plug-in at 200%");
+    assert!(matches!(&s.menu()[1], ScaleEntry::Info(t) if t == "Next open: stretched by Windows to 200%"));
+    assert!(s.log_line().contains("factor in use: 2; Windows stretch: none; in use: drawn by the plug-in at 200%"), "{}", s.log_line());
+    assert_eq!(s.dpi_changed(1.5), Some(1.5), "back on the 150% monitor the editor gets 1.5 again");
+    s.dpi_answer(true, false);
+    assert_eq!(first_line(&mut s), "In use: drawn by the plug-in at 150%");
+    let p = s.in_use.as_ref().unwrap();
+    assert_eq!((p.factor, p.stretch, p.mode), (Some(1.5), None, ScaleMode::HostFactor));
+}
+
+/// Review of #153, item 3: a live percentage the editor refuses leaves its factor as it was and is
+/// recorded, so no later factor goes to it (neither a pick nor a DPI change).
+#[test]
+fn a_refused_live_factor_changes_nothing_on_screen_and_stops_later_factors() {
+    let mut s = open_accepting(1.5);
+    let (applies, wanted) = s.set_setting(EditorScale { step: ScaleStep::Percent(200), mode: None });
+    assert_eq!((applies, wanted.factor), (Applies::Now, Some(2.0)));
+    s.applied(false, false);
+    let p = s.in_use.as_ref().unwrap();
+    assert_eq!((p.factor, p.stretch, p.mode), (Some(1.5), None, ScaleMode::HostFactor), "the factor it took stays; no stretch appears");
+    assert!(s.log_line().starts_with("accepts a factor: no; factor in use: 1.5; Windows stretch: none"));
+    let (applies, wanted) = s.set_setting(EditorScale::default());
+    assert_eq!((applies, wanted.factor), (Applies::NextOpen, None), "no factor to an editor that refused");
+    assert_eq!(s.dpi_changed(2.0), None, "nor on a DPI change");
+}
+
+/// Review of #153, item 3: a refusal during a DPI change is recorded and the old factor stays.
+#[test]
+fn a_refusal_during_a_dpi_change_is_recorded_and_the_old_factor_stays() {
+    let mut s = open_accepting(1.5);
+    assert_eq!(s.dpi_changed(2.0), Some(2.0));
+    s.dpi_answer(false, false);
+    assert_eq!(s.in_use.as_ref().unwrap().factor, Some(1.5));
+    assert_eq!(first_line(&mut s), "In use: drawn by the plug-in at 150%");
+    assert_eq!(s.dpi_changed(1.25), None, "no factor after a refusal");
+}
+
+/// VST3's answer after `attached` is kept: a refusal there is recorded and stops later factors.
+#[test]
+fn the_answer_after_attached_is_kept() {
+    let mut s = open_accepting(1.5);
+    s.after_attach(false, false);
+    assert_eq!(s.support, Some(ScaleSupport::Refuses));
+    assert_eq!(s.in_use.as_ref().unwrap().factor, Some(1.5), "what was taken before attached stays");
+    assert_eq!(s.dpi_changed(2.0), None);
+    let mut k = open_accepting(1.5);
+    k.after_attach(true, true);
+    assert!(k.in_use.as_ref().unwrap().hint.is_some(), "a size kept after attached gives the hint");
+}
+
+/// The every-input rule against the per-editor state: for every opening setting, every kind of
+/// editor, every pick while open, DPI changes and every answer, what is in use never has a factor
+/// and a stretch together, the stretch never turns on or off while open, and no factor is asked
+/// for after a refusal.
+#[test]
+fn no_factor_is_applied_twice_through_the_editor_state() {
+    let answers = [Some(true), Some(false), None];
+    for open in every_setting() {
+        for kind in answers {
+            for pick in every_setting() {
+                for reply in [true, false] {
+                    let mut s = ScaleState { stretch_available: true, platform: Platform::Windows, setting: open, ..ScaleState::default() };
+                    let first = s.before_open(1.5, kind.is_some());
+                    let answer = first.factor.and(kind).map(|a| (a, false));
+                    let plan = s.opened(answer);
+                    let stretched = plan.stretch.is_some();
+                    let what = format!("{open:?} {kind:?} -> {pick:?} reply {reply}");
+                    let check = |s: &ScaleState, what: &str| {
+                        let p = s.in_use.as_ref().unwrap();
+                        assert!(p.factor.is_none() || p.stretch.is_none(), "{what}: {p:?}");
+                        assert_eq!(p.stretch.is_some(), stretched, "{what}: the stretch changed while open");
+                    };
+                    check(&s, &what);
+                    let (applies, wanted) = s.set_setting(pick);
+                    if applies == Applies::Now {
+                        assert!(s.support != Some(ScaleSupport::Refuses) && wanted.factor.is_some(), "{what}");
+                        s.applied(reply, false);
+                    }
+                    check(&s, &what);
+                    for d in [2.0, 1.5, 1.25] {
+                        let refused = s.support == Some(ScaleSupport::Refuses);
+                        if let Some(f) = s.dpi_changed(d) {
+                            assert!(!refused, "{what}: a factor after a refusal");
+                            assert_eq!(f, d);
+                            s.dpi_answer(reply, false);
+                        }
+                        check(&s, &what);
+                    }
+                }
+            }
+        }
+    }
+}

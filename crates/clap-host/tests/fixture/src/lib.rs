@@ -213,6 +213,12 @@ struct Fx {
     /// `CMD:gui-self-scaling`: the GUI ignores `set_scale` (returns false) and always reports
     /// 400×300, like a plug-in that reads its monitor's scale itself.
     gui_self_scaling: bool,
+    /// `CMD:gui-resize-on-create-once`: the next embedded `create` asks the host for 600×450
+    /// (`request_resize`), once (issue #153: a request the discarded GUI left must not reach its
+    /// replacement).
+    gui_resize_on_create: bool,
+    /// `CMD:gui-quiet-show`: `show` does not ask for a resize (issue #153's replacement GUI test).
+    gui_quiet_show: bool,
     gui_mode: Mode,
     gui_painted: bool,
     gui_timer: Option<clap_id>,
@@ -893,6 +899,14 @@ unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istre
             f.gui_self_scaling = true;
             return true;
         }
+        Some("CMD:gui-resize-on-create-once") => {
+            f.gui_resize_on_create = true;
+            return true;
+        }
+        Some("CMD:gui-quiet-show") => {
+            f.gui_quiet_show = true;
+            return true;
+        }
         _ => {}
     }
     if got != 16 {
@@ -934,6 +948,12 @@ unsafe extern "C" fn gui_create(p: *const clap_plugin, _api: *const c_char, floa
     }
     f.gui_created = true;
     f.gui_floating = floating;
+    if !floating && std::mem::take(&mut f.gui_resize_on_create) {
+        let host = unsafe { &*f.host };
+        let hg = unsafe { (host.get_extension.unwrap())(f.host, CLAP_EXT_GUI.as_ptr()) } as *const clap_host_gui;
+        let hg = unsafe { hg.as_ref() }.expect("host gui extension");
+        assert!(unsafe { (hg.request_resize.unwrap())(f.host, 600, 450) });
+    }
     true
 }
 
@@ -1007,6 +1027,9 @@ unsafe extern "C" fn gui_show(p: *const clap_plugin) -> bool {
     }
     f.gui_visible = true;
     f.gui_edit_pending = true;
+    if f.gui_quiet_show {
+        return true;
+    }
     // Exercise the host GUI extension.
     let host = unsafe { &*f.host };
     let hg = unsafe { (host.get_extension.unwrap())(f.host, CLAP_EXT_GUI.as_ptr()) } as *const clap_host_gui;
@@ -1164,6 +1187,8 @@ unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const
         gui_floating: false,
         gui_scale: 1.0,
         gui_self_scaling: false,
+        gui_resize_on_create: false,
+        gui_quiet_show: false,
         gui_mode: if NEXT_NO_GUI.replace(false) { Mode::NoGui } else { Mode::Normal },
         gui_painted: false,
         gui_timer: None,

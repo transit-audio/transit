@@ -196,6 +196,9 @@ fn font_for(dpi: u32) -> HFONT {
 /// Resizes the frame so its content area is `w`×`h` plug-in pixels (plus the strip), keeping its
 /// position. A stretched window's content area is that times its DPI over 96 (issue #153).
 fn set_content(hwnd: HWND, d: &Data, w: i32, h: i32) {
+    // A stretched plug-in's synchronous resize request reaches here from its DPI-unaware window
+    // procedure: the frame's work runs in the frame's own context (#153 review).
+    let _frame = stretch::ThreadDpi::of_window(hwnd, d.stretch);
     let (w, h) = (w.clamp(1, 16_384), h.clamp(1, 16_384));
     d.size.set((w, h));
     let (w, h) = if d.stretch { (stretch::physical(w, d.dpi.get()), stretch::physical(h, d.dpi.get())) } else { (w, h) };
@@ -390,7 +393,12 @@ fn build_menu(items: &[MenuItem]) -> windows_sys::Win32::UI::WindowsAndMessaging
         };
         // SAFETY: a live menu we own; `text` is NUL-terminated and outlives the call; with
         // MF_POPUP `id` is the live submenu just built.
-        unsafe { AppendMenuW(menu, flags, id, text.as_ptr()) };
+        let appended = unsafe { AppendMenuW(menu, flags, id, text.as_ptr()) } != 0;
+        if !appended && flags & MF_POPUP != 0 {
+            // Not attached, so not owned by `menu`: destroyed here (#153 review).
+            // SAFETY: the submenu built above, attached to nothing and shown nowhere.
+            unsafe { DestroyMenu(id as windows_sys::Win32::UI::WindowsAndMessaging::HMENU) };
+        }
     }
     menu
 }
@@ -726,7 +734,7 @@ impl EditorWindow {
         };
         // The stretched container is made in the DPI-unaware context (issue #153, `stretch`).
         let content = {
-            let _unaware = stretch::Unaware::enter(stretched);
+            let _unaware = stretch::ThreadDpi::unaware(stretched);
             child(classes.content, WS_CLIPCHILDREN)
         };
         let strip = if has_header { child(classes.header, 0) } else { std::ptr::null_mut() };
@@ -809,8 +817,8 @@ impl EditorWindow {
     /// the DPI-unaware thread context for a stretched window, so its windows are DPI-unaware and
     /// the DPI it reads is 96 (issue #153); inert otherwise.
     #[must_use]
-    pub fn plugin_scope(&self) -> stretch::Unaware {
-        stretch::Unaware::enter(self.live().is_some_and(|d| d.stretch))
+    pub fn plugin_scope(&self) -> stretch::ThreadDpi {
+        stretch::ThreadDpi::unaware(self.live().is_some_and(|d| d.stretch))
     }
 
     /// The new [`EditorWindow::scale`] when the window's DPI changed since the last call (it moved
@@ -819,6 +827,15 @@ impl EditorWindow {
     pub fn take_scale_change(&self) -> Option<f64> {
         let d = self.live()?;
         d.scale_changed.replace(false).then(|| f64::from(d.dpi.get()) / 96.0)
+    }
+
+    /// Tests: as if the host's last resize were long past, so the size follow need not wait
+    /// [`Follow::GRACE`] on the real clock.
+    #[cfg(test)]
+    pub(crate) fn forget_resize(&self) {
+        if let Some(d) = self.live() {
+            d.resized.set(None);
+        }
     }
 
     /// The plug-in content's size in pixels (the strip excluded); `(0, 0)` once the window is gone
@@ -859,7 +876,7 @@ impl EditorWindow {
             let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };
             // A stretched plug-in's child is measured in its own (96-DPI) pixels, as Windows maps
             // them for a DPI-unaware caller (issue #153).
-            let _unaware = stretch::Unaware::enter(d.stretch);
+            let _unaware = stretch::ThreadDpi::unaware(d.stretch);
             // SAFETY: a window handle from GetWindow (any value is accepted); `r` is writable.
             unsafe { GetWindowRect(child, &raw mut r) };
             (r.right - r.left, r.bottom - r.top)
