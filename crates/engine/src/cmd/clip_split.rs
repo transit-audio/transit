@@ -122,6 +122,12 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
                 m.mixer.volume_db = tr.mixer.volume_db;
                 m.mixer.output = tr.mixer.output.clone();
                 m.mixer.sends = tr.mixer.sends.clone();
+                // A stereo source's sides stay where they were: hard left and hard right, exactly the
+                // gains its stereo track's two panners have at their defaults. A wider file's channels
+                // carry no layout here, so they stay centered.
+                if n == 2 {
+                    m.mixer.pan = vec![if ch == 0 { -1.0 } else { 1.0 }];
+                }
             }
             lanes.push(nt);
             new_tracks.push(nt);

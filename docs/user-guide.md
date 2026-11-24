@@ -934,9 +934,11 @@ the known issues).
 To split a stereo or wider clip into mono tracks, such as two microphones recorded onto one stereo
 track, right-click it and choose **Split to Mono Tracks**: each channel goes to a new mono track
 below the clip's track (`<track> L` and `<track> R`, numbered past stereo), with the clip's
-timing, fades and gain, the original clip is muted, and the whole split is one undo step. Each
-channel becomes its own mono file, saved to `Audio Files`; a take played from its file gets one
-mono WAV per channel beside it.
+timing, fades and gain, the original clip is muted, and the whole split is one undo step. The
+two tracks of a stereo clip are panned hard left and hard right, so the split sounds as the
+stereo track did at its default pan; the tracks of a wider clip start centered. Each channel
+becomes its own mono file, saved to `Audio Files`; a take played from its file gets one mono WAV
+per channel beside it.
 
 Right-click a pad and choose **Clear pad** to empty it and reset its name, choke group, mute,
 and solo. Delete or Backspace does the same for the selected pad while the Sampler window has

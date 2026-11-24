@@ -7,19 +7,26 @@ use transit_engine::model::TrackId;
 
 /// A 16-bit stereo PCM WAV: every left sample is `l`, every right one `r`.
 fn stereo_wav(frames: u32, l: i16, r: i16) -> Vec<u8> {
-    let data = frames * 4;
+    pcm_wav(frames, 2, |_, ch| if ch == 0 { l } else { r })
+}
+
+/// A 16-bit PCM WAV of `channels` channels at 48 kHz: frame `i` of channel `ch` is `sample(i, ch)`.
+fn pcm_wav(frames: u32, channels: u16, sample: impl Fn(u32, u16) -> i16) -> Vec<u8> {
+    let align = u32::from(channels) * 2;
+    let data = frames * align;
     let mut b = Vec::new();
     b.extend_from_slice(b"RIFF");
     b.extend_from_slice(&(36 + data).to_le_bytes());
     b.extend_from_slice(b"WAVEfmt ");
-    for v in [16u32, 0x0002_0001, 48_000, 48_000 * 4, 0x0010_0004] {
+    for v in [16u32, (u32::from(channels) << 16) | 1, 48_000, 48_000 * align, (16 << 16) | align] {
         b.extend_from_slice(&v.to_le_bytes());
     }
     b.extend_from_slice(b"data");
     b.extend_from_slice(&data.to_le_bytes());
-    for _ in 0..frames {
-        b.extend_from_slice(&l.to_le_bytes());
-        b.extend_from_slice(&r.to_le_bytes());
+    for i in 0..frames {
+        for ch in 0..channels {
+            b.extend_from_slice(&sample(i, ch).to_le_bytes());
+        }
     }
     b
 }
@@ -192,4 +199,51 @@ fn a_take_whose_file_is_back_after_a_failed_read_splits_again() {
     std::fs::write(&take, &bytes).unwrap();
     let r = e.execute("clip.split_to_mono", &json!({"clips": [ids[0].0]}));
     assert!(r.as_ref().is_ok_and(|r| r["tracks"].as_array().map(Vec::len) == Some(2)), "{r:?}");
+}
+
+/// #771: the two mono tracks of a split stereo clip are panned hard left and hard right, so the
+/// split renders as the stereo track did at its default pan. A mono track hard left is exactly
+/// (1, 0) under every pan law and a stereo track's two panners are exactly (1, 0) and (0, 1) at
+/// their defaults, so the comparison is IEEE-exact.
+#[test]
+fn a_split_stereo_clip_renders_exactly_as_its_stereo_track_did() {
+    let d = transit_test_support::TestDir::new("split-to-mono-render");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("Mics.wav");
+    // Two different signals, so a channel landing on the wrong side shows.
+    let sample = |i: u32, ch: u16| (((i * if ch == 0 { 37 } else { 91 }) % 2_000) as i16 - 1_000) * 16;
+    std::fs::write(&wav, pcm_wav(4_800, 2, sample)).unwrap();
+    let mut e = Engine::default();
+    let mics = track(&mut e, "stereo");
+    e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": mics, "at": 960})).unwrap();
+    let range = transit_time::Range::new(0, 6_400);
+    let before = transit_mix::render_range(e.session(), range, 512);
+    assert!(before.len() == 2 && before.iter().all(|ch| ch.iter().any(|v| *v != 0.0)), "the stereo track sounds on both sides");
+    let cid = e.session().track(TrackId(mics)).unwrap().clips()[0].id.0;
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [cid]})).unwrap();
+    let pans: Vec<Vec<f32>> = (0..2).map(|i| e.session().track(TrackId(r["tracks"][i].as_u64().unwrap())).unwrap().mixer.pan.clone()).collect();
+    assert_eq!(pans, [vec![-1.0], vec![1.0]], "L hard left, R hard right");
+    let after = transit_mix::render_range(e.session(), range, 512);
+    let diff = before.iter().flatten().zip(after.iter().flatten()).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(after == before, "the split renders exactly as the stereo track did (largest difference {diff})");
+}
+
+/// #771: a source wider than stereo has no left and right: its mono tracks stay centered.
+#[test]
+fn the_mono_tracks_of_a_wider_clip_stay_centered() {
+    let d = transit_test_support::TestDir::new("split-to-mono-wide");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("Room.wav");
+    std::fs::write(&wav, pcm_wav(480, 4, |_, ch| 1_000 * (i16::try_from(ch).unwrap() + 1))).unwrap();
+    let mut e = Engine::default();
+    let room = e.execute("track.new", &json!({"kind": "audio", "format": "stereo", "name": "Room"})).unwrap()["tracks"][0].as_u64().unwrap();
+    e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": room})).unwrap();
+    let cid = e.session().track(TrackId(room)).unwrap().clips()[0].id.0;
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [cid]})).unwrap();
+    let tracks = r["tracks"].as_array().unwrap();
+    assert_eq!(tracks.len(), 4);
+    for t in tracks {
+        let tr = e.session().track(TrackId(t.as_u64().unwrap())).unwrap();
+        assert_eq!(tr.mixer.pan, [0.0], "{} is centered", tr.name);
+    }
 }
