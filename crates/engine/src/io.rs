@@ -806,8 +806,12 @@ pub fn export_clips(e: &Engine, ids: &[transit_model::ClipId], dir: &str, opts: 
 pub fn sanitize_name(n: &str) -> String {
     let s: String = n.chars().map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | ' ' | '.') { c } else { '_' }).collect();
     let s = s.trim().trim_start_matches('.').to_string();
-    if s.is_empty() { "untitled".into() } else { s.chars().take(100).collect() }
+    if s.is_empty() { "untitled".into() } else { s.chars().take(FILE_STEM_CHARS).collect() }
 }
+
+/// The most characters [`sanitize_name`] keeps: a name no longer than this keeps its ending in its
+/// file name (it maps one character to one).
+pub(crate) const FILE_STEM_CHARS: usize = 100;
 
 mod session;
 pub use session::{

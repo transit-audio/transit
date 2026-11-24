@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use transit_audio_io::{AudioBuffer, FileFormat};
 use transit_model::disk::DiskSource;
-use transit_model::{ChannelFormat, ClipContent, ClipId, SourceAudio, SourceId, TrackId, TrackKind};
+use transit_model::{ChannelFormat, ClipContent, ClipId, MAX_NAME_CHARS, SourceAudio, SourceId, TrackId, TrackKind};
 
 const ID: &str = "clip.split_to_mono";
 
@@ -41,6 +41,13 @@ fn split_label(n: usize, ch: usize) -> String {
         (2, 1) => "R".into(),
         _ => (ch + 1).to_string(),
     }
+}
+
+/// `base` and the channel `label` joined by `sep`, the base shortened so the whole fits in `max`
+/// characters: a long name loses the end of its stem, never its channel ending.
+fn with_label(base: &str, sep: &str, label: &str, max: usize) -> String {
+    let keep = max.saturating_sub(sep.chars().count() + label.chars().count());
+    format!("{}{sep}{label}", base.chars().take(keep).collect::<String>())
 }
 
 /// A channel's audio, ready to become a source.
@@ -115,7 +122,7 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         let n = clips.iter().map(|c| c.2).max().unwrap_or(0);
         let mut lanes = Vec::with_capacity(n);
         for ch in 0..n {
-            let nt = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(&format!("{} {}", tr.name, split_label(n, ch))));
+            let nt = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(&with_label(&tr.name, " ", &split_label(n, ch), MAX_NAME_CHARS)));
             // Taken out before `t` is found: a new track goes in before a Master, which may sit above `t`.
             if let Some(from) = s.track_index(nt) {
                 let moved = s.tracks.remove(from);
@@ -144,7 +151,7 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
                 let Some(&mono) = sources.get(&(src, ch)) else { continue };
                 let mut c = orig.clone();
                 c.id = s.new_clip_id();
-                c.name = format!("{}.{}", orig.name, split_label(channels, ch));
+                c.name = with_label(&orig.name, ".", &split_label(channels, ch), MAX_NAME_CHARS);
                 c.content = ClipContent::Audio { source: mono, offset };
                 c.group = None;
                 new_clips.push(c.id);
@@ -190,7 +197,8 @@ fn prepare(
                 continue;
             }
             let (Some(meta), Some(audio)) = (s.source(src), s.pool.get(src)) else { continue };
-            let names: Vec<String> = (0..n).map(|ch| format!("{}.{}", meta.name, split_label(n, ch))).collect();
+            // A source's name is its file's stem: short enough that the file name keeps it whole.
+            let names: Vec<String> = (0..n).map(|ch| with_label(&meta.name, ".", &split_label(n, ch), crate::io::FILE_STEM_CHARS)).collect();
             let channels = match &audio.disk {
                 Some(disk) => {
                     crate::io::split_files::write(disk, &names, written)?;

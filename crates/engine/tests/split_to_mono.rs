@@ -274,3 +274,61 @@ fn a_split_copies_no_insert_and_says_so_when_the_track_had_one() {
         assert!(tr.mixer.inserts.iter().all(Option::is_none), "{} has no insert", tr.name);
     }
 }
+
+/// #771: a name too long to take its channel ending is shortened in its stem, so the track, clip,
+/// source and file names of a split all keep `L` and `R`, and stay within their limits.
+#[test]
+fn long_names_keep_their_channel_endings() {
+    let d = transit_test_support::TestDir::new("split-to-mono-long");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("Mics.wav");
+    std::fs::write(&wav, stereo_wav(480, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    let mics = track(&mut e, "stereo");
+    e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": mics})).unwrap();
+    let max = transit_model::MAX_NAME_CHARS;
+    let s = e.session_mut();
+    s.track_mut(TrackId(mics)).unwrap().name = "T".repeat(max);
+    s.sources.last_mut().unwrap().name = "S".repeat(max);
+    s.track_mut(TrackId(mics)).unwrap().playlist_mut().unwrap().clips[0].name = "C".repeat(max);
+    let cid = e.session().track(TrackId(mics)).unwrap().clips()[0].id.0;
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [cid]})).unwrap();
+    for (i, side) in ["L", "R"].into_iter().enumerate() {
+        let s = e.session();
+        let tr = s.track(TrackId(r["tracks"][i].as_u64().unwrap())).unwrap();
+        assert!(tr.name.ends_with(&format!("T {side}")) && tr.name.chars().count() == max, "track {:?}", tr.name);
+        let c = &tr.clips()[0];
+        assert!(c.name.ends_with(&format!("C.{side}")) && c.name.chars().count() == max, "clip {:?}", c.name);
+        let transit_engine::model::ClipContent::Audio { source, .. } = c.content else { panic!("an audio clip") };
+        let src = s.source(source).unwrap();
+        assert!(src.name.ends_with(&format!("S.{side}")) && src.name.chars().count() <= 100, "source {:?}", src.name);
+    }
+    let file = d.join("long.transit");
+    e.execute("session.save", &json!({"path": file.to_string_lossy()})).unwrap();
+    let paths: Vec<String> = e.session().sources.iter().map(|s| s.path.clone()).collect();
+    for side in ["L", "R"] {
+        assert!(paths.iter().any(|p| p.ends_with(&format!("S.{side}.wav"))), "the {side} file keeps its ending: {paths:?}");
+    }
+}
+
+/// #771: the file written beside a long take played from disk keeps its channel ending too.
+#[test]
+fn a_long_takes_split_files_keep_their_channel_endings() {
+    let d = transit_test_support::TestDir::new("split-to-mono-long-disk");
+    std::fs::create_dir_all(&*d).unwrap();
+    let take = d.join("Take.wav");
+    std::fs::write(&take, stereo_wav(4_800, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    e.session_mut().edit.values.insert(transit_model::disk::STREAM_MINUTES_KEY.into(), 0.001);
+    let mics = track(&mut e, "stereo");
+    let ids = transit_engine::io::add_recording_take(&mut e, &transit_engine::io::Recording::new(0), vec![(TrackId(mics), take)], false);
+    e.session_mut().sources.last_mut().unwrap().name = "S".repeat(150);
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [ids[0].0]})).unwrap();
+    for (i, side) in ["L", "R"].into_iter().enumerate() {
+        let s = e.session();
+        let c = &s.track(TrackId(r["tracks"][i].as_u64().unwrap())).unwrap().clips()[0];
+        let transit_engine::model::ClipContent::Audio { source, .. } = c.content else { panic!("an audio clip") };
+        let src = s.source(source).unwrap();
+        assert!(src.disk && src.path.ends_with(&format!("S.{side}.wav")), "{:?}", src.path);
+    }
+}
