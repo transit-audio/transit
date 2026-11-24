@@ -181,9 +181,16 @@ impl StudioApp {
                 if let Some(mark) = save_mark {
                     self.say_save_notes(mark);
                 }
-                // Print and export notices reach every command path; dialogs add them to their own line.
-                if matches!(id, "track.bounce" | "track.commit" | "file.export_midi" | "file.export_dawproject" | "file.bounce_consolidated")
-                    && let Some(notice) = v["notice"].as_str()
+                // Print, export and split notices reach every command path; dialogs add them to their own line.
+                if matches!(
+                    id,
+                    "track.bounce"
+                        | "track.commit"
+                        | "file.export_midi"
+                        | "file.export_dawproject"
+                        | "file.bounce_consolidated"
+                        | "clip.split_to_mono"
+                ) && let Some(notice) = v["notice"].as_str()
                 {
                     self.status = notice.to_string();
                 }

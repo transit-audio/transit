@@ -247,3 +247,30 @@ fn the_mono_tracks_of_a_wider_clip_stay_centered() {
         assert_eq!(tr.mixer.pan, [0.0], "{} is centered", tr.name);
     }
 }
+
+/// #771: the new tracks get no inserts. When the clip's track has any, the result carries a
+/// notice for the status line saying they were not copied; with none it carries no notice.
+#[test]
+fn a_split_copies_no_insert_and_says_so_when_the_track_had_one() {
+    let d = transit_test_support::TestDir::new("split-to-mono-inserts");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("LAV-2.wav");
+    std::fs::write(&wav, stereo_wav(480, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    let split = |e: &mut Engine, name: &str| {
+        let t = e.execute("track.new", &json!({"kind": "audio", "format": "stereo", "name": name})).unwrap()["tracks"][0].as_u64().unwrap();
+        e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": t})).unwrap();
+        (t, e.session().track(TrackId(t)).unwrap().clips()[0].id.0)
+    };
+    let (_, plain) = split(&mut e, "Plain");
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [plain]})).unwrap();
+    assert!(r.get("notice").is_none(), "no insert, no notice: {r}");
+    let (mics, cid) = split(&mut e, "Mics");
+    e.execute("mix.insert", &json!({"track": mics, "slot": 0, "plugin": "eq_7band"})).unwrap();
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [cid]})).unwrap();
+    assert_eq!(r["notice"], "Split to 2 mono tracks. The inserts on Mics were not copied.");
+    for t in r["tracks"].as_array().unwrap() {
+        let tr = e.session().track(TrackId(t.as_u64().unwrap())).unwrap();
+        assert!(tr.mixer.inserts.iter().all(Option::is_none), "{} has no insert", tr.name);
+    }
+}

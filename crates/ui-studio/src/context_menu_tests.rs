@@ -286,6 +286,21 @@ fn split_to_mono_tracks_is_disabled_unless_a_stereo_audio_clip_is_selected() {
     assert_eq!(t.app.engine.session().tracks.len(), tracks + 2, "a stereo clip splits: {}", t.app.status);
 }
 
+/// #771: splitting a clip whose track has an insert says on the status line that the inserts
+/// were not copied.
+#[test]
+fn split_to_mono_tracks_says_the_inserts_were_not_copied() {
+    let mut t = T::new();
+    let (track, clip) = audio_clip(&mut t, "Mics", 2);
+    t.app.run("mix.insert", json!({"track": track.0, "slot": 0, "plugin": "eq_7band"})).unwrap();
+    t.app.engine.session_mut().edit.selected_clips = vec![clip];
+    t.frames(3);
+    let at = t.app.arrange.layout.clips.iter().find(|c| c.id == clip.0).unwrap().rect;
+    t.click(at, "secondary");
+    t.click(find(&t.app.arrange.menu, "Split to Mono Tracks").rect, "primary");
+    assert_eq!(t.app.status, "Split to 2 mono tracks. The inserts on Mics were not copied.");
+}
+
 const ADD_ROWS: [&str; 4] = ["Add Mono Audio Track", "Add Stereo Audio Track", "Add Instrument Track", "Add MIDI Track"];
 
 /// Where `label` is drawn inside the popup that holds `anchor` (a recorded row), if it is.

@@ -104,9 +104,14 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
             sources.insert((src, ch), id);
         }
     }
-    let (mut new_tracks, mut new_clips) = (Vec::new(), Vec::new());
+    let (mut new_tracks, mut new_clips, mut with_inserts) = (Vec::new(), Vec::new(), Vec::new());
     for (t, clips) in by_track.into_values() {
         let Some(tr) = s.track(t).cloned() else { continue };
+        // Inserts are not copied: a stereo chain may not run on a mono track, and its settings
+        // were made for the mix of both channels. The status line says so.
+        if tr.mixer.inserts.iter().any(Option::is_some) {
+            with_inserts.push(tr.name.clone());
+        }
         let n = clips.iter().map(|c| c.2).max().unwrap_or(0);
         let mut lanes = Vec::with_capacity(n);
         for ch in 0..n {
@@ -154,7 +159,11 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
             }
         }
     }
-    Ok(json!({"tracks": new_tracks, "clips": new_clips}))
+    let mut out = json!({"tracks": new_tracks, "clips": new_clips});
+    if !with_inserts.is_empty() {
+        out["notice"] = json!(format!("Split to {} mono tracks. The inserts on {} were not copied.", new_tracks.len(), with_inserts.join(", ")));
+    }
+    Ok(out)
 }
 
 /// Channel `ch` of in-memory `audio` as mono audio, its peaks kept (rebuilt when there are none).

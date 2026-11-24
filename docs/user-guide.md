@@ -936,7 +936,9 @@ track, right-click it and choose **Split to Mono Tracks**: each channel goes to 
 below the clip's track (`<track> L` and `<track> R`, numbered past stereo), with the clip's
 timing, fades and gain, the original clip is muted, and the whole split is one undo step. The
 two tracks of a stereo clip are panned hard left and hard right, so the split sounds as the
-stereo track did at its default pan; the tracks of a wider clip start centered. Each channel
+stereo track did at its default pan; the tracks of a wider clip start centered. The new tracks
+take the track's volume, output and sends but not its inserts; when it has any, the status line
+says they were not copied. Each channel
 becomes its own mono file, saved to `Audio Files`; a take played from its file gets one mono WAV
 per channel beside it.
 
