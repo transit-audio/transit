@@ -938,9 +938,9 @@ timing, fades and gain, the original clip is muted, and the whole split is one u
 two tracks of a stereo clip are panned hard left and hard right, so the split sounds as the
 stereo track did at its default pan; the tracks of a wider clip start centered. The new tracks
 take the track's volume, output and sends but not its inserts; when it has any, the status line
-says they were not copied. Each channel
-becomes its own mono file, saved to `Audio Files`; a take played from its file gets one mono WAV
-per channel beside it.
+says they were not copied. Each channel becomes its own mono file, saved to `Audio Files`; a take
+played from its file gets one mono WAV per channel beside it. Undoing the split leaves those mono
+files on disk: transit does not delete audio files on undo.
 
 Right-click a pad and choose **Clear pad** to empty it and reset its name, choke group, mute,
 and solo. Delete or Backspace does the same for the selected pad while the Sampler window has
