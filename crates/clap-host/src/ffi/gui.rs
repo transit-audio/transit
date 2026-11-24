@@ -291,7 +291,9 @@ impl GuiLink {
             let accepted = GuiLink::set_scale(g, vt, factor, title);
             answer = Some((accepted, before == GuiLink::size(g, vt) && (factor - 1.0).abs() > 0.005));
         }
-        if g.scale.opened(answer).stretch.is_some() {
+        let stretch = g.scale.opened(answer).stretch.is_some();
+        debug_assert!(!(stretch && g.scale.auto()), "Auto never stretches");
+        if stretch {
             match hostwin::new_stretched(title, 640.0, 480.0, header) {
                 Ok(stretched) => {
                     win.close();
