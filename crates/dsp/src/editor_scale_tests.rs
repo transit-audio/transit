@@ -54,7 +54,7 @@ fn an_editor_that_refuses_keeps_its_own_drawing_under_auto_and_is_stretched_only
     let auto = decide(EditorScale::default(), win(ScaleSupport::Refuses, 1.5));
     assert_eq!((auto.factor, auto.stretch, auto.mode), (None, None, ScaleMode::PluginZoom), "Auto never stretches");
     assert_eq!(enabled(&auto), [ScaleStep::Auto, ScaleStep::Percent(100), ScaleStep::Percent(150)]);
-    assert!(auto.reason.as_deref().unwrap().contains("100% (its own drawing) or the display's 150%"), "{:?}", auto.reason);
+    assert!(auto.reason.as_deref().unwrap().contains("it keeps its own drawing (100%); 150% needs Stretched by Windows"), "{:?}", auto.reason);
     assert_eq!(auto.in_use, "In use: the plug-in's own drawing (100%)");
     let hint = auto.hint.as_deref().unwrap();
     assert!(hint.contains("Stretched by Windows") && hint.contains("150%") && hint.contains("black"), "{hint}");
@@ -64,7 +64,14 @@ fn an_editor_that_refuses_keeps_its_own_drawing_under_auto_and_is_stretched_only
     assert_eq!(picked.hint, None);
     let own = decide(set(ScaleStep::Percent(100), None), win(ScaleSupport::Refuses, 1.5));
     assert_eq!((own.factor, own.stretch, own.mode), (None, None, ScaleMode::PluginZoom), "100%: its own drawing");
+    assert!(picked.reason.as_deref().unwrap().contains("100% (its own drawing) or the display's 150%"), "{:?}", picked.reason);
+    // Only the explicit mode stretches: the display's 150% in the automatic mode is not realized,
+    // and the in-use line and the hint say so; with the mode picked it is stretched.
     let display = decide(set(ScaleStep::Percent(150), None), win(ScaleSupport::Refuses, 1.5));
+    assert_eq!((display.factor, display.stretch, display.step), (None, None, ScaleStep::Percent(150)));
+    assert_eq!(display.in_use, "In use: the plug-in's own drawing (100%; 150% needs Stretched by Windows)");
+    assert!(display.hint.as_deref().unwrap().contains("150% is not drawn in Automatic mode: choose Stretched by Windows"), "{:?}", display.hint);
+    let display = decide(set(ScaleStep::Percent(150), Some(ScaleMode::WindowsStretch)), win(ScaleSupport::Refuses, 1.5));
     assert_eq!(display.stretch, Some(1.5));
     // A step it cannot offer (saved when the editor was another kind) acts as Auto: not stretched.
     let other = decide(set(ScaleStep::Percent(200), None), win(ScaleSupport::Refuses, 1.5));
@@ -151,8 +158,9 @@ fn no_factor_is_ever_applied_twice() {
                         if setting.is_default() {
                             assert_eq!(p.stretch, None, "Auto stretched: {what}");
                         }
-                        if setting.mode.is_none() && p.stretch.is_some() {
-                            assert!(matches!(setting.step, ScaleStep::Percent(_)), "a stretch the user did not pick: {what}");
+                        // Stretched implies the explicit mode: nothing else ever stretches.
+                        if p.stretch.is_some() {
+                            assert_eq!(setting.mode, Some(ScaleMode::WindowsStretch), "a stretch the user did not pick: {what}");
                         }
                         assert_eq!(p.steps.len(), 7, "{what}");
                         let disabled = p.steps.iter().any(|(_, e)| !e);
@@ -246,7 +254,7 @@ fn the_menu_lists_steps_and_modes_with_the_setting_each_picks() {
     assert_eq!(choices[10], ("Stretched by Windows".into(), set(ScaleStep::Auto, Some(ScaleMode::WindowsStretch)), false, true));
     assert_eq!(choices.len(), 11);
     let n = m.len();
-    assert!(matches!(&m[n - 2], ScaleEntry::Info(r) if r.contains("stretched by Windows")), "the reason line");
+    assert!(matches!(&m[n - 2], ScaleEntry::Info(r) if r.contains("needs Stretched by Windows")), "the reason line");
     assert!(matches!(&m[n - 1], ScaleEntry::Info(h) if h.contains("Stretched by Windows") && h.contains("black")), "the hint last");
 }
 
@@ -553,4 +561,30 @@ fn under_auto_an_editor_that_takes_the_factor_only_after_attached_is_drawn_at_it
     r.after_attach(false, false);
     let p = r.in_use.as_ref().unwrap();
     assert_eq!((p.factor, p.stretch), (None, None));
+}
+
+/// Review round 2 of the follow-up: on a 150% display, an editor that refuses the factor with
+/// Stretched by Windows and 150% picked is stretched; picking Automatic then keeps the 150% step
+/// but nothing stretches any more, neither on the next open nor later: only the explicit mode
+/// stretches.
+#[test]
+fn automatic_after_a_picked_stretch_at_150_percent_does_not_stretch_also_on_the_next_open() {
+    let mut s = ScaleState { stretch_available: true, platform: Platform::Windows, ..ScaleState::default() };
+    let _ = s.set_setting(EditorScale { step: ScaleStep::Percent(150), mode: Some(ScaleMode::WindowsStretch) });
+    s.before_open(1.5, false);
+    assert_eq!(s.opened(None).stretch, Some(1.5), "stretched while the mode is picked");
+    let auto = s.menu().iter().position(|e| matches!(e, ScaleEntry::Choice { label, .. } if label.starts_with("Automatic"))).unwrap();
+    let picked = s.pick(auto).unwrap();
+    assert_eq!(picked, EditorScale { step: ScaleStep::Percent(150), mode: None }, "Automatic keeps the step");
+    let (applies, wanted) = s.set_setting(picked);
+    assert_eq!((applies, wanted.stretch), (Applies::NextOpen, None));
+    assert!(matches!(&s.menu()[1], ScaleEntry::Info(t) if t == "Next open: the plug-in's own drawing (100%; 150% needs Stretched by Windows)"));
+    s.closed();
+    s.before_open(1.5, false);
+    let plan = s.opened(None);
+    assert_eq!((plan.factor, plan.stretch, plan.mode), (None, None, ScaleMode::PluginZoom), "not stretched on the next open");
+    assert!(plan.hint.as_deref().unwrap().contains("Stretched by Windows"));
+    s.closed();
+    s.before_open(1.5, false);
+    assert_eq!(s.opened(None).stretch, None, "nor on the one after");
 }

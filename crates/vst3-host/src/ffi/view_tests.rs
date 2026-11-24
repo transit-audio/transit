@@ -611,9 +611,12 @@ fn no_factor_is_applied_twice_through_the_fake_views() {
                 let took = calls.iter().any(|c| c.starts_with("scale"));
                 assert!(!(stretched.is_some() && took), "{scales} {step:?} {mode:?}: {calls:?} stretched {stretched:?}");
                 assert!(scales || !took, "a view without the call got one: {calls:?}");
-                // Auto never stretches: a view without the call keeps its own drawing unless the
-                // user picked the stretch (the mode, or the display's 150%).
-                let own = !scales && matches!(mode, None | Some(ScaleMode::HostFactor)) && step != ScaleStep::Percent(150);
+                // Only the explicit mode stretches: a view without the call keeps its own drawing
+                // in every other mode, at every step.
+                let own = !scales && matches!(mode, None | Some(ScaleMode::HostFactor));
+                if stretched.is_some() {
+                    assert_eq!(mode, Some(ScaleMode::WindowsStretch), "{scales} {step:?}: a stretch the user did not pick");
+                }
                 assert!(
                     stretched.is_some() || took || own || mode == Some(ScaleMode::PluginZoom) || step == ScaleStep::Percent(100),
                     "{scales} {step:?} {mode:?}: neither"

@@ -292,7 +292,10 @@ impl GuiLink {
             answer = Some((accepted, before == GuiLink::size(g, vt) && (factor - 1.0).abs() > 0.005));
         }
         let stretch = g.scale.opened(answer).stretch.is_some();
-        debug_assert!(!(stretch && g.scale.auto()), "Auto never stretches");
+        debug_assert!(
+            !stretch || g.scale.setting.mode == Some(transit_dsp::ScaleMode::WindowsStretch),
+            "only the explicit Stretched by Windows stretches"
+        );
         if stretch {
             match hostwin::new_stretched(title, 640.0, 480.0, header) {
                 Ok(stretched) => {

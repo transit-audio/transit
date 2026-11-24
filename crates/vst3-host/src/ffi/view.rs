@@ -320,6 +320,10 @@ pub(super) fn attach_view(
         }
     }
     let plan = scale.opened(answer);
+    debug_assert!(
+        plan.stretch.is_none() || scale.setting.mode == Some(transit_dsp::ScaleMode::WindowsStretch),
+        "only the explicit Stretched by Windows stretches"
+    );
     if plan.stretch.is_some() {
         let (w, h) = view_size(&view).unwrap_or((w, h));
         match window::new_stretched(title, w, h, header.clone()) {
@@ -473,7 +477,7 @@ fn attach_auto(
         }
     }
     let plan = scale.opened(answer);
-    debug_assert!(plan.stretch.is_none(), "Auto never stretches");
+    debug_assert!(plan.stretch.is_none(), "Automatic never stretches");
     // SAFETY: valid view; the parent is the live content view of `win`, of the type named.
     if !ok(unsafe { view.attached(win.parent(), platform) }) {
         // SAFETY: valid view; detach our frame again.

@@ -14,12 +14,14 @@
 //! Windows stretch instead. A hint line says so when the editor accepted a factor other than 1 and
 //! reported the same size afterwards ([`ScaleInputs::kept_size`]).
 //!
-//! **Auto never stretches.** Under Auto (the Auto step in the automatic mode, the default) an
-//! editor that accepts the host's factor is drawn at it, and one that does not keeps its own
-//! drawing, opened as before #153; a hint says that Stretched by Windows is there to try. The
-//! stretch is used only when the user picks it (the mode, or the display's percentage for an
-//! editor that does not take the factor): a GPU-drawn editor showed black stretched on the
-//! maintainer's machine, so it is never the default.
+//! **Only the explicit mode stretches.** An editor is stretched by Windows only when the saved
+//! mode is [`ScaleMode::WindowsStretch`]; the automatic mode never stretches, at any step (a
+//! GPU-drawn editor showed black stretched on the maintainer's machine). Under Auto (the Auto step
+//! in the automatic mode, the default) an editor that accepts the host's factor is drawn at it,
+//! and one that does not keeps its own drawing, opened as before #153; a hint says that Stretched
+//! by Windows is there to try. In the automatic mode a percentage that an editor refusing the
+//! factor cannot draw itself is not realized: it keeps its own drawing, and the in-use line and
+//! the hint point at Stretched by Windows. The host factor and the plug-in's own zoom never stretch.
 //!
 //! The setting is per machine, keyed by plug-in id, and never in the session (the app keeps it
 //! with its other per-machine preferences).
@@ -313,15 +315,32 @@ pub fn decide(setting: EditorScale, inputs: ScaleInputs) -> ScalePlan {
                 ScaleStep::Percent(p) => p == 100 || p == shown,
             };
             let step = if offered(setting.step) { setting.step } else { ScaleStep::Auto };
-            // Auto never stretches (maintainer, after #153 shipped: a GPU-drawn editor came up
-            // black stretched): under the automatic mode at the Auto step the editor keeps its own
-            // drawing, as before #153. The stretch is the user's pick only: the mode itself, or
-            // the display's percentage.
-            let automatic_auto = chosen.is_none() && step == ScaleStep::Auto;
-            let stretched = !near(display, 1.0) && step != ScaleStep::Percent(100) && !automatic_auto;
-            let reason = format!(
-                "This plug-in is not drawn at the host's factor here: 100% (its own drawing) or the display's {shown}% (stretched by Windows)"
-            );
+            // Only the explicit mode stretches (maintainer, after #153 shipped: a GPU-drawn editor
+            // came up black stretched). In the automatic mode nothing stretches at any step: the
+            // editor keeps its own drawing, as before #153, and a percentage it cannot draw itself
+            // is not realized (the in-use line and the hint say so and point at the mode).
+            let picked = chosen == Some(ScaleMode::WindowsStretch);
+            let stretched = picked && !near(display, 1.0) && step != ScaleStep::Percent(100);
+            let unrealized = (!picked && !near(display, 1.0)).then_some(step).and_then(|s| match s {
+                ScaleStep::Percent(p) if p != 100 => Some(p),
+                _ => None,
+            });
+            let reason = if picked {
+                format!(
+                    "This plug-in is not drawn at the host's factor here: 100% (its own drawing) or the display's {shown}% (stretched by Windows)"
+                )
+            } else {
+                format!("This plug-in is not drawn at the host's factor here: it keeps its own drawing (100%); {shown}% needs Stretched by Windows")
+            };
+            let hint = match (picked || near(display, 1.0), unrealized) {
+                (true, _) => None,
+                (false, Some(p)) => {
+                    Some(format!("{p}% is not drawn in Automatic mode: choose Stretched by Windows for it (some editors show black when stretched)"))
+                }
+                (false, None) => {
+                    Some(format!("Too small? Stretched by Windows can bring it to {shown}%, but some editors show black when stretched"))
+                }
+            };
             ScalePlan {
                 factor: None,
                 stretch: stretched.then_some(display),
@@ -333,11 +352,12 @@ pub fn decide(setting: EditorScale, inputs: ScaleInputs) -> ScalePlan {
                 reason: Some(reason),
                 in_use: if stretched {
                     format!("In use: stretched by Windows to {shown}%")
+                } else if let Some(p) = unrealized {
+                    format!("In use: the plug-in's own drawing (100%; {p}% needs Stretched by Windows)")
                 } else {
                     "In use: the plug-in's own drawing (100%)".into()
                 },
-                hint: (automatic_auto && !near(display, 1.0))
-                    .then(|| format!("Too small? Stretched by Windows can bring it to {shown}%, but some editors show black when stretched")),
+                hint,
             }
         }
         ScaleMode::PluginZoom => {
