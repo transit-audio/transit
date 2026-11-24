@@ -219,6 +219,10 @@ struct Fx {
     gui_resize_on_create: bool,
     /// `CMD:gui-quiet-show`: `show` does not ask for a resize (issue #153's replacement GUI test).
     gui_quiet_show: bool,
+    /// `CMD:gui-trace`: every GUI call from then on (`create`, `set_scale <s> -> <answer>`,
+    /// `get_size`, `set_parent`, `show`, `hide`, `destroy`); the saved state carries it after the
+    /// two f64s, one call per line, cleared as read (issue #153: Auto opens as before the menu).
+    gui_trace: Option<Vec<String>>,
     gui_mode: Mode,
     gui_painted: bool,
     gui_timer: Option<clap_id>,
@@ -228,6 +232,13 @@ struct Fx {
 
 unsafe fn fx<'a>(p: *const clap_plugin) -> &'a mut Fx {
     unsafe { &mut *((*p).plugin_data as *mut Fx) }
+}
+
+/// Records a GUI call while `CMD:gui-trace` runs.
+fn gui_note(f: &mut Fx, what: impl FnOnce() -> String) {
+    if let Some(t) = &mut f.gui_trace {
+        t.push(what());
+    }
 }
 
 fn note(f: &Fx, what: &str) {
@@ -804,7 +815,10 @@ unsafe extern "C" fn state_save(p: *const clap_plugin, stream: *const clap_ostre
     let a = unsafe { (s.write.unwrap())(stream, bytes.as_ptr().cast(), 5) };
     let b = unsafe { (s.write.unwrap())(stream, bytes[5..].as_ptr().cast(), 11) };
     // The parameter log, while it runs (see the crate docs).
-    let log = f.param_log.as_mut().map(|l| std::mem::take(l).join("\n")).unwrap_or_default();
+    let mut log = f.param_log.as_mut().map(|l| std::mem::take(l).join("\n")).unwrap_or_default();
+    if let Some(t) = &mut f.gui_trace {
+        log.push_str(&std::mem::take(t).join("\n"));
+    }
     let c = if log.is_empty() { 0 } else { unsafe { (s.write.unwrap())(stream, log.as_ptr().cast(), log.len() as u64) } };
     a == 5 && b == 11 && c == log.len() as i64
 }
@@ -907,6 +921,10 @@ unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istre
             f.gui_quiet_show = true;
             return true;
         }
+        Some("CMD:gui-trace") => {
+            f.gui_trace = Some(Vec::new());
+            return true;
+        }
         _ => {}
     }
     if got != 16 {
@@ -939,6 +957,7 @@ unsafe extern "C" fn gui_is_api_supported(p: *const clap_plugin, api: *const c_c
 unsafe extern "C" fn gui_create(p: *const clap_plugin, _api: *const c_char, floating: bool) -> bool {
     let f = unsafe { fx(p) };
     assert!(!f.gui_created, "create");
+    gui_note(f, || "create".into());
     assert!(floating || f.gui_embed > 0, "embedded create without embedded support");
     if (!floating && f.gui_embed == 2) || f.gui_mode == Mode::CreateFalse {
         return false;
@@ -962,6 +981,7 @@ unsafe extern "C" fn gui_set_parent(p: *const clap_plugin, window: *const clap_w
     // SAFETY: the host passes this live fixture instance on its main thread.
     let f = unsafe { fx(p) };
     assert!(f.gui_created && !f.gui_floating && !window.is_null(), "set_parent");
+    gui_note(f, || "set_parent".into());
     // SAFETY: set_parent supplies a valid clap_window for this call; the macOS host chose
     // CLAP_WINDOW_API_COCOA, whose union member is cocoa (the window's content NSView).
     #[cfg(target_os = "macos")]
@@ -981,6 +1001,7 @@ unsafe extern "C" fn gui_destroy(p: *const clap_plugin) {
     // SAFETY: the host passes this live fixture instance on its main thread.
     let f = unsafe { fx(p) };
     assert!(f.gui_created, "destroy without create");
+    gui_note(f, || "destroy".into());
     f.gui_created = false;
     f.gui_visible = false;
     editor_modes::unregister_timer(f);
@@ -995,7 +1016,9 @@ unsafe extern "C" fn gui_set_scale(p: *const clap_plugin, scale: f64) -> bool {
     assert!(f.gui_created && !f.gui_floating, "set_scale is for a created embedded GUI");
     // clap gui.h on CLAP_WINDOW_API_COCOA: "uses logical size, don't call set_scale()".
     assert!(!cfg!(target_os = "macos"), "set_scale on a cocoa GUI");
-    if f.gui_self_scaling || !(scale > 0.0) {
+    let taken = !f.gui_self_scaling && scale > 0.0;
+    gui_note(f, || format!("set_scale {scale} -> {taken}"));
+    if !taken {
         return false;
     }
     f.gui_scale = scale;
@@ -1005,6 +1028,7 @@ unsafe extern "C" fn gui_set_scale(p: *const clap_plugin, scale: f64) -> bool {
 unsafe extern "C" fn gui_get_size(p: *const clap_plugin, width: *mut u32, height: *mut u32) -> bool {
     let f = unsafe { fx(p) };
     assert!(f.gui_created, "get_size before create");
+    gui_note(f, || "get_size".into());
     let factor = if f.gui_mode == Mode::ZeroSize { 0.0 } else { f.gui_scale };
     // SAFETY: CLAP get_size supplies distinct, writable output pointers for this call.
     unsafe {
@@ -1022,6 +1046,7 @@ unsafe extern "C" fn gui_suggest_title(p: *const clap_plugin, title: *const c_ch
 unsafe extern "C" fn gui_show(p: *const clap_plugin) -> bool {
     let f = unsafe { fx(p) };
     assert!(f.gui_created, "show without create");
+    gui_note(f, || "show".into());
     if f.gui_mode == Mode::ShowFalse {
         return false;
     }
@@ -1039,7 +1064,9 @@ unsafe extern "C" fn gui_show(p: *const clap_plugin) -> bool {
 }
 
 unsafe extern "C" fn gui_hide(p: *const clap_plugin) -> bool {
-    unsafe { fx(p) }.gui_visible = false;
+    let f = unsafe { fx(p) };
+    gui_note(f, || "hide".into());
+    f.gui_visible = false;
     true
 }
 
@@ -1189,6 +1216,7 @@ unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const
         gui_self_scaling: false,
         gui_resize_on_create: false,
         gui_quiet_show: false,
+        gui_trace: None,
         gui_mode: if NEXT_NO_GUI.replace(false) { Mode::NoGui } else { Mode::Normal },
         gui_painted: false,
         gui_timer: None,

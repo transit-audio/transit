@@ -239,9 +239,10 @@ impl GuiLink {
     /// call was ignored, or the scaling could not be applied." The window takes the size
     /// `get_size` reports (physical pixels on Win32).
     ///
-    /// Issue #153: the factor the editor's plan asks for is the one `set_scale` gets (none for the
-    /// plug-in's own zoom or the Windows stretch). A plan that stretches (a GUI that ignored the
-    /// factor under Auto, or the user's choice) makes the window again with a DPI-unaware content
+    /// Issue #153: under Auto (the default setting) the open is the one before #153 and never
+    /// stretched. For a setting the user picked, the factor the editor's plan asks for is the one
+    /// `set_scale` gets (none for the plug-in's own zoom or the Windows stretch). A plan that
+    /// stretches (only ever the user's choice) makes the window again with a DPI-unaware content
     /// container, and the GUI again inside its plug-in scope (some GUIs make their window in
     /// `create`), with no `set_scale`: a factor and the stretch are never both in use.
     fn open_embedded(
@@ -277,7 +278,15 @@ impl GuiLink {
         g.scale.stretch_available = transit_rt::editor_window::stretch_available();
         let first = g.scale.before_open(display.unwrap_or(1.0), vt.set_scale.is_some());
         let mut answer = None;
-        if let (Some(factor), Some(_)) = (first.factor, display) {
+        if g.scale.auto() {
+            // Auto never stretches: the open is the one before #153, call for call (`set_scale`
+            // with the window's scale, whatever the GUI answered last time, and no `get_size`
+            // around it; the answer only says what is in use). Nothing below makes the GUI again
+            // or enters a DPI-unaware scope: the window is not a stretched one.
+            if let Some(factor) = display {
+                answer = Some((GuiLink::set_scale(g, vt, factor, title), false));
+            }
+        } else if let (Some(factor), Some(_)) = (first.factor, display) {
             let before = GuiLink::size(g, vt);
             let accepted = GuiLink::set_scale(g, vt, factor, title);
             answer = Some((accepted, before == GuiLink::size(g, vt) && (factor - 1.0).abs() > 0.005));

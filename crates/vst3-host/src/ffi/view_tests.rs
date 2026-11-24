@@ -100,7 +100,11 @@ impl<const S: bool> IPlugViewTrait for FakeView<S> {
         sb::kResultTrue
     }
     unsafe fn attached(&self, _p: *mut c_void, _t: sb::FIDString) -> sb::tresult {
-        self.log("attached".into());
+        if TRACE.with(std::cell::Cell::get) {
+            self.log(format!("attached {}", if thread_unaware() { "unaware" } else { "aware" }));
+        } else {
+            self.log("attached".into());
+        }
         sb::kResultOk
     }
     unsafe fn removed(&self) -> sb::tresult {
@@ -117,6 +121,9 @@ impl<const S: bool> IPlugViewTrait for FakeView<S> {
         sb::kResultFalse
     }
     unsafe fn getSize(&self, size: *mut sb::ViewRect) -> sb::tresult {
+        if TRACE.with(std::cell::Cell::get) {
+            self.log("getSize".into());
+        }
         if let Some((w, h)) = *self.sized.lock().unwrap() {
             // SAFETY: the host's writable rect.
             unsafe { *size = sb::ViewRect { left: 0, top: 0, right: w, bottom: h } };
@@ -173,6 +180,10 @@ impl<const S: bool> IPlugViewTrait for FakeView<S> {
 #[cfg(windows)]
 impl<const S: bool> IPlugViewContentScaleSupportTrait for FakeView<S> {
     unsafe fn setContentScaleFactor(&self, factor: f32) -> sb::tresult {
+        if REFUSE.with(std::cell::Cell::get) {
+            self.log(format!("scale {factor} refused"));
+            return sb::kResultFalse;
+        }
         self.log(format!("scale {factor}"));
         *self.scale.lock().unwrap() = factor;
         sb::kResultTrue
@@ -207,6 +218,11 @@ thread_local! {
     static SAME_VIEW: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     /// Review round 3: views made in the DPI-unaware context ask for this width from `setFrame`.
     static ASK_WHEN_UNAWARE: std::cell::Cell<Option<i32>> = const { std::cell::Cell::new(None) };
+    /// Fakes log every `getSize` and the thread's DPI context at `attached` (Auto never stretches:
+    /// the open's exact call sequence).
+    static TRACE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Fakes with the scale call answer it with `kResultFalse` and keep their size.
+    static REFUSE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Makes another view like `view` (a fake made by [`make_fake`]), as the controller would; with
@@ -348,18 +364,63 @@ fn the_scale_comes_before_attached_and_again_on_a_dpi_change() {
 }
 
 /// A view without `IPlugViewContentScaleSupport` gets no call and keeps the size it reports in its
-/// own pixels, at any DPI. Issue #153 (the maintainer's redesign of 2026-11-16) changed what
-/// happens on screen: under Auto, Windows stretches such an editor to the display's scale (its
-/// content container is DPI-unaware); before #153 it was left at 100 percent (K74).
+/// own pixels, at any DPI. Auto never stretches (the maintainer's decision after #153 shipped: a
+/// GPU-drawn editor came up black stretched), so under Auto it is left at its own drawing as
+/// before #153 (K74); Windows stretches it to the display's scale only when the user picks
+/// Stretched by Windows.
 #[cfg(windows)]
 #[test]
-fn a_view_without_the_scale_call_gets_no_call_and_is_stretched_by_windows() {
+fn a_view_without_the_scale_call_keeps_its_own_drawing_under_auto_and_is_stretched_when_picked() {
     let (view, calls) = fake_view(false);
     let (opened, moved, stretched) = open_fake_with(&view, EditorScale::default(), 144, 192);
     assert_eq!(*calls.lock().unwrap(), ["attached", "removed"]);
-    assert_eq!(opened, (200, 100), "its own pixels");
-    assert_eq!(moved, (200, 100));
-    assert_eq!(stretched, Some(1.5), "stretched at the display's scale (the simulated 144 DPI)");
+    assert_eq!((opened, moved, stretched), ((200, 100), (200, 100), None), "its own pixels, not stretched");
+    let (view, calls) = fake_view(false);
+    let (opened, _, stretched) = open_fake_with(&view, setting(ScaleStep::Auto, Some(ScaleMode::WindowsStretch)), 144, 192);
+    assert_eq!(*calls.lock().unwrap(), ["attached", "removed"]);
+    assert_eq!((opened, stretched), ((200, 100), Some(1.5)), "stretched at the display's scale (the simulated 144 DPI)");
+}
+
+/// Auto never stretches, call for call: on a per-monitor-aware thread at 144 DPI, a view that
+/// reads the DPI when made (300×150) and refuses the factor, and one without the scale call, are
+/// opened under Auto exactly as before #153: no second `createView` (one "made" line), `attached`
+/// outside any DPI-unaware scope, the factor before and again after `attached` (issue #105), and
+/// no stretched window.
+#[cfg(windows)]
+#[test]
+fn under_auto_a_view_that_does_not_take_the_factor_is_opened_as_before_153() {
+    let _pm = PerMonitor::enter();
+    TRACE.with(|t| t.set(true));
+    REFUSE.with(|r| r.set(true));
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let view = make_fake(true, 0, true, Arc::clone(&calls));
+    let (opened, moved, stretched) = open_fake_with(&view, EditorScale::default(), 144, 144);
+    let refusing = calls.lock().unwrap().clone();
+    let calls = Arc::new(Mutex::new(Vec::new()));
+    let view = make_fake(false, 0, true, Arc::clone(&calls));
+    let (plain_opened, _, plain_stretched) = open_fake_with(&view, EditorScale::default(), 144, 144);
+    let plain = calls.lock().unwrap().clone();
+    TRACE.with(|t| t.set(false));
+    REFUSE.with(|r| r.set(false));
+    assert_eq!(
+        refusing,
+        [
+            "made aware",
+            "getSize",
+            "getSize",
+            "scale 1.5 refused",
+            "getSize",
+            "attached aware",
+            "getSize",
+            "scale 1.5 refused",
+            "getSize",
+            "getSize",
+            "removed"
+        ]
+    );
+    assert_eq!((opened, moved, stretched), ((300, 150), (300, 150), None), "its own drawing, never stretched");
+    assert_eq!(plain, ["made aware", "getSize", "getSize", "attached aware", "getSize", "getSize", "removed"]);
+    assert_eq!((plain_opened, plain_stretched), ((300, 150), None));
 }
 
 // ---- issue #105: a scale applied after `attached`, and `resizeView` at any time -------------
@@ -450,7 +511,7 @@ fn scale_child_after_attach() {
 
 #[cfg(windows)]
 #[test]
-#[ignore = "run in a child process by a_refused_scale_is_logged_and_the_editor_is_stretched_instead"]
+#[ignore = "run in a child process by a_refused_scale_is_logged_and_the_editor_keeps_its_own_drawing_under_auto"]
 fn scale_child_refuse() {
     assert_eq!(open_gain_at_144_dpi("refuse"), (320, 240), "no scale, no resize");
 }
@@ -472,19 +533,18 @@ fn the_window_takes_a_scale_the_view_applies_only_after_attached() {
     }
 }
 
-/// A view that refuses the factor (kResultFalse) is logged as such before `attached`, keeps the
-/// size it reports in its own pixels, and (issue #153, Auto on Windows) is stretched by Windows
-/// instead: it is not asked again after `attached` (a factor and the stretch are never both in
-/// use), and the editor's scale line says so.
+/// A view that refuses the factor (kResultFalse) is logged as such before `attached` and keeps the
+/// size it reports in its own pixels. Auto never stretches: it is asked again after `attached` as
+/// before #153 (issue #105), is not stretched, and the editor's scale line says so.
 #[cfg(windows)]
 #[test]
-fn a_refused_scale_is_logged_and_the_editor_is_stretched_instead() {
+fn a_refused_scale_is_logged_and_the_editor_keeps_its_own_drawing_under_auto() {
     let log = scale_mode_child("scale_child_refuse", "refuse");
     let before = "vst3 editor \"Fixture Gain\": content scale before attached: IPlugViewContentScaleSupport obtained, setContentScaleFactor(1.5) -> kResultFalse (1); getSize 320×240 before, 320×240 after";
     assert!(log.contains(before), "{before:?} is not in the log:\n{log}");
-    assert!(!log.contains("content scale after attached"), "no factor after the refusal:\n{log}");
-    let line =
-        "vst3 editor \"Fixture Gain\": scale: accepts a factor: no; factor in use: none; Windows stretch: 1.5; in use: stretched by Windows to 150%";
+    let after = "vst3 editor \"Fixture Gain\": content scale after attached: IPlugViewContentScaleSupport obtained, setContentScaleFactor(1.5) -> kResultFalse (1)";
+    assert!(log.contains(after), "asked again after attached, as before #153:\n{log}");
+    let line = "vst3 editor \"Fixture Gain\": scale: accepts a factor: no; factor in use: none; Windows stretch: none; in use: the plug-in's own drawing (100%)";
     assert!(log.contains(line), "{line:?} is not in the log:\n{log}");
     assert!(!log.contains("resizeView"), "{log}");
     assert!(!log.contains("window follows"), "{log}");
@@ -500,6 +560,12 @@ use transit_rt::editor_window::{HeaderClick, HeaderView, MenuItem};
 #[cfg(windows)]
 fn setting(step: ScaleStep, mode: Option<ScaleMode>) -> EditorScale {
     EditorScale { step, mode }
+}
+
+/// Stretched by Windows, picked by the user (Auto never stretches).
+#[cfg(windows)]
+fn stretch_picked() -> EditorScale {
+    setting(ScaleStep::Auto, Some(ScaleMode::WindowsStretch))
 }
 
 /// The third kind of editor (it takes the factor; whether it draws at it is not known): with the
@@ -545,10 +611,16 @@ fn no_factor_is_applied_twice_through_the_fake_views() {
                 let took = calls.iter().any(|c| c.starts_with("scale"));
                 assert!(!(stretched.is_some() && took), "{scales} {step:?} {mode:?}: {calls:?} stretched {stretched:?}");
                 assert!(scales || !took, "a view without the call got one: {calls:?}");
+                // Auto never stretches: a view without the call keeps its own drawing unless the
+                // user picked the stretch (the mode, or the display's 150%).
+                let own = !scales && matches!(mode, None | Some(ScaleMode::HostFactor)) && step != ScaleStep::Percent(150);
                 assert!(
-                    stretched.is_some() || took || mode == Some(ScaleMode::PluginZoom) || step == ScaleStep::Percent(100),
+                    stretched.is_some() || took || own || mode == Some(ScaleMode::PluginZoom) || step == ScaleStep::Percent(100),
                     "{scales} {step:?} {mode:?}: neither"
                 );
+                if setting(step, mode).is_default() {
+                    assert_eq!(stretched, None, "Auto stretched: {calls:?}");
+                }
             }
         }
     }
@@ -591,7 +663,7 @@ fn a_scale_change_applies_at_once_or_on_the_next_open_through_the_editor_link() 
 
 /// Issue #153 review, item 5: a view that reads its monitor's DPI when it is made (made in the
 /// per-monitor-aware context it reports 1.5 times its size, 300×150) and has no scale call is,
-/// under Auto, made again inside the stretched window's DPI-unaware scope before it is attached:
+/// with Stretched by Windows picked, made again inside the stretched window's DPI-unaware scope before it is attached:
 /// the attached view reads 96 DPI and reports 200×100, so Windows' 1.5 stretch is the only scale
 /// (not 1.5 drawn and stretched again to 2.25).
 #[cfg(windows)]
@@ -600,7 +672,7 @@ fn a_view_that_reads_the_dpi_when_made_is_made_again_inside_the_unaware_scope() 
     let pm = PerMonitor::enter();
     let calls = Arc::new(Mutex::new(Vec::new()));
     let view = make_fake(false, 0, true, Arc::clone(&calls));
-    let (opened, moved, stretched) = open_fake_with(&view, EditorScale::default(), 144, 144);
+    let (opened, moved, stretched) = open_fake_with(&view, stretch_picked(), 144, 144);
     drop(pm);
     assert_eq!(*calls.lock().unwrap(), ["made aware", "made unaware", "attached", "removed"], "made again, the second one attached");
     assert_eq!((opened, moved, stretched), ((200, 100), (200, 100), Some(1.5)), "its 100% size, stretched once");
@@ -627,8 +699,9 @@ impl Drop for PerMonitor {
     }
 }
 
-/// Review round 3, finding 2: a controller that hands back its existing view while that view
-/// lives (it kept a reference) gives the view that read 150% when it was made. The host sees the
+/// Review round 3, finding 2 (Stretched by Windows picked): a controller that hands back its
+/// existing view while that view lives (it kept a reference) gives the view that read 150% when it
+/// was made. The host sees the
 /// same object, does not stretch it, and attaches it to a window of the normal kind: drawn at its
 /// own 150% (300×150), never 150% stretched again.
 #[cfg(windows)]
@@ -638,13 +711,13 @@ fn a_controller_that_gives_back_the_same_view_is_not_stretched() {
     SAME_VIEW.with(|s| s.set(true));
     let calls = Arc::new(Mutex::new(Vec::new()));
     let view = make_fake(false, 0, true, Arc::clone(&calls));
-    let (opened, _, stretched) = open_fake_with(&view, EditorScale::default(), 144, 144);
+    let (opened, _, stretched) = open_fake_with(&view, stretch_picked(), 144, 144);
     SAME_VIEW.with(|s| s.set(false));
     assert_eq!(*calls.lock().unwrap(), ["made aware", "attached", "removed"]);
     assert_eq!((opened, stretched), ((300, 150), None), "its own drawing, not stretched on top");
 }
 
-/// Review round 3, note 4: the new view asks for 260×120 from `setFrame`, before it is attached,
+/// Review round 3, note 4 (Stretched by Windows picked): the new view asks for 260×120 from `setFrame`, before it is attached,
 /// while it still reports 200×100; that request is kept and applied once it is attached, with its
 /// `onSize`.
 #[cfg(windows)]
@@ -654,7 +727,7 @@ fn a_size_the_new_view_asks_for_before_attached_is_applied() {
     ASK_WHEN_UNAWARE.with(|a| a.set(Some(260)));
     let calls = Arc::new(Mutex::new(Vec::new()));
     let view = make_fake(false, 0, true, Arc::clone(&calls));
-    let (opened, _, stretched) = open_fake_with(&view, EditorScale::default(), 144, 144);
+    let (opened, _, stretched) = open_fake_with(&view, stretch_picked(), 144, 144);
     ASK_WHEN_UNAWARE.with(|a| a.set(None));
     let calls = calls.lock().unwrap().clone();
     assert!(stretched.is_some());

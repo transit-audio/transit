@@ -165,26 +165,42 @@ impl IPlugFrameTrait for PlugFrame {
 /// attached", "on a DPI change"): whether the interface was obtained, the factor, the `tresult`,
 /// and `getSize` before and after the call.
 fn set_content_scale(view: &ComPtr<sb::IPlugView>, scale: f64, name: &str, when: &str) -> bool {
+    content_scale_call(view, scale, name, when).0
+}
+
+/// A size `getSize` reported (`None`: it reported none).
+type Size = Option<(f64, f64)>;
+
+/// [`set_content_scale`] with the sizes it reads anyway for its log line: whether the view took
+/// the factor, then `getSize` before and after the call (the same size twice when the view has no
+/// `IPlugViewContentScaleSupport`: no second `getSize` then). The plug-in sees exactly the calls
+/// it saw before #153: `getSize`, `queryInterface`, `setContentScaleFactor`, `getSize`.
+fn content_scale_call(view: &ComPtr<sb::IPlugView>, scale: f64, name: &str, when: &str) -> (bool, Size, Size) {
     if !scale.is_finite() || scale <= 0.0 {
-        return false;
+        return (false, None, None);
     }
-    let before = size_text(view_size(view));
+    let before = view_size(view);
     // `cast` is `queryInterface`: `None` when the view does not implement the interface.
     let Some(support) = view.cast::<sb::IPlugViewContentScaleSupport>() else {
-        log::info!("vst3 editor \"{name}\": content scale {when}: no IPlugViewContentScaleSupport, factor {scale} not sent; getSize {before}");
-        return false;
+        log::info!(
+            "vst3 editor \"{name}\": content scale {when}: no IPlugViewContentScaleSupport, factor {scale} not sent; getSize {}",
+            size_text(before)
+        );
+        return (false, before, before);
     };
     #[allow(clippy::cast_possible_truncation)]
     let factor = scale as f32;
     // SAFETY: a valid interface of the live view, held (counted) for the call; main thread (the
     // callers run on the editor's thread). `ScaleFactor` is an `f32` in the SDK.
     let r = unsafe { support.setContentScaleFactor(factor) };
-    let after = size_text(view_size(view));
+    let after = view_size(view);
     log::info!(
-        "vst3 editor \"{name}\": content scale {when}: IPlugViewContentScaleSupport obtained, setContentScaleFactor({factor}) -> {} ({r}); getSize {before} before, {after} after",
-        tresult_name(r)
+        "vst3 editor \"{name}\": content scale {when}: IPlugViewContentScaleSupport obtained, setContentScaleFactor({factor}) -> {} ({r}); getSize {} before, {} after",
+        tresult_name(r),
+        size_text(before),
+        size_text(after)
     );
-    r == sb::kResultTrue
+    (r == sb::kResultTrue, before, after)
 }
 
 /// A view size for the log.
@@ -230,8 +246,10 @@ pub(super) fn view_size(view: &ComPtr<sb::IPlugView>) -> Option<(f64, f64)> {
 /// stretches it; issue #101 for the factor) and attaches the view. On success the caller keeps the
 /// frame and window and detaches the view before dropping them.
 ///
-/// Issue #153: the factor `scale`'s plan asks for is sent before `attached`; the answer settles
-/// the plan. A plan that stretches makes the window again with a DPI-unaware content container
+/// Under Auto (the default setting) the open is [`attach_auto`]: the one before #153, call for
+/// call, never stretched. Otherwise (a setting the user picked, issue #153) the factor `scale`'s
+/// plan asks for is sent before `attached`; the answer settles the plan. A plan that stretches
+/// (only ever the user's pick) makes the window again with a DPI-unaware content container
 /// (the plug-in has no window yet), takes our frame off the view and releases it (it was made
 /// outside that context, so it may have read the monitor's DPI and sized itself by it), then has
 /// `recreate` make another inside the window's plug-in scope and attaches that one there; it sends
@@ -270,6 +288,9 @@ pub(super) fn attach_view(
     recreate: &mut dyn FnMut() -> Option<ComPtr<sb::IPlugView>>,
     mut prepare: impl FnMut(&window::HostWindow),
 ) -> Result<(ComWrapper<PlugFrame>, window::HostWindow, ComPtr<sb::IPlugView>), String> {
+    if scale.auto() {
+        return attach_auto(&view, platform, title, header, scale, prepare).map(|(frame, win)| (frame, win, view));
+    }
     let (w, h) = view_size(&view).unwrap_or_else(|| {
         log::info!("vst3 editor \"{title}\": size unknown before attached: default window 400×300, following the view's size after attached");
         (400.0, 300.0)
@@ -407,6 +428,71 @@ pub(super) fn attach_view(
     window::in_plugin_scope(&win, || follow_view_size(&view, &win, title, "after attached"));
     log::info!("vst3 editor \"{title}\": scale: {}", scale.log_line());
     Ok((frame, win, view))
+}
+
+/// [`attach_view`] under Auto, the default setting: Auto never stretches (the maintainer's
+/// decision after a GPU-drawn editor came up black stretched on a 150% display), so the open is
+/// the one transit made before the Scale menu, call for call: `getSize`, `setFrame(frame)`, the
+/// window's factor before `attached` (`getSize`, `queryInterface`, `setContentScaleFactor`,
+/// `getSize`, and one more `getSize` when it was taken), `attached`, the frame's pending size,
+/// the same factor again after `attached` (issue #105, sent whatever the first answer was), then
+/// the size follow. No DPI-unaware scope, no second `createView`, no stretched window. The answers
+/// only tell `scale` what is in use (an editor that takes the factor is drawn at it; one that does
+/// not keeps its own drawing).
+fn attach_auto(
+    view: &ComPtr<sb::IPlugView>,
+    platform: sb::FIDString,
+    title: &str,
+    header: Option<Arc<transit_rt::editor_window::HeaderCell>>,
+    scale: &mut ScaleState,
+    mut prepare: impl FnMut(&window::HostWindow),
+) -> Result<(ComWrapper<PlugFrame>, window::HostWindow), String> {
+    let (w, h) = view_size(view).unwrap_or_else(|| {
+        log::info!("vst3 editor \"{title}\": size unknown before attached: default window 400×300, following the view's size after attached");
+        (400.0, 300.0)
+    });
+    let win = window::HostWindow::new(title, w, h, header).map_err(|e| format!("host window failed: {e}"))?;
+    prepare(&win);
+    let frame = ComWrapper::new(PlugFrame::new(win.raw(), title));
+    if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
+        // SAFETY: valid view; the frame outlives the view's attachment (the caller keeps it, in
+        // `g.frame`, and detaches it in `teardown`).
+        unsafe { view.setFrame(f.as_ptr()) };
+    }
+    // Issue #101: the window's scale before `attached`, then the size the view reports at that
+    // scale (a `resizeView` it sends now is kept until it is attached, issue #105).
+    let display = window::content_scale(&win);
+    scale.before_open(display.unwrap_or(1.0), true);
+    let (mut answer, mut unscaled) = (None, None);
+    if let Some(factor) = display {
+        let (accepted, before, after) = content_scale_call(view, factor, title, "before attached");
+        unscaled = before;
+        answer = Some((accepted, before == after && (factor - 1.0).abs() > 0.005));
+        if accepted && let Some((w, h)) = view_size(view) {
+            window::resize(win.raw(), w, h);
+        }
+    }
+    let plan = scale.opened(answer);
+    debug_assert!(plan.stretch.is_none(), "Auto never stretches");
+    // SAFETY: valid view; the parent is the live content view of `win`, of the type named.
+    if !ok(unsafe { view.attached(win.parent(), platform) }) {
+        // SAFETY: valid view; detach our frame again.
+        unsafe { view.setFrame(std::ptr::null_mut()) };
+        win.close();
+        frame.close_run_loop();
+        return Err("set_parent failed".into());
+    }
+    frame.attach(view);
+    // Issue #105: the same factor again once attached (the SDK allows "before or after"; some
+    // plug-ins apply it only to an attached view). A view that scales asks through `resizeView`
+    // (honored now); one that only reports its new size gets the window at that size.
+    if let Some(factor) = display {
+        let (accepted, _, after) = content_scale_call(view, factor, title, "after attached");
+        scale.after_attach(accepted, after == unscaled);
+    }
+    follow_view_size(view, &win, title, "after attached");
+    log::info!("vst3 editor \"{title}\": scale: {}", scale.log_line());
+    Ok((frame, win))
 }
 
 /// A new view of the edit controller `c` (`createView("editor")`); `None` when it gives none.

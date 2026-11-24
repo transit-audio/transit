@@ -414,11 +414,13 @@ mod tests {
         inst
     }
 
-    /// Opens the embedded editor in a window at `dpi`, then moves it to `then`: the content sizes
-    /// after the open and after the move, and whether Windows stretches it (issue #153).
+    /// Opens the embedded editor in a window at `dpi` with the Scale `setting`, then moves it to
+    /// `then`: the content sizes after the open and after the move, and whether Windows stretches
+    /// it (issue #153).
     #[cfg(windows)]
-    fn open_scaled_stretch(inst: &Instance, dpi: usize, then: usize) -> ((u32, u32), (u32, u32), bool) {
+    fn open_scaled_with(inst: &Instance, setting: transit_dsp::EditorScale, dpi: usize, then: usize) -> ((u32, u32), (u32, u32), bool) {
         let link = inst.gui().unwrap();
+        link.set_header(transit_rt::editor_window::HeaderView::default(), setting);
         link.open_with("scale", |w| set_dpi(w, dpi)).unwrap();
         let sizes = {
             let mut g = link.lock();
@@ -433,11 +435,33 @@ mod tests {
         sizes
     }
 
-    /// [`open_scaled_stretch`] without the stretch.
+    /// [`open_scaled_with`] under Auto, without the stretch.
     #[cfg(windows)]
     fn open_scaled(inst: &Instance, dpi: usize, then: usize) -> ((u32, u32), (u32, u32)) {
-        let (opened, moved, _) = open_scaled_stretch(inst, dpi, then);
+        let (opened, moved, _) = open_scaled_with(inst, transit_dsp::EditorScale::default(), dpi, then);
         (opened, moved)
+    }
+
+    /// Stretched by Windows, picked by the user (Auto never stretches).
+    #[cfg(windows)]
+    fn stretch_picked() -> transit_dsp::EditorScale {
+        use transit_dsp::editor_scale::{ScaleMode, ScaleStep};
+        transit_dsp::EditorScale { step: ScaleStep::Auto, mode: Some(ScaleMode::WindowsStretch) }
+    }
+
+    /// Opens the embedded editor of `inst` (after `CMD:gui-trace`) at 144 DPI with `setting` and
+    /// returns the GUI calls the fixture saw during the open, and whether the window is stretched.
+    #[cfg(windows)]
+    fn traced_open(inst: &Instance, setting: transit_dsp::EditorScale) -> (Vec<String>, bool) {
+        assert!(inst.load_state(b"CMD:gui-trace"));
+        let link = inst.gui().unwrap();
+        link.set_header(transit_rt::editor_window::HeaderView::default(), setting);
+        link.open_with("trace", |w| set_dpi(w, 144)).unwrap();
+        let stretched = link.lock().window.as_ref().expect("embedded").stretch().is_some();
+        let state = link.save_state().unwrap();
+        link.close();
+        let trace = String::from_utf8(state[16..].to_vec()).unwrap();
+        (trace.lines().map(str::to_owned).collect(), stretched)
     }
 
     /// `set_scale` gets the window's factor before `set_parent` (the fixture asserts a created
@@ -500,17 +524,43 @@ mod tests {
     }
 
     /// A GUI that ignores `set_scale` keeps the size it reports in its own pixels at any DPI and
-    /// gets no other factor. Issue #153 (the maintainer's redesign of 2026-11-16) changed what
-    /// happens on screen: under Auto, Windows stretches it (its GUI is made again in a DPI-unaware
-    /// container); before #153 it was left at 100 percent.
+    /// gets no other factor. Auto never stretches (the maintainer's decision after #153 shipped: a
+    /// GPU-drawn editor came up black stretched): under Auto it is left at 100 percent as before
+    /// #153; Windows stretches it (its GUI made again in a DPI-unaware container) only when the
+    /// user picks Stretched by Windows.
     #[cfg(windows)]
     #[test]
-    fn a_gui_that_ignores_set_scale_is_stretched_by_windows() {
+    fn a_gui_that_ignores_set_scale_keeps_its_own_drawing_under_auto_and_is_stretched_when_picked() {
         let inst = embedded_gain(&[b"CMD:gui-self-scaling"]);
-        assert_eq!(open_scaled_stretch(&inst, 144, 192), ((400, 300), (400, 300), true));
+        assert_eq!(open_scaled_with(&inst, transit_dsp::EditorScale::default(), 144, 192), ((400, 300), (400, 300), false));
+        assert_eq!(open_scaled_with(&inst, stretch_picked(), 144, 192), ((400, 300), (400, 300), true));
     }
 
-    /// Issue #153 review, item 4: a resize the discarded GUI asked for (600×450, in `create`,
+    /// Auto never stretches, call for call: under Auto the embedded GUI is opened exactly as
+    /// before #153 (`create`, `set_scale` with the window's factor, the probe's `get_size`,
+    /// `set_parent`, `show`), whether it takes the factor or ignores it: one `create`, no
+    /// `destroy`, no stretched window (so no DPI-unaware scope: the scope is inert for a window
+    /// that is not stretched). With Stretched by Windows picked the GUI is made again instead.
+    #[cfg(windows)]
+    #[test]
+    fn under_auto_an_embedded_gui_is_opened_as_before_153() {
+        let ignores = embedded_gain(&[b"CMD:gui-self-scaling"]);
+        assert_eq!(
+            traced_open(&ignores, transit_dsp::EditorScale::default()),
+            (["create", "set_scale 1.5 -> false", "get_size", "set_parent", "show"].map(String::from).to_vec(), false)
+        );
+        let takes = embedded_gain(&[]);
+        assert_eq!(
+            traced_open(&takes, transit_dsp::EditorScale::default()),
+            (["create", "set_scale 1.5 -> true", "get_size", "set_parent", "show"].map(String::from).to_vec(), false)
+        );
+        let picked = embedded_gain(&[b"CMD:gui-self-scaling"]);
+        let (calls, stretched) = traced_open(&picked, stretch_picked());
+        assert!(stretched, "{calls:?}");
+        assert_eq!(calls.iter().filter(|c| *c == "create").count(), 2, "made again for the picked stretch: {calls:?}");
+    }
+
+    /// Issue #153 review, item 4 (Stretched by Windows picked): a resize the discarded GUI asked for (600×450, in `create`,
     /// before it refused `set_scale` and was made again for the stretch) does not reach the
     /// replacement, which reports 400×300: the next idle leaves the window at 400×300.
     #[cfg(windows)]
@@ -519,6 +569,7 @@ mod tests {
         use windows_sys::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
         let inst = embedded_gain(&[b"CMD:gui-self-scaling", b"CMD:gui-resize-on-create-once", b"CMD:gui-quiet-show"]);
         let link = inst.gui().unwrap();
+        link.set_header(transit_rt::editor_window::HeaderView::default(), stretch_picked());
         link.open_with("replaced", |w| set_dpi(w, 144)).unwrap();
         {
             let g = link.lock();

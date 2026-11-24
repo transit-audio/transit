@@ -14,6 +14,13 @@
 //! Windows stretch instead. A hint line says so when the editor accepted a factor other than 1 and
 //! reported the same size afterwards ([`ScaleInputs::kept_size`]).
 //!
+//! **Auto never stretches.** Under Auto (the Auto step in the automatic mode, the default) an
+//! editor that accepts the host's factor is drawn at it, and one that does not keeps its own
+//! drawing, opened as before #153; a hint says that Stretched by Windows is there to try. The
+//! stretch is used only when the user picks it (the mode, or the display's percentage for an
+//! editor that does not take the factor): a GPU-drawn editor showed black stretched on the
+//! maintainer's machine, so it is never the default.
+//!
 //! The setting is per machine, keyed by plug-in id, and never in the session (the app keeps it
 //! with its other per-machine preferences).
 
@@ -306,7 +313,12 @@ pub fn decide(setting: EditorScale, inputs: ScaleInputs) -> ScalePlan {
                 ScaleStep::Percent(p) => p == 100 || p == shown,
             };
             let step = if offered(setting.step) { setting.step } else { ScaleStep::Auto };
-            let stretched = !near(display, 1.0) && step != ScaleStep::Percent(100);
+            // Auto never stretches (maintainer, after #153 shipped: a GPU-drawn editor came up
+            // black stretched): under the automatic mode at the Auto step the editor keeps its own
+            // drawing, as before #153. The stretch is the user's pick only: the mode itself, or
+            // the display's percentage.
+            let automatic_auto = chosen.is_none() && step == ScaleStep::Auto;
+            let stretched = !near(display, 1.0) && step != ScaleStep::Percent(100) && !automatic_auto;
             let reason = format!(
                 "This plug-in is not drawn at the host's factor here: 100% (its own drawing) or the display's {shown}% (stretched by Windows)"
             );
@@ -324,7 +336,8 @@ pub fn decide(setting: EditorScale, inputs: ScaleInputs) -> ScalePlan {
                 } else {
                     "In use: the plug-in's own drawing (100%)".into()
                 },
-                hint: None,
+                hint: (automatic_auto && !near(display, 1.0))
+                    .then(|| format!("Too small? Stretched by Windows can bring it to {shown}%, but some editors show black when stretched")),
             }
         }
         ScaleMode::PluginZoom => {
@@ -500,6 +513,14 @@ impl Default for ScaleState {
 }
 
 impl ScaleState {
+    /// Auto in the automatic mode, the default setting: the format hosts open the editor as they
+    /// did before the Scale menu (the display's factor before and, for VST3, after `attached`,
+    /// whatever the editor answered last time; never a stretch, never a second view or GUI).
+    #[must_use]
+    pub fn auto(&self) -> bool {
+        self.setting.is_default()
+    }
+
     /// The decision's inputs now.
     #[must_use]
     pub fn inputs(&self) -> ScaleInputs {
@@ -583,9 +604,22 @@ impl ScaleState {
 
     /// VST3: the answer to the factor sent again after `attached` (issue #105). Kept: a refusal is
     /// recorded (no later factor is sent), an acceptance updates the kept-size hint. What is on
-    /// screen does not change: the factor accepted before `attached` stays.
+    /// screen does not change: the factor accepted before `attached` stays. Under Auto the factor
+    /// goes again after `attached` even when it was refused before (the open as before #153): an
+    /// editor that takes it only then is drawn at the host's factor from now on.
     pub fn after_attach(&mut self, accepted: bool, kept_size: bool) {
         self.record(accepted, kept_size);
+        if accepted
+            && let Some(p) = &self.in_use
+            && p.factor.is_none()
+            && p.stretch.is_none()
+        {
+            let plan = decide(self.setting, self.inputs());
+            if plan.stretch.is_none() && plan.factor.is_some() {
+                self.in_use = Some(plan);
+            }
+            return;
+        }
         let windows = self.platform == Platform::Windows && self.stretch_available;
         let (support, kept) = (self.support.unwrap_or(ScaleSupport::Unasked), self.kept_size);
         if let Some(p) = &mut self.in_use

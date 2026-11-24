@@ -44,32 +44,42 @@ fn an_editor_that_takes_the_factor_draws_itself_at_the_display_scale_or_the_chos
     assert_eq!(small.factor, Some(0.75));
 }
 
-/// The second kind (K74): an editor that refuses the factor is stretched by Windows to the
-/// display's scale under Auto; the only other size is its own 100 percent; the other steps are
-/// disabled with a reason.
+/// The second kind (K74): Auto never stretches. Under Auto an editor that refuses the factor keeps
+/// its own drawing, as before #153, and a hint says that Stretched by Windows is there to try and
+/// can show black; the stretch is the user's pick only (the mode, or the display's percentage).
+/// The sizes on offer are its own 100 percent and the display's; the other steps are disabled
+/// with a reason.
 #[test]
-fn an_editor_that_refuses_is_stretched_by_windows_and_offers_only_100_and_the_display_scale() {
+fn an_editor_that_refuses_keeps_its_own_drawing_under_auto_and_is_stretched_only_when_picked() {
     let auto = decide(EditorScale::default(), win(ScaleSupport::Refuses, 1.5));
-    assert_eq!((auto.factor, auto.stretch, auto.mode), (None, Some(1.5), ScaleMode::WindowsStretch));
+    assert_eq!((auto.factor, auto.stretch, auto.mode), (None, None, ScaleMode::PluginZoom), "Auto never stretches");
     assert_eq!(enabled(&auto), [ScaleStep::Auto, ScaleStep::Percent(100), ScaleStep::Percent(150)]);
     assert!(auto.reason.as_deref().unwrap().contains("100% (its own drawing) or the display's 150%"), "{:?}", auto.reason);
-    assert_eq!(auto.in_use, "In use: stretched by Windows to 150%");
+    assert_eq!(auto.in_use, "In use: the plug-in's own drawing (100%)");
+    let hint = auto.hint.as_deref().unwrap();
+    assert!(hint.contains("Stretched by Windows") && hint.contains("150%") && hint.contains("black"), "{hint}");
+    let picked = decide(set(ScaleStep::Auto, Some(ScaleMode::WindowsStretch)), win(ScaleSupport::Refuses, 1.5));
+    assert_eq!((picked.factor, picked.stretch, picked.mode), (None, Some(1.5), ScaleMode::WindowsStretch), "the mode picked");
+    assert_eq!(picked.in_use, "In use: stretched by Windows to 150%");
+    assert_eq!(picked.hint, None);
     let own = decide(set(ScaleStep::Percent(100), None), win(ScaleSupport::Refuses, 1.5));
     assert_eq!((own.factor, own.stretch, own.mode), (None, None, ScaleMode::PluginZoom), "100%: its own drawing");
     let display = decide(set(ScaleStep::Percent(150), None), win(ScaleSupport::Refuses, 1.5));
     assert_eq!(display.stretch, Some(1.5));
-    // A step it cannot offer (saved when the editor was another kind) acts as Auto.
+    // A step it cannot offer (saved when the editor was another kind) acts as Auto: not stretched.
     let other = decide(set(ScaleStep::Percent(200), None), win(ScaleSupport::Refuses, 1.5));
-    assert_eq!((other.step, other.stretch), (ScaleStep::Auto, Some(1.5)));
+    assert_eq!((other.step, other.stretch), (ScaleStep::Auto, None));
+    let other = decide(set(ScaleStep::Percent(200), Some(ScaleMode::WindowsStretch)), win(ScaleSupport::Refuses, 1.5));
+    assert_eq!((other.step, other.stretch), (ScaleStep::Auto, Some(1.5)), "unless the stretch is the mode picked");
     // At a display of 125% the offered sizes are 100 and 125.
     assert_eq!(
         enabled(&decide(EditorScale::default(), win(ScaleSupport::Refuses, 1.25))),
         [ScaleStep::Auto, ScaleStep::Percent(100), ScaleStep::Percent(125)]
     );
-    // The host factor cannot be chosen for it; picking it anyway acts as automatic.
+    // The host factor cannot be chosen for it; picking it anyway acts as automatic (no stretch).
     let forced = decide(set(ScaleStep::Auto, Some(ScaleMode::HostFactor)), win(ScaleSupport::Refuses, 1.5));
     assert!(forced.mode_unavailable);
-    assert_eq!((forced.factor, forced.stretch), (None, Some(1.5)));
+    assert_eq!((forced.factor, forced.stretch), (None, None));
     assert!(forced.modes.iter().any(|(m, ok)| *m == ScaleMode::HostFactor && ok.is_err()));
 }
 
@@ -79,6 +89,7 @@ fn nothing_is_stretched_on_a_display_at_100_percent() {
     let p = decide(EditorScale::default(), win(ScaleSupport::Refuses, 1.0));
     assert_eq!((p.factor, p.stretch, p.mode), (None, None, ScaleMode::PluginZoom));
     assert_eq!(enabled(&p), [ScaleStep::Auto, ScaleStep::Percent(100)]);
+    assert_eq!(p.hint, None, "nothing to suggest at 100%");
 }
 
 /// The third kind: an editor that accepts the factor and keeps its size. Auto cannot tell it from
@@ -136,6 +147,13 @@ fn no_factor_is_ever_applied_twice() {
                         if platform == Platform::MacOs {
                             assert_eq!((p.factor, p.stretch), (None, None), "{what}");
                         }
+                        // Auto never stretches; the stretch is only ever the user's pick.
+                        if setting.is_default() {
+                            assert_eq!(p.stretch, None, "Auto stretched: {what}");
+                        }
+                        if setting.mode.is_none() && p.stretch.is_some() {
+                            assert!(matches!(setting.step, ScaleStep::Percent(_)), "a stretch the user did not pick: {what}");
+                        }
                         assert_eq!(p.steps.len(), 7, "{what}");
                         let disabled = p.steps.iter().any(|(_, e)| !e);
                         assert!(!disabled || p.reason.is_some(), "a disabled step without a reason: {what}");
@@ -191,7 +209,7 @@ fn a_new_factor_applies_at_once_and_a_stretch_or_a_withdrawn_factor_on_the_next_
     let zoom = at(set(ScaleStep::Auto, Some(ScaleMode::PluginZoom)));
     assert_eq!(applies(&zoom, &auto), Applies::Now, "a factor sent to an editor that can take one");
     let r = win(ScaleSupport::Refuses, 1.5);
-    let stretched = decide(EditorScale::default(), r);
+    let stretched = decide(set(ScaleStep::Auto, Some(ScaleMode::WindowsStretch)), r);
     let own = decide(set(ScaleStep::Percent(100), None), r);
     assert_eq!(applies(&stretched, &own), Applies::NextOpen);
     // The menu of an open stretched editor whose setting now asks for its own drawing.
@@ -215,7 +233,7 @@ fn the_menu_lists_steps_and_modes_with_the_setting_each_picks() {
     assert_eq!(choices[0], ("Auto (150%)".into(), EditorScale::default(), true, true));
     assert_eq!(choices[1], ("50%".into(), set(ScaleStep::Percent(50), None), false, false));
     assert_eq!(choices[3], ("100%".into(), set(ScaleStep::Percent(100), None), false, true));
-    assert_eq!(choices[7], ("Automatic: Stretched by Windows".into(), EditorScale::default(), true, true));
+    assert_eq!(choices[7], ("Automatic: The plug-in's own zoom (no stretch)".into(), EditorScale::default(), true, true));
     assert_eq!(
         choices[8],
         (
@@ -225,8 +243,11 @@ fn the_menu_lists_steps_and_modes_with_the_setting_each_picks() {
             false
         )
     );
+    assert_eq!(choices[10], ("Stretched by Windows".into(), set(ScaleStep::Auto, Some(ScaleMode::WindowsStretch)), false, true));
     assert_eq!(choices.len(), 11);
-    assert!(matches!(m.last(), Some(ScaleEntry::Info(r)) if r.contains("stretched by Windows")));
+    let n = m.len();
+    assert!(matches!(&m[n - 2], ScaleEntry::Info(r) if r.contains("stretched by Windows")), "the reason line");
+    assert!(matches!(&m[n - 1], ScaleEntry::Info(h) if h.contains("Stretched by Windows") && h.contains("black")), "the hint last");
 }
 
 /// The saved form: `{"step": "auto" | <percent>, "mode": null | "host_factor" | ...}`; a missing
@@ -298,11 +319,15 @@ fn the_editor_state_follows_an_open_a_change_a_dpi_change_and_a_pick() {
     assert_eq!(again.factor, None);
     let plan = s.opened(None);
     assert_eq!((plan.factor, plan.stretch), (None, Some(1.5)));
-    // An editor without the call refuses without being asked.
+    // An editor without the call refuses without being asked, and under Auto keeps its own drawing.
     let mut r = ScaleState { stretch_available: true, platform: Platform::Windows, ..ScaleState::default() };
-    assert_eq!(r.before_open(1.5, false).stretch, Some(1.5));
+    assert_eq!(r.before_open(1.5, false).stretch, None);
     assert_eq!(r.opened(None).factor, None);
-    assert!(r.log_line().starts_with("accepts a factor: no; factor in use: none; Windows stretch: 1.5"));
+    assert!(
+        r.log_line().starts_with("accepts a factor: no; factor in use: none; Windows stretch: none; in use: the plug-in's own drawing (100%)"),
+        "{}",
+        r.log_line()
+    );
 }
 
 fn open_accepting(display: f64) -> ScaleState {
@@ -475,4 +500,57 @@ fn the_kept_size_hint_follows_a_dpi_change() {
     assert_eq!(s.dpi_changed(2.0), Some(2.0));
     s.dpi_answer(true, false);
     assert_eq!(s.in_use.as_ref().unwrap().hint, None, "it resized for 2.0: no hint");
+}
+
+/// Auto never stretches, through the per-editor state: a refusing editor opened under Auto keeps
+/// its own drawing, its menu says Automatic is its own drawing and hints at the stretch; the user's
+/// pick of Stretched by Windows waits for the next open and then stretches it, as before.
+#[test]
+fn under_auto_a_refusing_editor_keeps_its_own_drawing_and_the_stretch_is_the_users_pick() {
+    let mut s = ScaleState { stretch_available: true, platform: Platform::Windows, ..ScaleState::default() };
+    assert!(s.auto());
+    assert_eq!(s.before_open(1.5, true).factor, Some(1.5), "asked with the display's factor");
+    let plan = s.opened(Some((false, false)));
+    assert_eq!((plan.factor, plan.stretch, plan.mode), (None, None, ScaleMode::PluginZoom));
+    let entries = s.menu().to_vec();
+    assert_eq!(entries[0], ScaleEntry::Info("In use: the plug-in's own drawing (100%)".into()));
+    assert!(
+        entries
+            .iter()
+            .any(|e| matches!(e, ScaleEntry::Choice { label, checked: true, .. } if label == "Automatic: The plug-in's own zoom (no stretch)"))
+    );
+    assert!(matches!(entries.last(), Some(ScaleEntry::Info(h)) if h.contains("black")), "{entries:?}");
+    let pick = EditorScale { step: ScaleStep::Auto, mode: Some(ScaleMode::WindowsStretch) };
+    assert!(!ScaleState { setting: pick, ..ScaleState::default() }.auto());
+    assert_eq!(s.set_setting(pick).0, Applies::NextOpen);
+    assert!(matches!(&s.menu()[1], ScaleEntry::Info(t) if t == "Next open: stretched by Windows to 150%"));
+    s.closed();
+    assert_eq!(s.before_open(1.5, true).factor, None);
+    assert_eq!(s.opened(None).stretch, Some(1.5), "stretched once picked");
+    // Reopened under Auto again: its own drawing, not stretched.
+    s.closed();
+    let _ = s.set_setting(EditorScale::default());
+    s.before_open(1.5, true);
+    assert_eq!(s.opened(Some((false, false))).stretch, None);
+}
+
+/// Under Auto the factor goes again after `attached` whatever the first answer was (the open as
+/// before #153); an editor that refused it before `attached` and takes it after is drawn at it.
+#[test]
+fn under_auto_an_editor_that_takes_the_factor_only_after_attached_is_drawn_at_it() {
+    let mut s = ScaleState { stretch_available: true, platform: Platform::Windows, ..ScaleState::default() };
+    s.before_open(1.5, true);
+    s.opened(Some((false, false)));
+    s.after_attach(true, false);
+    let p = s.in_use.as_ref().unwrap();
+    assert_eq!((p.factor, p.stretch, p.mode), (Some(1.5), None, ScaleMode::HostFactor));
+    assert_eq!(p.in_use, "In use: drawn by the plug-in at 150%");
+    assert_eq!(s.dpi_changed(2.0), Some(2.0), "it follows the display from now on");
+    // Refused both times: its own drawing stays.
+    let mut r = ScaleState { stretch_available: true, platform: Platform::Windows, ..ScaleState::default() };
+    r.before_open(1.5, true);
+    r.opened(Some((false, false)));
+    r.after_attach(false, false);
+    let p = r.in_use.as_ref().unwrap();
+    assert_eq!((p.factor, p.stretch), (None, None));
 }
