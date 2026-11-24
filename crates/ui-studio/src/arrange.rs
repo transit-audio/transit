@@ -855,6 +855,11 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
         let item = crate::bounce_in_place::clip_menu_item(app, ui);
         app.arrange.menu.retain(|m| m.label != item.label);
         app.arrange.menu.push(item);
+        // Each channel of the selected stereo or wider clips on a new mono track below.
+        if on_clip && ui.add(crate::chrome::MenuRow::new("Split to Mono Tracks")).clicked() {
+            let _ = app.run("clip.split_to_mono", json!({}));
+            ui.close();
+        }
         ui.separator();
         crate::edit_tools::context_menu_items(app, ui);
     });

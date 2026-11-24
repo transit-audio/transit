@@ -920,10 +920,23 @@ slot), in one undo step, with the dashed well outlined while you hold it there; 
 view has content it takes no drag. On an Instrument key map with zones, a file dragged over keys
 no zone plays shows, dashed, the keys it will cover, and letting go makes a zone there (see below). A file or plug-in dropped elsewhere on a device window is ignored; the window takes the
 drop, so nothing behind it is reached. Anywhere else, a browser drag lands on the track lane,
-header, mixer strip or device chain where you let go, and a file from the file manager is imported
-into the arrangement at the cursor (a `.transit` or `.dawproject` file opens as the session, a MIDI
-file imports as MIDI). On Windows a file manager drop lands where the pointer is when you let go; on other
-platforms it lands as soon as the pointer moves after you let go (see the known issues).
+header, mixer strip or device chain where you let go. A file from the file manager lands the same
+way: on the track under the pointer (at the pointer's time on its lane) or below the tracks on a
+new track, several files one after another, and anywhere else at the cursor (a MIDI file imports
+as MIDI). A track that takes no audio, or a file that is not audio transit imports, is refused
+with the reason on the status line. A file keeps its channels: a stereo file dropped on a mono
+track lands there as one stereo clip. A `.transit` or `.dawproject` file opens as the session,
+asking first to save unsaved changes as File > Open does; dropped with other files, it opens alone
+and the status line says how many were left out. On Windows a file manager drop lands where the pointer
+is when you let go; on other platforms it lands as soon as the pointer moves after you let go (see
+the known issues).
+
+To split a stereo or wider clip into mono tracks, such as two microphones recorded onto one stereo
+track, right-click it and choose **Split to Mono Tracks**: each channel goes to a new mono track
+below the clip's track (`<track> L` and `<track> R`, numbered past stereo), with the clip's
+timing, fades and gain, the original clip is muted, and the whole split is one undo step. Each
+channel becomes its own mono file, saved to `Audio Files`; a take played from its file gets one
+mono WAV per channel beside it.
 
 Right-click a pad and choose **Clear pad** to empty it and reset its name, choke group, mute,
 and solo. Delete or Backspace does the same for the selected pad while the Sampler window has

@@ -630,8 +630,10 @@ impl StudioApp {
     /// Import audio files at `at`: onto `track` (an audio track), or onto a new track when
     /// `track` is `None`. Several files go one after another on the same track. The files are
     /// prepared in the background and committed in order, one undo step each (see `import`).
+    /// Maschine/Kontakt files are left out here; whether any other file is audio is the engine's
+    /// call (it reads a file by its contents), and a refusal gives its reason.
     pub fn import_files(&mut self, files: &[PathBuf], track: Option<TrackId>, at: Samples) -> Result<(), String> {
-        let (ok, closed): (Vec<&PathBuf>, Vec<&PathBuf>) = files.iter().partition(|p| kind_of(&p.to_string_lossy(), false) == Some(Kind::Audio));
+        let (ok, closed): (Vec<&PathBuf>, Vec<&PathBuf>) = files.iter().partition(|p| kind_of(&p.to_string_lossy(), false) != Some(Kind::Closed));
         if ok.is_empty() {
             let what = closed.first().map_or("Nothing to import".to_string(), |p| refusal(p));
             self.status = what.clone();
@@ -639,7 +641,10 @@ impl StudioApp {
         }
         if let Some(t) = track {
             let s = self.engine.session();
-            let Some(tr) = s.track(t) else { return Err("no such track".into()) };
+            let Some(tr) = s.track(t) else {
+                self.status = "The track was deleted: drop the files again".into();
+                return Err(self.status.clone());
+            };
             if tr.kind != TrackKind::Audio {
                 self.status = format!("{} is not an audio track: drop audio files on an audio track or below the tracks", tr.name);
                 return Err(self.status.clone());
@@ -666,13 +671,15 @@ impl StudioApp {
     /// device layouts. An editor window on top at `pos` comes first and takes the drop whole:
     /// `audio` (the payload holds an audio file) lands on a Sampler pad or an empty Sampler view's
     /// well, anything else over a window is no target (nothing behind a window is reached).
-    fn drop_target(&self, ctx: &egui::Context, pos: Pos2, snap: bool, audio: bool) -> Option<(Target, R4)> {
+    pub(crate) fn drop_target(&self, ctx: &egui::Context, pos: Pos2, snap: bool, audio: bool) -> Option<(Target, R4)> {
         if let Some(key) = self.editor_window_at(ctx, pos) {
             return if audio { self.editor_target(key, pos) } else { None };
         }
         let m = &self.mixer.layout;
         if m.visible {
-            for s in m.strips.iter().chain(m.master.iter()) {
+            // The Main strip of a session with no Master track is the main bus, no track (its
+            // `track` is 0, an id no track has): no target, as the mixer's empty area.
+            for s in m.strips.iter().chain(m.master.iter()).filter(|s| s.track != 0) {
                 if rect(s.rect).contains(pos) {
                     return Some((Target::Track { track: TrackId(s.track), at: None }, s.rect));
                 }

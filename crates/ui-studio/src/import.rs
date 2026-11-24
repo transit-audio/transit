@@ -280,7 +280,22 @@ pub fn step(app: &mut StudioApp, ctx: &egui::Context) {
                     app.drop_item(0, msg);
                 }
                 "failed" => {
-                    let msg = format!("Couldn't import {}: {}", front.name, front.error.clone().unwrap_or_default());
+                    let (name, why, batch) = (front.name.clone(), front.error.clone().unwrap_or_default(), front.batch);
+                    let mut msg = format!("Couldn't import {name}: {why}");
+                    // Kept for the drop's last line, so a later file's commit keeps the reason. When
+                    // this is the drop's last file, its own line goes on with the files left out up
+                    // front and the drop's earlier failures, never a track (it may be gone by now).
+                    let last = !app.imports.items.iter().skip(1).any(|i| i.batch == batch);
+                    if let Some(b) = app.imports.batches.get_mut(&batch) {
+                        if last && b.closed > 0 {
+                            let s = if b.closed == 1 { "" } else { "s" };
+                            msg.push_str(&format!("; {} Maschine/Kontakt file{s} skipped: not supported", b.closed));
+                        }
+                        if last && !b.refused.is_empty() {
+                            msg.push_str(&format!("; {}", not_prepared(&b.refused, b.asked)));
+                        }
+                        b.refused.push((name, why));
+                    }
                     app.drop_item(0, msg);
                 }
                 _ => break,

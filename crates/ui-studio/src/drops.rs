@@ -8,10 +8,12 @@
 //! frame or a later one). A `PointerGone` does not route it blind: the drop stays held, and only
 //! after [`GONE_GRACE_FRAMES`] frames with no position does it go to the arrangement. Then the
 //! editor window on top at that position (egui's own layer order) claims it, or the arrangement
-//! imports it. Exactly one claimant takes a drop; a held drop never vanishes (a second drop while
-//! one is held routes with it).
+//! imports it by the browser drag's rules: on the track under the pointer or below the tracks, else
+//! at the cursor, with the reason on the status line when it can't. Exactly one claimant takes a
+//! drop; a held drop never vanishes (a second drop while one is held routes with it).
 
 use crate::StudioApp;
+use crate::browser::Target;
 use std::path::PathBuf;
 use transit_model::TrackId;
 
@@ -123,9 +125,60 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
         r.offer = Some((key, offer));
         return;
     }
-    for p in &offer.paths {
+    // A drop holding a session opens it and nothing else: its other files would land in whichever
+    // document is open when their turn came, the closing one or the new one by a pointer or a
+    // cursor that still names the closing one's tracks.
+    if let Some(session) = offer.paths.iter().find(|p| opens_session(&p.to_string_lossy())) {
+        let left = offer.paths.len() - 1;
+        if left > 0 {
+            // Said first, so a session that fails to open replaces it with its own reason.
+            let name = session.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+            app.status = format!(
+                "{left} file{} dropped with {name} {} not imported; drop {} on the session once it is open",
+                if left == 1 { "" } else { "s" },
+                if left == 1 { "was" } else { "were" },
+                if left == 1 { "it" } else { "them" }
+            );
+        }
+        open_path(app, &session.to_string_lossy());
+        return;
+    }
+    let (midi, audio): (Vec<PathBuf>, Vec<PathBuf>) = offer.paths.iter().cloned().partition(|p| is_midi(&p.to_string_lossy()));
+    for p in midi {
         open_path(app, &p.to_string_lossy());
     }
+    if audio.is_empty() {
+        return;
+    }
+    // The rest lands as a browser drag's files do (`import_files`): on the track under the pointer
+    // (at the pointer's time on its lane) or on a new track below the tracks, one after another;
+    // anywhere else at the cursor (on the cursor's track, as before). A track that takes no audio,
+    // or a file that is not audio, is refused with the reason on the status line.
+    let snap = !ctx.input(|i| i.modifiers.shift);
+    let cursor = app.cursor();
+    let _ = match offer.pos.and_then(|p| app.drop_target(ctx, p, snap, true)).map(|(t, _)| t) {
+        Some(Target::Track { track, at }) => app.import_files(&audio, Some(track), at.unwrap_or(cursor)),
+        Some(Target::Below { at }) => app.import_files(&audio, None, at.unwrap_or(cursor)),
+        _ => app.import_files(&audio, cursor_audio_track(app), cursor),
+    };
+}
+
+/// The cursor's track when it is an audio track: where audio lands at the cursor (none: a new
+/// track).
+fn cursor_audio_track(app: &StudioApp) -> Option<TrackId> {
+    app.cursor_track().filter(|t| app.engine.session().track(*t).is_some_and(|t| t.kind == transit_model::TrackKind::Audio))
+}
+
+/// Whether dropping `p` opens it as the session.
+fn opens_session(p: &str) -> bool {
+    let lower = p.to_ascii_lowercase();
+    lower.ends_with(".transit") || lower.ends_with(".dawproject")
+}
+
+/// Whether `p` imports as MIDI.
+fn is_midi(p: &str) -> bool {
+    let lower = p.to_ascii_lowercase();
+    lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf")
 }
 
 /// Offers `path` to the editor window `key` in the next frame, as a file dropped on it at `pos` (a
@@ -140,21 +193,21 @@ pub(crate) fn take(app: &mut StudioApp, key: (TrackId, usize)) -> Option<DropOff
     if r.offer.as_ref().is_some_and(|(k, _)| *k == key) { r.offer.take().map(|(_, o)| o) } else { None }
 }
 
-/// The arrangement's claim: a `.transit` or `.dawproject` file opens as the session, a MIDI file
-/// imports, any other file imports as audio at the cursor (on the cursor's track). Also used for
-/// files named on the command line.
+/// The arrangement's claim: a `.transit` or `.dawproject` file opens as the session (asking to
+/// save unsaved changes first, as File > Open does), a MIDI file imports, any other file imports
+/// as audio at the cursor (on the cursor's track when it is an audio track, else on a new one).
+/// Used for files named on the command line; a failure's reason goes to the status line.
 pub fn open_path(app: &mut StudioApp, p: &str) {
-    let lower = p.to_ascii_lowercase();
-    if lower.ends_with(".transit") || lower.ends_with(".dawproject") {
+    if opens_session(p) {
         app.run_or_ask("session.open", serde_json::json!({"path": p}));
         return;
     }
-    let r = if lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf") {
+    let r = if is_midi(p) {
         app.run("file.import_midi", serde_json::json!({"path": p}))
     } else {
         let at = app.cursor();
         let mut params = serde_json::json!({"path": p, "at": at});
-        if let Some(t) = app.cursor_track() {
+        if let Some(t) = cursor_audio_track(app) {
             params["track"] = serde_json::json!(t.0);
         }
         app.run("file.import_audio", params)

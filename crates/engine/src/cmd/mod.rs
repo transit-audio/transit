@@ -13,6 +13,7 @@ mod clip;
 pub(crate) mod clip_bounce;
 mod clip_list;
 mod clip_more;
+mod clip_split;
 mod device_pages;
 mod edit;
 mod edit_more;
@@ -188,6 +189,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(track_more::specs());
         v.extend(clip_more::specs());
         v.extend(clip_bounce::specs());
+        v.extend(clip_split::specs());
         v.extend(clip_list::specs());
         v.extend(event_more::specs());
         v.extend(setup_more::specs());

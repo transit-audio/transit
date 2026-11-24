@@ -161,8 +161,25 @@ impl T {
 
     /// Drops `path` at `at` (the next frame sees it), then runs a few frames.
     pub fn drop_file(&mut self, path: &Path, at: (f32, f32)) {
-        self.drop = Some((vec![path.to_path_buf()], Some(egui::pos2(at.0, at.1))));
+        self.drop_files(vec![path.to_path_buf()], at);
+    }
+
+    /// Drops `paths` together at `at`, as [`T::drop_file`] drops one, then lets the arrangement's
+    /// queued imports land.
+    pub fn drop_files(&mut self, paths: Vec<PathBuf>, at: (f32, f32)) {
+        self.drop = Some((paths, Some(egui::pos2(at.0, at.1))));
         self.frames(3);
+        self.settle_imports();
+    }
+
+    /// Runs frames until the arrangement's queued imports are committed (or 10 s).
+    pub fn settle_imports(&mut self) {
+        let t0 = std::time::Instant::now();
+        while self.app.imports.active() && t0.elapsed().as_secs() < 10 {
+            self.frames(6);
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        assert!(!self.app.imports.active(), "imports never finished: {}", self.app.status);
     }
 
     /// Drops `path` with no pointer motion in the drop's frame (egui's pointer stays where it last
