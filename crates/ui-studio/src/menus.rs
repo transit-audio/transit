@@ -759,20 +759,27 @@ pub fn dialogs(app: &mut StudioApp, ctx: &egui::Context) {
         Some(crate::chrome::Choice::Cancel) => Some(0),
         None => None,
     };
-    match choice {
+    let ran = match choice {
         Some(1) => {
             app.dialog = None;
-            if app.save() {
+            let saved = app.save();
+            if saved {
                 let _ = app.run(&then.0, then.1);
             }
+            saved
         }
         Some(2) => {
             app.dialog = None;
             let _ = app.run(&then.0, then.1);
+            true
         }
-        Some(_) => app.dialog = None,
-        None => {}
-    }
+        Some(_) => {
+            app.dialog = None;
+            false
+        }
+        None => return,
+    };
+    crate::drops::question_answered(app, ran);
 }
 
 /// The delete questions' detail line (the artboard's): the deletion is one undo step.

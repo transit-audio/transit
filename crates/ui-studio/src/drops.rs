@@ -37,6 +37,9 @@ pub(crate) struct Router {
     /// A browser drag released on a Sampler view's empty well (#464): next frame's offer to that
     /// window, so the view takes it as it takes a dropped file.
     next: Option<((TrackId, usize), DropOffer)>,
+    /// The status line about a drop's files left out, while the save question its session raised
+    /// is up: cleared when that question ends without opening the session (#771).
+    left_out: Option<String>,
 }
 
 /// Frames a held drop waits for a position after the pointer is reported gone before it goes to
@@ -141,6 +144,8 @@ pub(crate) fn route(app: &mut StudioApp, ctx: &egui::Context, offer: DropOffer) 
             );
         }
         open_path(app, &session.to_string_lossy());
+        let asked = matches!(app.dialog, Some(crate::Dialog::SaveChanges { .. }));
+        app.builtin_editor.drops.left_out = (left > 0 && asked).then(|| app.status.clone());
         return;
     }
     let (midi, audio): (Vec<PathBuf>, Vec<PathBuf>) = offer.paths.iter().cloned().partition(|p| is_midi(&p.to_string_lossy()));
@@ -179,6 +184,19 @@ fn opens_session(p: &str) -> bool {
 fn is_midi(p: &str) -> bool {
     let lower = p.to_ascii_lowercase();
     lower.ends_with(".mid") || lower.ends_with(".midi") || lower.ends_with(".smf")
+}
+
+/// The save question ended; `ran` says whether the command it held ran. When a drop's session
+/// raised it and the session was not opened (Cancel, or a save that did not happen), the line about
+/// the drop's files left out no longer holds: it is cleared, as a cancelled wait's line is, unless
+/// something newer has replaced it.
+pub(crate) fn question_answered(app: &mut StudioApp, ran: bool) {
+    if let Some(note) = app.builtin_editor.drops.left_out.take()
+        && !ran
+        && app.status == note
+    {
+        app.status.clear();
+    }
 }
 
 /// Offers `path` to the editor window `key` in the next frame, as a file dropped on it at `pos` (a

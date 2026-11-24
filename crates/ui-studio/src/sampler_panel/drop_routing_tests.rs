@@ -290,6 +290,25 @@ fn a_dropped_session_asks_to_save_unsaved_changes_first() {
     assert!(s.tracks.iter().any(|tr| tr.name == "Unsaved") && s.tracks.iter().all(|tr| tr.clips().is_empty()), "nothing opened or imported yet");
 }
 
+/// #771: Cancel at the save question a dropped session raised opens nothing, so the line about
+/// the files dropped with it goes too.
+#[test]
+fn cancel_at_a_dropped_sessions_save_question_clears_the_left_out_line() {
+    let mut t = T::new();
+    let b = t.dir.join("B.transit");
+    transit_engine::Engine::default().execute("session.save", &serde_json::json!({"path": b.to_string_lossy()})).unwrap();
+    t.app.run("track.new", serde_json::json!({"kind": "audio", "name": "Unsaved"})).unwrap();
+    t.frames(3);
+    let one = t.sample("One.wav", 2_400);
+    t.drop_files(vec![b, one], MENU_BAR);
+    assert!(matches!(t.app.dialog, Some(crate::Dialog::SaveChanges { .. })), "the save question is up");
+    assert!(t.app.status.contains("1 file dropped with B.transit was not imported"), "{}", t.app.status);
+    t.key("escape");
+    assert!(t.app.dialog.is_none(), "the question was cancelled");
+    assert!(t.app.engine.session().tracks.iter().any(|tr| tr.name == "Unsaved"), "nothing opened");
+    assert_eq!(t.app.status, "", "the left-out line went with the cancelled open");
+}
+
 /// With the cursor before bar 1 (a count-in session's pre-count zone), files dropped at the cursor
 /// still follow each other: the first lands at 0, where the engine puts it, and the next after it.
 #[test]
