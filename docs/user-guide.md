@@ -633,10 +633,12 @@ session). Its first line says how the editor is drawn now:
   disabled with the reason. Some plug-ins (those drawn by the graphics card) show a black window
   when stretched: pick **The plug-in's own zoom** or **Automatic** to get the picture back.
 
-Auto picks the first for a plug-in that takes the scale. A plug-in that cannot take it opens at its
-own size: Auto never stretches. If it is too small, choose **Stretched by Windows** for that
-plug-in (a hint line in the submenu says so; for such a plug-in, picking the display's percentage
-stretches it too). Some plug-ins take the scale and still draw at their own size: if one opens too
+Only **Stretched by Windows** stretches: a plug-in window is stretched only when that mode is the
+one picked for it. Automatic never stretches, at any size. Auto picks the first for a plug-in that
+takes the scale; a plug-in that cannot take it opens at its own size. If it is too small, choose
+**Stretched by Windows** for that plug-in (a hint line in the submenu says so). In Automatic, a
+percentage such a plug-in cannot draw itself is not applied: it keeps its own size, and the first
+line and the hint say that the size needs **Stretched by Windows**. Some plug-ins take the scale and still draw at their own size: if one opens too
 small, choose **Stretched by Windows** or **The plug-in's own zoom** in the same submenu (a hint
 line appears when the plug-in kept its size). A new percentage applies at once where the plug-in
 allows it; a change between drawn and stretched applies the next time you open the editor, and the submenu says so
