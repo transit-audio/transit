@@ -1,0 +1,6 @@
+<!-- transit-index
+status: Open, plug-in dependent (Windows)
+follow-up: In the editor window's menu (≡ > Scale) pick The plug-in's own zoom (no stretch) or Automatic; the editor comes back at its own size on the next open. Auto never stretches, so only an explicit pick can show this.
+-->
+
+Stretched by Windows can show a black editor with plug-ins whose editor is drawn by the graphics card (#153). The stretch makes the editor's window DPI-unaware so that Windows enlarges its 100% drawing; one GPU-drawn VST3 instrument editor (fixed size, no host scale factor) stayed black that way on a 150% display, while its own drawing was fine. This is why Auto never stretches: under Auto an editor that cannot take the host's factor opens at its own size, and the Scale menu's hint line offers Stretched by Windows as a choice to try. If an editor shows black after picking it, **The plug-in's own zoom (no stretch)** or **Automatic** in the same submenu restores it (the change applies the next time the editor opens). The choice is remembered per plug-in on this machine, so the other plug-ins are not affected. transit does not try to tell GPU-drawn editors apart.

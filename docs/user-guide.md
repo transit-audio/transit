@@ -630,13 +630,16 @@ session). Its first line says how the editor is drawn now:
 - **Stretched by Windows**: for a plug-in that cannot take a scale from transit, Windows enlarges
   its 100% drawing to the display's scale (softer than a sharp drawing, but the right size). Only
   100% (its own drawing) and the display's scale are offered then; the other sizes are shown
-  disabled with the reason.
+  disabled with the reason. Some plug-ins (those drawn by the graphics card) show a black window
+  when stretched: pick **The plug-in's own zoom** or **Automatic** to get the picture back.
 
-Auto picks the first for a plug-in that takes the scale and the third for one that cannot. Some
-plug-ins take the scale and still draw at their own size: if one opens too small, choose
-**Stretched by Windows** or **The plug-in's own zoom** in the same submenu (a hint line appears when
-the plug-in kept its size). A new percentage applies at once where the plug-in allows it; a change
-between drawn and stretched applies the next time you open the editor, and the submenu says so
+Auto picks the first for a plug-in that takes the scale. A plug-in that cannot take it opens at its
+own size: Auto never stretches. If it is too small, choose **Stretched by Windows** for that
+plug-in (a hint line in the submenu says so; for such a plug-in, picking the display's percentage
+stretches it too). Some plug-ins take the scale and still draw at their own size: if one opens too
+small, choose **Stretched by Windows** or **The plug-in's own zoom** in the same submenu (a hint
+line appears when the plug-in kept its size). A new percentage applies at once where the plug-in
+allows it; a change between drawn and stretched applies the next time you open the editor, and the submenu says so
 ("Next open: ..."). A plug-in is never scaled twice. On macOS the system scales plug-in windows
 itself, and on Linux only plug-ins that take a scale from transit can be scaled; neither has the
 header strip's menu yet.
