@@ -239,6 +239,53 @@ fn a_clip_context_menu_has_the_chrome_rows_and_bounce_in_place_still_opens_its_f
     assert_eq!(t.app.bounce_place.clips, vec![clip]);
 }
 
+/// An audio track with one clip of `channels` channels at 0 (each channel a constant).
+fn audio_clip(t: &mut T, name: &str, channels: usize) -> (TrackId, transit_model::ClipId) {
+    let format = if channels == 1 { "mono" } else { "stereo" };
+    let r = t.app.run("track.new", json!({"kind": "audio", "format": format, "name": name})).unwrap();
+    let track = TrackId(r["tracks"][0].as_u64().unwrap());
+    let s = t.app.engine.session_mut();
+    let buf = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: (0..channels).map(|c| vec![0.1 * (c + 1) as f32; 48_000]).collect() };
+    let src = transit_engine::io::add_source(s, name, buf, None, transit_audio_io::FileFormat::Wav);
+    let id = s.new_clip_id();
+    s.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::audio(id, name, src, 0, 10_000, 40_000));
+    t.frames(2);
+    (track, id)
+}
+
+/// #771: Split to Mono Tracks is disabled (shown, greyed, a click does nothing) while no selected
+/// clip is a stereo or wider audio clip; with one selected it splits.
+#[test]
+fn split_to_mono_tracks_is_disabled_unless_a_stereo_audio_clip_is_selected() {
+    let mut t = T::new();
+    let keys = t.track("instrument", "Keys");
+    t.app.run("midi.new_clip", json!({"track": keys.0, "start": 10_000, "length": 40_000})).unwrap();
+    let midi = t.app.engine.session().track(keys).unwrap().clips()[0].id;
+    let (_, mono) = audio_clip(&mut t, "Vox", 1);
+    let (_, stereo) = audio_clip(&mut t, "Mics", 2);
+    let status = t.app.status.clone();
+    for (what, clip) in [("a MIDI clip", midi), ("a mono audio clip", mono)] {
+        t.app.engine.session_mut().edit.selected_clips = vec![clip];
+        t.frames(3);
+        let tracks = t.app.engine.session().tracks.len();
+        let at = t.app.arrange.layout.clips.iter().find(|c| c.id == clip.0).unwrap().rect;
+        t.click(at, "secondary");
+        let row = find(&t.app.arrange.menu, "Split to Mono Tracks");
+        assert!(drawn_in(&t, &row, "Split to Mono Tracks").is_some(), "{what}: the row is shown");
+        t.click(row.rect, "primary");
+        assert_eq!(t.app.engine.session().tracks.len(), tracks, "{what}: nothing split");
+        assert_eq!(t.app.status, status, "{what}: the disabled row runs nothing, so no refusal is said");
+        t.input("ui.key", json!({"key": "escape"}));
+    }
+    t.app.engine.session_mut().edit.selected_clips = vec![stereo];
+    t.frames(3);
+    let tracks = t.app.engine.session().tracks.len();
+    let at = t.app.arrange.layout.clips.iter().find(|c| c.id == stereo.0).unwrap().rect;
+    t.click(at, "secondary");
+    t.click(find(&t.app.arrange.menu, "Split to Mono Tracks").rect, "primary");
+    assert_eq!(t.app.engine.session().tracks.len(), tracks + 2, "a stereo clip splits: {}", t.app.status);
+}
+
 const ADD_ROWS: [&str; 4] = ["Add Mono Audio Track", "Add Stereo Audio Track", "Add Instrument Track", "Add MIDI Track"];
 
 /// Where `label` is drawn inside the popup that holds `anchor` (a recorded row), if it is.

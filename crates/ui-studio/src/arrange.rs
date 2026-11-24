@@ -855,14 +855,35 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
         let item = crate::bounce_in_place::clip_menu_item(app, ui);
         app.arrange.menu.retain(|m| m.label != item.label);
         app.arrange.menu.push(item);
-        // Each channel of the selected stereo or wider clips on a new mono track below.
-        if on_clip && ui.add(crate::chrome::MenuRow::new("Split to Mono Tracks")).clicked() {
-            let _ = app.run("clip.split_to_mono", json!({}));
-            ui.close();
+        // Each channel of the selected stereo or wider clips on a new mono track below; disabled
+        // while no selected clip has more than one channel (the engine refuses those).
+        if on_clip {
+            let b = ui
+                .add_enabled(splits_to_mono(s), crate::chrome::MenuRow::new(SPLIT_TO_MONO))
+                .on_disabled_hover_text("Select a stereo audio clip first");
+            app.arrange.menu.retain(|m| m.label != SPLIT_TO_MONO);
+            app.arrange.menu.push(crate::mixer::MenuItem::at(ui, SPLIT_TO_MONO.into(), String::new(), b.rect));
+            if b.clicked() {
+                let _ = app.run("clip.split_to_mono", json!({}));
+                ui.close();
+            }
         }
         ui.separator();
         crate::edit_tools::context_menu_items(app, ui);
     });
+}
+
+const SPLIT_TO_MONO: &str = "Split to Mono Tracks";
+
+/// Whether a selected clip is an audio clip of two or more channels: what Split to Mono Tracks
+/// takes.
+fn splits_to_mono(s: &Session) -> bool {
+    s.edit.selected_clips.iter().any(|id| {
+        s.find_clip(*id).is_some_and(|(_, c)| match c.content {
+            ClipContent::Audio { source, .. } => s.pool.get(source).is_some_and(|a| a.buffer.num_channels() > 1),
+            _ => false,
+        })
+    })
 }
 
 /// The empty lane's "Add ... Track" rows.
