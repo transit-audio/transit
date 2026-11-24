@@ -756,6 +756,35 @@ fn a_drop_shows_an_outline_and_progress_then_commits_at_the_drop_in_one_undo_ste
     assert!(t.app.imports.layout.items.is_empty() && t.app.engine.imports.is_empty());
 }
 
+/// #771: a file dropped just before a dialog opens is prepared behind it but not placed until the
+/// dialog closes; then it lands where it was dropped, nothing lost.
+#[test]
+fn a_ready_import_waits_while_a_dialog_is_up_and_lands_once_it_closes() {
+    let mut t = T::new();
+    t.add_and_expand();
+    t.app.imports.pace = Some(1_000_000);
+    let audio = t.track(TrackKind::Audio);
+    let u0 = t.undo_len();
+    drop_on_lane(&mut t, "loop 90.wav", audio);
+    assert!(t.app.imports.active(), "{}", t.app.status);
+    t.app.about.open = true;
+    t.frames(3);
+    t.app.imports.pace = None;
+    let t0 = std::time::Instant::now();
+    while t.app.imports.items.first().is_some_and(|i| i.state != "done") && t0.elapsed().as_secs() < 10 {
+        t.frames(6);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+    t.frames(30);
+    assert_eq!(t.app.imports.items.first().map(|i| i.state.as_str()), Some("done"), "prepared behind the dialog: {}", t.app.status);
+    assert!(t.clips(audio).is_empty(), "nothing is placed while About is up");
+    assert_eq!(t.undo_len(), u0);
+    t.app.about.open = false;
+    t.settle_imports();
+    assert_eq!(t.clips(audio), vec![(t.bar(2), Samples::from(t.rate * 2), "loop 90".to_string())], "{}", t.app.status);
+    assert_eq!(t.undo_len(), u0 + 1);
+}
+
 #[test]
 fn escape_cancels_the_imports_in_flight_and_changes_nothing() {
     let mut t = T::new();

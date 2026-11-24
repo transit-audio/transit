@@ -368,6 +368,9 @@ impl StudioApp {
         self.step_host_devices();
         self.save_good_audio();
         finish::step_bounce(self, ctx);
+        // A plug-in host thread found stuck by the host steps above holds the app from this frame:
+        // the import queue's commit asks (#771).
+        self.sync_modal(ctx);
         import::step(self, ctx);
         crate::drops::step(self, ctx);
         // Stop the old playback before sending a replacement session to the audio thread.

@@ -270,8 +270,12 @@ pub fn step(app: &mut StudioApp, ctx: &egui::Context) {
         app.imports.last_poll = Some(now);
         app.imports.layout.polls += 1;
         poll(app);
+        // A dialog holds the app (#771): nothing is placed into the session behind it. The files go
+        // on being prepared and polled (so none expires), and the queue goes on in order once no
+        // dialog is up.
+        let held = crate::modal::up(ctx);
         // Commit in order: only the oldest item may go, then the next.
-        while let Some(front) = app.imports.items.first() {
+        while !held && let Some(front) = app.imports.items.first() {
             let paced = app.imports.pace.is_none_or(|n| front.frames_seen >= n);
             match front.state.as_str() {
                 "done" if paced => app.commit_front(),

@@ -230,3 +230,32 @@ fn the_message_owns_the_keys_from_the_frame_it_comes_back() {
     assert!(t.app.about.open, "About stays open under the message");
     assert!(matches!(t.app.dialog, Some(crate::Dialog::SaveChanges { .. })), "the save question is neither cancelled nor answered");
 }
+
+/// #771: the message holds the import queue as any dialog does. A file queued while it is up is
+/// prepared but not placed until Later lets the app go; then it lands, nothing lost.
+#[test]
+fn an_import_waits_while_the_message_is_up_and_lands_after_later() {
+    let mut t = T::stuck();
+    let dir = transit_test_support::TestDir::new("host-hang-import");
+    std::fs::create_dir_all(&dir).unwrap();
+    // A mono 16-bit WAV of 4800 frames at 48 kHz.
+    let mut wav = Vec::new();
+    for v in [0x4646_4952u32, 36 + 4_800 * 2, 0x4556_4157, 0x2074_6d66, 16, 0x0001_0001, 48_000, 48_000 * 2, 0x0010_0002, 0x6174_6164, 4_800 * 2] {
+        wav.extend(v.to_le_bytes());
+    }
+    wav.extend(std::iter::repeat_n([0x00u8, 0x20], 4_800).flatten());
+    let path = dir.join("Held.wav");
+    std::fs::write(&path, wav).unwrap();
+    let track = transit_model::TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
+    t.app.queue_imports(std::slice::from_ref(&path), Some(track), 0, 0).unwrap();
+    let ready = t.frames_until(Duration::from_secs(5), |t| t.app.imports.items.first().is_some_and(|i| i.state == "done"));
+    t.frames(30);
+    assert!(ready, "the file is prepared behind the message: {}", t.app.status);
+    let clips = |t: &T| t.app.engine.session().track(track).unwrap().clips().len();
+    assert_eq!(clips(&t), 0, "nothing is placed while the message is up");
+    assert!(t.app.imports.active(), "the import still waits");
+    let later = t.app.host_hang.layout.later.expect("Later");
+    t.click(later);
+    let landed = t.frames_until(Duration::from_secs(5), |t| !t.app.imports.active());
+    assert!(landed && clips(&t) == 1, "the import lands once the message is gone: {}", t.app.status);
+}
