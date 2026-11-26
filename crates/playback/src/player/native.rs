@@ -234,6 +234,8 @@ struct Input {
     lost: bool,
     /// Set by the ingress worker when the port's storm detector trips (#99).
     storm: Arc<AtomicBool>,
+    /// The open was in flight at an audio device handover and is kept (#760).
+    carried: bool,
 }
 
 /// A port the storm detector muted (#99). Kept by key, so closing and reopening the port (an
@@ -542,8 +544,15 @@ impl Native {
                 Ok(Reply::Ports(ports)) => self.status.inputs = ports,
                 Ok(Reply::Opened { id, consumer, boundary }) => {
                     if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) {
-                        match self.worker.attach_input(consumer, Arc::clone(&input.storm)) {
+                        // An open a handover carried in flight completed while no runtime was open:
+                        // nothing it received before now acts (#760). The routes this service
+                        // makes take a cutoff drawn later still.
+                        let floor = if input.carried { boundary.cutoff() } else { 0 };
+                        match self.worker.attach_input(consumer, Arc::clone(&input.storm), floor) {
                             Ok(id) => {
+                                if std::mem::take(&mut input.carried) {
+                                    self.buttons.cutoffs.insert(id, floor);
+                                }
                                 input.attached = Some((id, boundary));
                                 input.dirty = true;
                             }
@@ -693,6 +702,7 @@ impl Native {
                         closed: false,
                         lost: false,
                         storm: Arc::default(),
+                        carried: false,
                     }),
                     Err(error) => {
                         self.status.error = Some(error.into());

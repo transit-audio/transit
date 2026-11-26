@@ -89,3 +89,68 @@ fn a_replacement_without_midi_closes_the_carried_inputs() {
     drop(midi);
     owner.retire(ports);
 }
+
+/// Starts `old`'s open of `key` and holds it in flight (the device thread takes no request), hands
+/// the MIDI side over, then lets the device thread complete the open while no runtime is open.
+fn hand_over_in_flight(mut old: Fixture, fake: &Fake, key: &PortKey) -> Native {
+    let stall = Arc::clone(&old.native.io.as_ref().unwrap().stall);
+    stall.store(true, Ordering::Release);
+    until(|| {
+        old.tick();
+        !old.native.inputs.is_empty()
+    });
+    assert!(old.native.inputs[0].attached.is_none(), "the open is in flight");
+    let carried = old.hand_over();
+    stall.store(false, Ordering::Release);
+    until(|| fake.input_opens(key) == 1);
+    carried
+}
+
+/// An open still in flight at the handover is completed by the carried device thread: the port is
+/// opened once, not closed and opened again, and a note it received before the replacement took it
+/// over is cancelled (counted), not played.
+#[test]
+fn an_open_in_flight_at_the_handover_is_opened_once_and_its_gap_note_does_not_play() {
+    let fake = Fake::default();
+    let key = fake.add_input("Keys");
+    let mut session = Session::default();
+    let t = track(&mut session, MidiInput::default());
+    let old = Fixture::new(session.clone(), fake.io());
+    let carried = hand_over_in_flight(old, &fake, &key);
+    let port = fake.input_port(&key).unwrap();
+    assert!(port.deliver(10_000, &[0x90, 60, 100]), "the open in flight stays open across the handover");
+    let reopened = EngineEpoch(EPOCH.0 + 1);
+    let mut new = Fixture::on(session, fake.io(), ingress::IDLE, reopened, |fresh| Native::adopt(fresh, carried));
+    new.ready(1, 1);
+    assert!(port.deliver(20_000, &[0x90, 62, 100]));
+    let packets = new.packets(1);
+    assert_eq!((packets[0].engine, packets[0].target.0, packets[0].raw.bytes[1]), (reopened, t, 62), "{packets:?}");
+    assert_eq!(fake.input_opens(&key), 1, "the handover closed and reopened the input");
+    assert_eq!(new.native.status().counts.cancelled, 1, "the note from the gap is cancelled and counted");
+    new.finish();
+}
+
+/// The same open with MIDI Learn armed: a message it received in the gap is not the candidate; the
+/// first message after the replacement took it over is.
+#[test]
+fn an_open_in_flight_at_the_handover_gives_learn_nothing_from_the_gap() {
+    let fake = Fake::default();
+    let key = fake.add_input("Keys");
+    let session = Session::default();
+    let mut old = Fixture::new(session.clone(), fake.io());
+    old.native.set_learn(true);
+    let carried = hand_over_in_flight(old, &fake, &key);
+    let port = fake.input_port(&key).unwrap();
+    assert!(port.deliver(0, &[0xB0, 74, 1]), "a CC in the gap");
+    let mut new = Fixture::on(session, fake.io(), ingress::IDLE, EngineEpoch(EPOCH.0 + 1), |fresh| Native::adopt(fresh, carried));
+    new.ready(1, 0);
+    let mut got = Vec::new();
+    until(|| {
+        assert!(port.deliver(0, &[0xB0, 75, 1]));
+        new.tick();
+        got.extend(new.native.take_map_events());
+        !got.is_empty()
+    });
+    assert!(matches!(got[0], crate::player::MapMsg::Candidate { number: 75, .. }), "{got:?}");
+    new.finish();
+}

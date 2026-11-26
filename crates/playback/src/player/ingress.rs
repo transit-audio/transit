@@ -455,20 +455,25 @@ impl Worker {
 
     /// One consumer per physical open; routing edits never reopen the device. The worker sets
     /// `muted` when the port's feedback storm detector trips (#99); while it is set the port
-    /// admits no route, and Main clears it when the user re-enables the port.
-    pub(super) fn attach_input(&mut self, consumer: InputConsumer, muted: Arc<AtomicBool>) -> Result<u64, &'static str> {
+    /// admits no route, and Main clears it when the user re-enables the port. What the port
+    /// offered before `floor` is skipped for MIDI Learn, mapped controls and transport capture (an
+    /// open that completed while no runtime was open, #760); 0 skips nothing.
+    pub(super) fn attach_input(&mut self, consumer: InputConsumer, muted: Arc<AtomicBool>, floor: u64) -> Result<u64, &'static str> {
         if self.shared.finished.load(Ordering::Acquire) {
             return Err("MIDI worker unavailable");
         }
         let id = self.next_input.checked_add(1).ok_or("MIDI input identities exhausted")?;
         self.next_input = id;
         consumer.wake_on(self.thread.thread().clone());
+        let mut mon = Mon::default();
+        mon.map_next = floor;
+        mon.capture.next = floor;
         self.attach
             .try_send(Update::Input(Box::new(Input {
                 id,
                 consumer,
                 routes: Vec::new(),
-                mon: Mon::default(),
+                mon,
                 guard: storm::Guard::new(muted),
                 live: false,
                 buttons: Vec::new(),

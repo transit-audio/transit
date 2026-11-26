@@ -136,8 +136,9 @@ fn a_transport_press_before_the_worker_resumed_is_not_acted_on_and_learn_takes_i
     new.finish();
 }
 
-/// Finding C: an open still in flight at the handover, whose close the full device queue refuses,
-/// is closed once the queue takes it, so the replacement opens the port.
+/// Finding C: an open still in flight at the handover, with the device thread's queue full. Since
+/// an open in flight is carried (not closed), the carried device thread completes it once the
+/// queue drains and the replacement routes the port.
 #[test]
 fn a_close_the_full_device_queue_refuses_is_kept_until_taken() {
     let fake = Fake::default();

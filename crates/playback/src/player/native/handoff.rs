@@ -3,8 +3,9 @@
 //! worker with their consumers, and the per-port state (storm mutes, transport button settings, the
 //! MIDI Learn list) stay; what belongs to the old runtime goes (its routes and sources, and the
 //! output thread, whose drop releases what the echo held on external destinations, as a reopen did
-//! before). Inputs that are not open (a failed open, an open still in flight) are let go, so the
-//! replacement tries them again, as a reopen always did; a close the device thread's full queue
+//! before). An open still in flight stays too: the carried device thread completes it, and what
+//! that input received before it arrives has no effect. A failed open is let go, so the
+//! replacement tries it again, as a reopen always did; a close the device thread's full queue
 //! refuses is kept and sent again before any port is opened.
 //!
 //! From the handover on, the worker matches, learns and captures nothing. The replacement
@@ -16,8 +17,8 @@
 //! transport buttons take it, the worker skips what precedes it for MIDI Learn, mapped controls and
 //! capture, and what the worker published before the boundary is dropped. While suspended with
 //! Learn not armed the worker still forwards transport button copies (nothing would capture them
-//! after the resume), and control admits only those that follow the boundary. The mappings are renewed
-//! as a replacement's (a new generation), so the interface treats the Player as new: its held
+//! after the resume), and control admits only those that follow the boundary. The mappings are
+//! renewed as a replacement's (a new generation), so the interface treats the Player as new: its held
 //! button latches are cleared and an armed Learn is armed again. Host time has one process-wide
 //! origin (`HostOrigin::default`), so arrival stamps need no bridge across the reopen.
 use super::*;
@@ -97,8 +98,8 @@ impl Native {
     /// Detaches this Native from the runtime of the Player being replaced. Every open input stays
     /// open and attached to the worker; its routes are revoked here (the worker routes nothing until
     /// the replacement's routes arrive), the worker stops matching, learning and capturing, the old
-    /// runtime's sources are forgotten, inputs that are not open are let go, and the output thread
-    /// closes now, with the old device.
+    /// runtime's sources are forgotten, inputs that failed or are closing are let go (an open in
+    /// flight is kept), and the output thread closes now, with the old device.
     pub(in crate::player) fn hand_off(&mut self) {
         self.handovers += 1;
         self.worker.suspend(self.handovers);
@@ -111,6 +112,12 @@ impl Native {
             input.routes_applied = None;
             input.dirty = true;
             if input.attached.is_some() {
+                return true;
+            }
+            // An open still in flight is kept too: the carried device thread completes it, and
+            // what it received before it arrives has no effect (`Input::carried`).
+            if !input.closed && !input.failed && !input.lost {
+                input.carried = true;
                 return true;
             }
             if !input.closed && io.is_some_and(|io| io.request(Request::Close(input.id)).is_err()) {
