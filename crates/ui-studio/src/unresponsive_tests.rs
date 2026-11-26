@@ -1,7 +1,10 @@
 //! Issue #213: the unresponsive-plug-in marker in the mixer insert row, the device card and the
 //! arrange track header, with one text and a hover that names the cause. A real device-free Player
-//! whose hosted plug-in is made on a real plug-in host thread; the stuck call is a job that blocks
-//! on a channel the test releases (E49). The worker cause is faked through the helper's test seam.
+//! with a hosted plug-in. The worker cause is faked through the helper's test seam, on an inline
+//! plug-in host: the plug-in is made inside the frame that asks for it, so it is live after a fixed
+//! number of frames (a host thread would make it in its own time, and a slot still loading shows
+//! "Loading…", never the marker). The stuck host-thread call needs a real host thread: a job that
+//! blocks on a channel the test releases (E49).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use crate::devices::UNRESPONSIVE;
@@ -61,11 +64,21 @@ impl Drop for T {
 }
 
 impl T {
+    /// An inline plug-in host on a fixed clock: no thread decides when the plug-in is made.
     fn new() -> T {
+        let now = Instant::now();
+        T::with_host(Host::new(Config { inline: true, ..Config::default() }), Arc::new(move || now))
+    }
+
+    /// A real plug-in host thread with a short watchdog budget, for the stuck call.
+    fn threaded() -> T {
+        let timeout = Duration::from_millis(200);
+        T::with_host(Host::new(Config { timeout, creation_timeout: timeout, inline: false, ..Config::default() }), Arc::new(Instant::now))
+    }
+
+    fn with_host(host: Host, clock: transit_playback::Clock) -> T {
         let engine = transit_engine::Engine::default();
         let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
-        let timeout = Duration::from_millis(200);
-        let host = Host::new(Config { timeout, creation_timeout: timeout, inline: false, ..Config::default() });
         player.set_plugin_test_hooks(PluginTestHooks {
             host: host.clone(),
             factory: Arc::new(|spec: &transit_mix::InstanceSpec| {
@@ -73,7 +86,7 @@ impl T {
                     .map(|n| transit_mix::NewInstance { plugin: Box::new(Stateful(n.plugin)), ..n })
             }),
             deferred: Arc::new(|id: &str| id == HOSTED),
-            clock: Arc::new(Instant::now),
+            clock,
             slow_after: Duration::from_secs(10),
         });
         let mut app = StudioApp::new(engine, Some(player), Services::default());
@@ -142,6 +155,12 @@ impl T {
         self.app.arrange.layout.tracks.iter().find(|r| r.id == t.0).cloned().expect("a track row")
     }
 
+    /// Whether the hosted plug-in in insert 0 of `t` is made and in the plan (nothing loading).
+    fn live(&self, t: TrackId) -> bool {
+        let player = self.app.player.as_ref().unwrap();
+        player.slot_load(t, 0).is_none() && player.live_name(t, 0).is_some()
+    }
+
     fn marked(&self, t: TrackId) -> [bool; 3] {
         [self.row(t).status == UNRESPONSIVE, self.card().status == UNRESPONSIVE, self.header(t).unresponsive == UNRESPONSIVE]
     }
@@ -168,6 +187,7 @@ fn a_hung_worker_marks_the_row_the_card_and_the_track_header() {
     t.app.focus(track);
     FAKE.with(|f| f.set(Some((track, Hang::Worker))));
     t.frames(5);
+    assert!(t.live(track) && t.live(other), "both plug-ins are made before the marker is read");
     assert_eq!(t.marked(track), [true; 3], "the same text in all three places");
     assert_ne!(t.header(track).unresponsive_rect, [0.0; 4]);
     // #326: the card cannot take input, so the hatch fills its body and the reason sits on a
@@ -211,7 +231,7 @@ fn the_hover_text_names_the_cause_and_what_to_do() {
 /// plug-in's row, card and header; once the call returns the marker goes.
 #[test]
 fn a_stuck_host_thread_marks_its_loaded_plug_in_and_clears_when_it_returns() {
-    let mut t = T::new();
+    let mut t = T::threaded();
     let track = t.fx_track();
     assert!(t.frames_until(Duration::from_secs(10), |t| t.app.player.as_ref().unwrap().live_name(track, 0).is_some()), "the hosted plug-in is live");
     assert_eq!(t.marked(track), [false; 3]);
@@ -245,6 +265,7 @@ fn an_unresponsive_insert_slot_shows_the_alert_glyph_and_opens_its_card() {
     t.app.focus(other);
     FAKE.with(|f| f.set(Some((track, Hang::Worker))));
     t.frames(5);
+    assert!(t.live(track) && t.live(other), "both plug-ins are made before the glyph is read");
     assert!(!t.strip(track).short, "full-height strips");
     let row = t.row(track);
     assert!(row.alert, "the alert glyph");
