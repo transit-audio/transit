@@ -120,8 +120,8 @@ impl ab::Stream for JackStream {
     /// before.
     ///
     /// A client that latched a rebuild ([`ab::Stream::needs_rebuild`]) restores nothing: it is
-    /// silent and about to be replaced. It keeps the snapshot, and the reopen that replaces it
-    /// takes it back ([`ab::Stream::snapshot_links`]) for the rebuilt client to restore.
+    /// silent and about to be replaced. It keeps the snapshot, and each reopen that tries to
+    /// replace it reads a copy ([`ab::Stream::snapshot_links`]) for the rebuilt client to restore.
     fn restore_links(&self, snapshot: ab::LinkSnapshot) -> Option<String> {
         let snapshot = snapshot.downcast::<links::Snapshot>().ok()?;
         let (mut done, period) = {

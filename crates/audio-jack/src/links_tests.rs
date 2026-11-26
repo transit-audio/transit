@@ -611,3 +611,28 @@ fn a_client_that_latched_a_rebuild_restores_no_links_and_the_rebuilt_client_does
     assert_eq!(note, None);
     assert!(server.linked("Player:out_L", "transit:in_1"), "the rebuilt client restored the outside link");
 }
+
+/// #760: a reopen of the latched client that is refused after it read the snapshot (the app's
+/// `replace` returns early when the old Player refuses to close its editors or input) drops its
+/// copy; the latched client still holds the snapshot, so the next reopen restores the links.
+#[test]
+fn a_refused_reopen_of_a_latched_client_leaves_its_held_links_for_the_next_reopen() {
+    let server = FakeServer::pipewire(48_000, 256, (48_000, 256));
+    server.add_port("Player:out_L", true);
+    let backend = manual(&server);
+    let old = open(&backend, Choice::default()).unwrap();
+    server.outside_link("Player:out_L", "transit:in_1");
+    server.set_sample_rate(44_100);
+    let (latched, _) = reopen(&backend, old, Choice::default());
+    let latched = latched.unwrap();
+    assert!(latched.render.needs_rebuild());
+    // The refused reopen: read, then dropped with the call; the latched client stays open.
+    let refused = latched.render.snapshot_links();
+    assert!(refused.is_some(), "the latched client hands out what it holds");
+    drop(refused);
+    let (rebuilt, note) = reopen(&backend, latched, Choice::default());
+    let rebuilt = rebuilt.unwrap();
+    assert!(!rebuilt.render.needs_rebuild());
+    assert_eq!(note, None);
+    assert!(server.linked("Player:out_L", "transit:in_1"), "the outside link survived the refused reopen");
+}

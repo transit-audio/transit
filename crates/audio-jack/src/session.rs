@@ -1138,10 +1138,11 @@ impl Session {
     ///
     /// A client that latched a rebuild holds the snapshot a restore handed it instead of its own
     /// links (its links, if its start made any before the rate moved, are not saved): the rebuilt
-    /// client restores that one.
+    /// client restores that one. The client keeps it and hands out a copy, so a reopen refused
+    /// after this read (which drops its copy) leaves it for the next reopen (#760).
     fn snapshot(&mut self) -> Option<links::Snapshot> {
         if self.rebuild {
-            return self.held.take();
+            return self.held.as_ref().map(links::Snapshot::copy);
         }
         if !self.active || self.shared.shutdown() {
             return None;

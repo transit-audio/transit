@@ -136,7 +136,13 @@ impl Snapshot {
     pub(crate) fn early(&mut self) -> (Snapshot, std::sync::Weak<()>) {
         let alive = self.alive.get_or_insert_with(|| Arc::new(()));
         let weak = Arc::downgrade(alive);
-        let copy = Snapshot {
+        (self.copy(), weak)
+    }
+
+    /// The same links without this snapshot's liveness token: whoever holds the copy decides,
+    /// through a token of its own, whether an early copy of it is still wanted.
+    pub(crate) fn copy(&self) -> Snapshot {
+        Snapshot {
             from: self.from,
             links: self.links.clone(),
             unsaved: self.unsaved.clone(),
@@ -144,8 +150,7 @@ impl Snapshot {
             outputs: self.outputs.clone(),
             origin: Arc::clone(&self.origin),
             alive: None,
-        };
-        (copy, weak)
+        }
     }
 
     fn meaning(&self, input: bool) -> Option<&Meaning> {
