@@ -14,7 +14,9 @@
 //! through. Then the boundary is drawn, once, for everything that arrived while no runtime was open:
 //! each input's cutoff is taken, the routes of that service cancel what precedes it (notes), the
 //! transport buttons take it, the worker skips what precedes it for MIDI Learn, mapped controls and
-//! capture, and what the worker published before the boundary is dropped. The mappings are renewed
+//! capture, and what the worker published before the boundary is dropped. While suspended with
+//! Learn not armed the worker still forwards transport button copies (nothing would capture them
+//! after the resume), and control admits only those that follow the boundary. The mappings are renewed
 //! as a replacement's (a new generation), so the interface treats the Player as new: its held
 //! button latches are cleared and an armed Learn is armed again. Host time has one process-wide
 //! origin (`HostOrigin::default`), so arrival stamps need no bridge across the reopen.

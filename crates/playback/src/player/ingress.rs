@@ -908,7 +908,15 @@ impl Pump {
                     host_arrival_ns: raw.host_arrival_ns,
                     backend_time_us: 0,
                 };
+                // Suspended (#760) with Learn not armed, nothing will capture this message once the
+                // worker resumes (the resume clears what Learn held), so its transport copy is
+                // forwarded now, as it would be then, and marked seen: control admits it only
+                // when it follows the boundary.
+                let forward = suspended && !learning && raw.seq >= mon.capture.next;
                 let captured = if suspended {
+                    if forward {
+                        mon.capture.next = raw.seq.saturating_add(1);
+                    }
                     None
                 } else if raw.seq >= mon.capture.next {
                     mon.capture.next = raw.seq.saturating_add(1);
@@ -922,10 +930,10 @@ impl Pump {
                 } else {
                     mon.capture.disposition(raw.seq)
                 };
-                // Suspended (#760), a transport copy is not forwarded: what precedes the boundary
-                // has no effect, and what follows it is captured (Learn) or not once the worker
-                // resumes, from the musical copy it keeps.
-                if independent && !suspended && raw.bytes[0] != 0xf8 && *buttons_enabled && captured.is_none() {
+                // Suspended (#760) with Learn armed, a transport copy is not forwarded: what
+                // follows the boundary is captured (Learn) or not once the worker resumes, from the
+                // musical copy it keeps; what precedes it has no effect either way.
+                if independent && (!suspended || forward) && raw.bytes[0] != 0xf8 && *buttons_enabled && captured.is_none() {
                     self.transport_out.push(*id, raw);
                     worked = true;
                 }

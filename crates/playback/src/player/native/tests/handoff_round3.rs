@@ -169,3 +169,62 @@ fn a_close_the_full_device_queue_refuses_is_kept_until_taken() {
     new.packets(1);
     new.finish();
 }
+
+/// #760: the same window with Learn not armed. A mapped transport press after the cutoff, while the
+/// worker has not resumed yet, is acted on once (nothing would capture it after the resume).
+#[test]
+fn a_transport_press_before_the_worker_resumed_is_acted_on_when_learn_is_not_armed() {
+    let fake = Fake::default();
+    let key = fake.add_input("Controller");
+    let session = Session::default();
+    let source = MidiSource { port: "Controller".into(), channel: Some(0), kind: SourceKind::Cc, number: 20 };
+    let profiles: transit_model::TransportProfiles =
+        [("Controller".to_string(), TransportPrefs { mappings: vec![Mapping::new(source, TransportControl::Play.target())], ..Default::default() })]
+            .into();
+    let buttons = |f: &mut Fixture| {
+        f.native.configure_buttons(profiles.clone(), Vec::new());
+        f.native.sync_buttons();
+    };
+    let mut old = Fixture::new(session.clone(), fake.io());
+    until(|| {
+        buttons(&mut old);
+        old.tick();
+        old.native.status().open_inputs == 1
+    });
+    let port = fake.input_port(&key).unwrap();
+    let mut got = Vec::new();
+    until(|| {
+        assert!(port.deliver(0, &[0xB0, 20, 127]));
+        buttons(&mut old);
+        old.tick();
+        got.extend(old.native.take_buttons().1);
+        !got.is_empty()
+    });
+    assert!(port.deliver(0, &[0xB0, 20, 0]));
+    let carried = old.hand_over();
+    let mut new = replacement(session, &fake, carried);
+    let token = new.native.handovers;
+    until(|| new.native.worker.suspend_seen() >= token);
+    new.native.worker.stall(true);
+    for _ in 0..sources::PORTS - 3 {
+        assert!(new.native.worker.set_buttons(new.native.buttons.sent.clone()).is_ok());
+    }
+    new.native.set_monitor(true, false);
+    buttons(&mut new);
+    new.tick();
+    assert!(new.native.unbound.is_some(), "the resume waits behind the full queue");
+    new.native.worker.stall(false);
+    let seen = new.native.monitor_activity().0.count;
+    assert!(port.deliver(0, &[0xB0, 20, 127]), "a mapped Play press after the cutoff");
+    until(|| new.native.monitor_activity().0.count > seen);
+    let mut pressed = Vec::new();
+    until(|| {
+        buttons(&mut new);
+        new.tick();
+        pressed.extend(new.native.take_buttons().1);
+        new.native.unbound.is_none() && !pressed.is_empty()
+    });
+    pressed.extend(new.native.take_buttons().1);
+    assert_eq!(pressed.iter().map(|e| (e.raw.bytes[1], e.raw.bytes[2])).collect::<Vec<_>>(), [(20, 127)], "acted on once: {pressed:?}");
+    new.finish();
+}
