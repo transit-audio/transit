@@ -157,7 +157,7 @@ fn main() {
 /// The block's preamble is the pre-#604 one too (the clip's map, the intersection, the pool lookup,
 /// the disk check), so both sides pay the same per-block work.
 fn old_render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize, buf: &mut [Vec<f32>]) {
-    let ClipContent::Audio { source, offset } = clip.content else { return };
+    let ClipContent::Audio { source, offset, .. } = clip.content else { return };
     let Some(map) = transit_model::disk::StreamMap::of(clip) else { return };
     let block = Range { start: pos, end: pos.saturating_add(frames as i64) };
     let Some(isect) = clip.range().intersect(&block) else { return };

@@ -51,7 +51,7 @@ fn source(data: &[Vec<f32>], window: usize, cache: usize) -> Arc<DiskSource> {
 }
 
 fn stretched(clip: u64, offset: i64, stretch: f64, length: i64, looping: Option<ClipLoop>) -> StreamMap {
-    StreamMap { clip, offset, looping, stretch, length }
+    StreamMap { clip, offset, anchor: 0, looping, stretch, length }
 }
 
 #[test]
@@ -249,7 +249,7 @@ fn a_request_under_another_stretch_or_loop_is_not_taken_for_it() {
     let data = noise(8_000);
     let d = source(&data, 1_024, 4_096);
     let a = stretched(1, 0, 1.5, 3_000, None);
-    let others = [StreamMap { stretch: 2.0, ..a }, StreamMap { looping: Some(ClipLoop { start: 0, end: 700 }), ..a }];
+    let others = [StreamMap { stretch: 2.0, ..a }, StreamMap { looping: Some(ClipLoop { start: 0, end: 700 }), ..a }, StreamMap { anchor: 40, ..a }];
     for b in others {
         d.cue(&a, 0);
         d.cue(&b, 0);

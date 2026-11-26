@@ -21,8 +21,13 @@ const PRESET_FORMAT: &str = "transit-track-preset";
 pub const PRESET_EXTENSION: &str = "tpreset";
 /// The fork's tag (ADR 0049): read through v0.7.x; from the v0.8.0 tag it moves to `refused_pre_0_7`.
 const LEGACY_PRESET_FORMAT: &str = "soundcraft-track-preset";
-const PRESET_TAGS: crate::file_tags::Tags =
-    crate::file_tags::Tags { current: PRESET_FORMAT, accepted_legacy: &[LEGACY_PRESET_FORMAT], refused_pre_0_7: &[], what: "track preset" };
+const PRESET_TAGS: crate::file_tags::Tags = crate::file_tags::Tags {
+    version: crate::file_tags::VERSION,
+    current: PRESET_FORMAT,
+    accepted_legacy: &[LEGACY_PRESET_FORMAT],
+    refused_pre_0_7: &[],
+    what: "track preset",
+};
 
 /// The notice for reading a track preset saved before transit 0.7.0 (ADR 0049).
 #[must_use]

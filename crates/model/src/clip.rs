@@ -1,5 +1,6 @@
 //! Clips: windows onto audio sources or MIDI sequences, placed on a playlist.
 
+use crate::clip_map::MAX_ANCHOR;
 use crate::{ClipId, MAX_NAME_CHARS, SourceId, truncate_chars};
 use transit_midi::Sequence;
 use transit_time::{MAX_POSITION, Range, Samples};
@@ -83,8 +84,16 @@ impl Fade {
 /// What a clip plays.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum ClipContent {
-    /// Audio from `source`, starting `offset` samples into the file.
-    Audio { source: SourceId, offset: Samples },
+    /// Audio from `source`: source frame `offset` is read at clip time `anchor`, and the clip time
+    /// around it at the clip's rate (ADR 0056 decision 5, [`Clip::source_pos`]). The anchor is 0 for
+    /// every clip at rate 1 (the normal form) and is not written while 0, so a session without
+    /// re-anchored clips saves as before.
+    Audio {
+        source: SourceId,
+        offset: Samples,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        anchor: Samples,
+    },
     /// MIDI notes, with ticks relative to the clip start.
     Midi { sequence: Sequence },
 }
@@ -216,6 +225,10 @@ fn one() -> f64 {
     1.0
 }
 
+fn is_zero(v: &Samples) -> bool {
+    *v == 0
+}
+
 impl Clip {
     pub fn audio(id: ClipId, name: impl Into<String>, source: SourceId, offset: Samples, start: Samples, length: Samples) -> Clip {
         Clip {
@@ -223,7 +236,7 @@ impl Clip {
             name: name.into(),
             start,
             length: length.max(1),
-            content: ClipContent::Audio { source, offset },
+            content: ClipContent::Audio { source, offset, anchor: 0 },
             scale_mode: Default::default(),
             gain_db: 0.0,
             gain_env: Vec::new(),
@@ -324,14 +337,20 @@ impl Clip {
     }
 
     /// Move the start edge to `new_start` keeping material anchored (trim start).
+    ///
+    /// An audio clip's new clip time 0 is its old content time `phase`, so its anchor moves `phase`
+    /// earlier and its offset stays (ADR 0056 decision 5.4): the same source positions at any rate.
+    /// At rate 1 the normal form then folds the anchor back into the offset, as before (#554).
     pub fn trim_start_to(&mut self, new_start: Samples) {
         let new_start = new_start.min(self.end() - 1);
         let delta = new_start - self.start;
         // Trimming into a later cycle starts the clip at that cycle's phase, not further into the file.
         let phase = if delta > 0 { self.content_pos(delta) } else { delta };
-        if let ClipContent::Audio { offset, .. } = &mut self.content {
-            *offset = offset.saturating_add(phase);
+        if let ClipContent::Audio { anchor, .. } = &mut self.content {
+            // Outside i64 is outside the anchor's bound too: the command's domain check refuses it.
+            *anchor = anchor.checked_sub(phase).unwrap_or(if phase > 0 { Samples::MIN } else { Samples::MAX });
         }
+        self.normalize();
         // MIDI note ticks are re-anchored by the engine, which knows the tempo map.
         self.length -= delta;
         self.start = new_start;
@@ -406,7 +425,10 @@ impl Clip {
         bound(&mut self.sync_point);
         self.gain_env.iter_mut().for_each(|(at, _)| bound(at));
         match &mut self.content {
-            ClipContent::Audio { offset, .. } => bound(offset),
+            // An anchor past +-2^46 only comes from a hand edit (ADR 0056 decision 5.5): it is reset
+            // and [`Clip::sanitize_noting`] says so.
+            ClipContent::Audio { anchor, .. } if !(-MAX_ANCHOR..=MAX_ANCHOR).contains(anchor) => *anchor = 0,
+            ClipContent::Audio { .. } => {}
             ClipContent::Midi { sequence } => bound_sequence(sequence),
         }
         self.clamp_fades();
@@ -425,33 +447,47 @@ impl Clip {
             self.stretch = 1.0;
         }
         self.stretch = snap_stretch(self.stretch.clamp(MIN_STRETCH, MAX_STRETCH));
+        // The normal form at rate 1 (ADR 0056 decision 5.3), then the offset's bound.
+        self.normalize();
+        if let ClipContent::Audio { offset, .. } = &mut self.content {
+            bound(offset);
+        }
     }
 
-    /// [`Clip::sanitize`], and the load note to show when it had to clamp the clip's stretch into
-    /// [`MIN_STRETCH`]..[`MAX_STRETCH`] (ADR 0056 decision 5.2; a clip outside them could not play).
-    pub fn sanitize_noting(&mut self) -> Option<String> {
+    /// [`Clip::sanitize`], and the load notes to show when it had to clamp the clip's stretch into
+    /// [`MIN_STRETCH`]..[`MAX_STRETCH`] (ADR 0056 decision 5.2; a clip outside them could not play)
+    /// or reset an anchor outside +-2^46 (decision 5.5).
+    pub fn sanitize_noting(&mut self) -> Vec<String> {
         let before = self.stretch;
+        let anchor = self.anchor();
         self.sanitize();
-        let outside = before.is_finite() && before > 0.0 && !(MIN_STRETCH..=MAX_STRETCH).contains(&before);
-        outside.then(|| {
-            format!(
+        let mut notes = Vec::new();
+        if before.is_finite() && before > 0.0 && !(MIN_STRETCH..=MAX_STRETCH).contains(&before) {
+            notes.push(format!(
                 "clip \"{}\": its stretch {before} was outside what a clip can play (1/32 to 32, a speed of 1/32 to 32 times), so it was set to {}",
                 self.name, self.stretch
-            )
-        })
+            ));
+        }
+        if !(-MAX_ANCHOR..=MAX_ANCHOR).contains(&anchor) {
+            notes.push(format!(
+                "clip \"{}\": its anchor {anchor} was outside what a clip can hold (2^46 samples either way), so it was reset and its audio now starts from its source offset",
+                self.name
+            ));
+        }
+        notes
     }
 }
 
-/// The session load note for a clip on track `track` whose stretch [`Clip::sanitize_noting`] clamped
-/// (`note` is its note).
-pub fn stretch_load_note(track: &str, note: &str) -> String {
+/// The session load note for a clip on track `track` whose stretch or anchor [`Clip::sanitize_noting`]
+/// repaired (`note` is its note).
+pub fn clip_load_note(track: &str, note: &str) -> String {
     format!("track \"{track}\", {note}")
 }
 
-/// Whether `note`, a session load note, says a clip on track `track` had its stretch clamped
-/// ([`stretch_load_note`]): what an import of that track passes on.
-pub fn is_stretch_load_note(note: &str, track: &str) -> bool {
-    note.strip_prefix(&stretch_load_note(track, "clip \"")).is_some_and(|rest| rest.contains("\": its stretch "))
+/// Whether `note`, a session load note, says a clip on track `track` had its stretch clamped or its
+/// anchor reset ([`clip_load_note`]): what an import of that track passes on.
+pub fn is_clip_load_note(note: &str, track: &str) -> bool {
+    note.strip_prefix(&clip_load_note(track, "clip \"")).is_some_and(|rest| rest.contains("\": its stretch ") || rest.contains("\": its anchor "))
 }
 
 pub(crate) fn bound(at: &mut Samples) {

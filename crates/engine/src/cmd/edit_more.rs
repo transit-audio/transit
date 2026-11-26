@@ -765,12 +765,13 @@ fn tce(e: &mut Engine, p: &Value) -> Result<Value> {
     if c.time_locked || c.edit_locked {
         return Err(bad(id, "the clip is locked"));
     }
+    super::clip::refuse_anchored(e.session(), id, &[c.id])?;
     let s = e.session_mut();
     let Some(src) = render_stretched(s, id, &c, target.len())? else { return Err(bad(id, "the clip's audio is not loaded")) };
     let ratio = target.len() as f64 / c.length.max(1) as f64;
     let scale = |x: Samples| transit_time::to_samples(x as f64 * ratio);
     let mut nc = c.clone();
-    nc.content = ClipContent::Audio { source: src, offset: 0 };
+    nc.content = ClipContent::Audio { source: src, offset: 0, anchor: 0 };
     nc.looping = None;
     nc.start = target.start;
     nc.length = target.len();

@@ -118,9 +118,11 @@ fn process(e: &mut Engine, p: &Value) -> Result<Value> {
         let src = crate::io::add_source(s, &new_name, buf, None, FileFormat::Wav);
         let mut nc: Clip = clip.clone();
         nc.name = new_name;
-        nc.content = ClipContent::Audio { source: src, offset: 0 };
-        // The rendered file already holds every cycle (ADR 0019).
+        nc.content = ClipContent::Audio { source: src, offset: 0, anchor: 0 };
+        // The rendered file already holds every cycle (ADR 0019) and the clip's stretch (#554):
+        // keeping either would play them a second time.
         nc.looping = None;
+        nc.stretch = 1.0;
         nc.length = i64::try_from(frames).unwrap_or(nc.length);
         // Invert and Duplicate are phase/copy operations. The clip's gain stays a clip gain,
         // the same way its fades stay editable. Other processes bake a new file at unity gain.

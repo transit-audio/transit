@@ -103,7 +103,7 @@ fn same_material(a: &Clip, b: &Clip) -> bool {
     a.length == b.length
         && (a.loop_id.is_some() && a.loop_id == b.loop_id
             || match (&a.content, &b.content) {
-                (ClipContent::Audio { source: s1, offset: o1 }, ClipContent::Audio { source: s2, offset: o2 }) => s1 == s2 && o1 == o2,
+                (ClipContent::Audio { .. }, ClipContent::Audio { .. }) => a.canonical().content == b.canonical().content,
                 (ClipContent::Midi { sequence: q1 }, ClipContent::Midi { sequence: q2 }) => q1 == q2,
                 _ => false,
             })
@@ -223,6 +223,7 @@ fn effects_render(e: &mut Engine, p: &Value) -> Result<Value> {
 fn conform(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "clip.conform_to_tempo";
     let ids = clip_ids_param(e, p);
+    super::clip::refuse_anchored(e.session(), id, &ids)?;
     let given = p.get("source_bpm").and_then(Value::as_f64).filter(|b| b.is_finite());
     if let Some(b) = given
         && !(5.0..=1000.0).contains(&b)
@@ -262,6 +263,7 @@ fn conform(e: &mut Engine, p: &Value) -> Result<Value> {
 fn remove_pitch_shift(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "clip.remove_pitch_shift";
     let ids = clip_ids_param(e, p);
+    super::clip::refuse_anchored(e.session(), id, &ids)?;
     let s = e.session_mut();
     let mut n = 0;
     for cid in ids {
@@ -272,7 +274,7 @@ fn remove_pitch_shift(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         let Some(src) = render_stretched(s, id, &c, c.length)? else { continue };
         let mut nc = c.clone();
-        nc.content = ClipContent::Audio { source: src, offset: 0 };
+        nc.content = ClipContent::Audio { source: src, offset: 0, anchor: 0 };
         nc.looping = None;
         nc.stretch = 1.0;
         replace_clip(s, t, cid, nc);

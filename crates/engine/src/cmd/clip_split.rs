@@ -146,13 +146,13 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         for (cid, src, channels) in clips {
             let Some(orig) = s.find_clip(cid).map(|(_, c)| c.clone()) else { continue };
-            let ClipContent::Audio { offset, .. } = orig.content else { continue };
+            let ClipContent::Audio { offset, anchor, .. } = orig.content else { continue };
             for (ch, &lane) in lanes.iter().enumerate().take(channels) {
                 let Some(&mono) = sources.get(&(src, ch)) else { continue };
                 let mut c = orig.clone();
                 c.id = s.new_clip_id();
                 c.name = with_label(&orig.name, ".", &split_label(channels, ch), MAX_NAME_CHARS);
-                c.content = ClipContent::Audio { source: mono, offset };
+                c.content = ClipContent::Audio { source: mono, offset, anchor };
                 c.group = None;
                 new_clips.push(c.id);
                 // Pushed as they are: the original's layering on its track stays as it was.

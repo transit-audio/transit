@@ -732,11 +732,10 @@ fn trim_to_file(e: &mut Engine, p: &Value) -> Result<Value> {
     for id in ids {
         if let Some((frames, lo, hi)) = trim_limits(s, id)
             && let Some(c) = s.find_clip_mut(id)
+            && let Some((file_start, file_end)) = file_edges(c, frames)
         {
-            let off = c.source_offset();
-            let new_start = c.start - off;
-            c.trim_start_to(new_start.max(lo));
-            c.trim_end_to((new_start + frames).min(hi));
+            c.trim_start_to(file_start.max(lo));
+            c.trim_end_to(file_end.min(hi));
             n += 1;
         }
     }
@@ -751,23 +750,30 @@ fn trim_to_fill(e: &mut Engine, p: &Value) -> Result<Value> {
     for id in ids {
         if let Some((frames, lo, hi)) = trim_limits(s, id)
             && let Some(c) = s.find_clip_mut(id)
+            && let Some((file_start, file_end)) = file_edges(c, frames)
         {
-            let file_start = c.start - c.source_offset();
             c.trim_start_to(r.start.max(file_start).max(lo));
-            c.trim_end_to(r.end.min(file_start + frames).min(hi));
+            c.trim_end_to(r.end.min(file_end).min(hi));
             n += 1;
         }
     }
     Ok(json!({"trimmed": n}))
 }
 
+/// The timeline span where `c` reads inside its file of `frames` frames, through its mapping (ADR 0056
+/// decision 5.6): the first sample and the end. None when no clip time reads inside the file.
+fn file_edges(c: &transit_model::Clip, frames: u64) -> Option<(Samples, Samples)> {
+    let span = c.clip_span_in_file(frames);
+    (!span.is_empty()).then(|| (c.start.saturating_add(span.start), c.start.saturating_add(span.end)))
+}
+
 /// How far a trim may extend an audio clip: its source length in frames, and the earliest
 /// start and latest end before it would run over the clip before or after it on the playlist
 /// (an extension never overwrites, like the trim tool). An overlap the clip already has with
 /// a neighbour (a crossfade) is kept rather than trimmed away.
-fn trim_limits(s: &Session, id: ClipId) -> Option<(Samples, Samples, Samples)> {
+fn trim_limits(s: &Session, id: ClipId) -> Option<(u64, Samples, Samples)> {
     let (track, c) = s.find_clip(id)?;
-    let frames = c.source().and_then(|src| s.source(src)).map(|src| i64::try_from(src.frames).unwrap_or(i64::MAX))?;
+    let frames = c.source().and_then(|src| s.source(src)).map(|src| src.frames)?;
     let others = || s.track(track).into_iter().flat_map(|t| t.clips()).filter(|x| x.id != id);
     let lo = others().filter(|x| x.start < c.start).map(|x| x.end()).max().map_or(Samples::MIN, |end| end.min(c.start));
     let hi = others().filter(|x| x.start > c.start).map(|x| x.start).min().map_or(Samples::MAX, |start| start.max(c.end()));

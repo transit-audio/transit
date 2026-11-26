@@ -434,14 +434,21 @@ impl Session {
     }
 
     /// Features a file can list under `needs` (see [`Session::to_json`]) that this build understands.
-    pub const KNOWN_NEEDS: [&'static str; 7] =
-        ["clip_loop", "clip_scale_mode", "device_pages", "midi_hidden_notes", "pre_count", "sampler_patch", "sampler_slicing_modes"];
+    pub const KNOWN_NEEDS: [&'static str; 8] =
+        ["clip_anchor", "clip_loop", "clip_scale_mode", "device_pages", "midi_hidden_notes", "pre_count", "sampler_patch", "sampler_slicing_modes"];
 
     /// The `needs` entries this session's content requires: a reader that does not know one would
     /// silently drop or misplay it. Empty for a session that uses none.
     pub fn needs(&self) -> Vec<&'static str> {
-        let looped = self.tracks.iter().any(|t| t.playlists.iter().any(|p| p.clips.iter().any(|c| c.looping.is_some())));
-        let mut needs = if looped { vec!["clip_loop"] } else { Vec::new() };
+        let mut needs = Vec::new();
+        // ADR 0056 decision 5.7: a clip re-anchored by a split or start trim at a rate other than 1
+        // (#554); an older build reads its offset at the clip's start, the wrong part of the file.
+        if self.all_clips().any(|c| c.anchor() != 0) {
+            needs.push("clip_anchor");
+        }
+        if self.tracks.iter().any(|t| t.playlists.iter().any(|p| p.clips.iter().any(|c| c.looping.is_some()))) {
+            needs.push("clip_loop");
+        }
         if self.all_clips().any(|c| c.scale_mode != Default::default()) {
             needs.push("clip_scale_mode");
         }
@@ -853,8 +860,8 @@ impl Session {
                 truncate_chars(&mut p.name, MAX_NAME_CHARS);
                 p.clips.retain(|c| c.length > 0);
                 for c in &mut p.clips {
-                    if let Some(note) = c.sanitize_noting() {
-                        stretch_notes.push(crate::clip::stretch_load_note(&t.name, &note));
+                    for note in c.sanitize_noting() {
+                        stretch_notes.push(crate::clip::clip_load_note(&t.name, &note));
                     }
                 }
                 p.sort();

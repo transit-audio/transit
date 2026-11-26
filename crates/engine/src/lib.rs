@@ -923,6 +923,11 @@ impl Engine {
         if cmd::edits_frozen(before, &self.doc) {
             return Err(EngineError::TrackFrozen);
         }
+        // ADR 0056 decision 5.5: an edit whose result leaves a clip's mapping outside the numeric
+        // bounds is refused, whole, never clamped.
+        if let Some(why) = transit_model::new_clip_domain_problem(before, &self.doc) {
+            return Err(cmd::bad(id, why));
+        }
         Ok(())
     }
 
@@ -1149,6 +1154,8 @@ fn panic_message(p: &(dyn std::any::Any + Send)) -> String {
     p.downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_else(|| "panic".into())
 }
 
+#[cfg(test)]
+mod anchor_tests;
 #[cfg(test)]
 mod hidden_edge_activation_tests;
 #[cfg(test)]

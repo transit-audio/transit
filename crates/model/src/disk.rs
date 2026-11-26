@@ -25,7 +25,7 @@ mod read;
 mod retarget;
 mod stream;
 
-use crate::{Clip, ClipContent, ClipLoop, Session};
+use crate::{Clip, ClipLoop, Session};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -141,6 +141,9 @@ impl DiskFile for BlockFile {
 pub struct StreamMap {
     pub clip: u64,
     pub offset: Samples,
+    /// The clip time at which `offset` is read (ADR 0056 decision 5.1); 0 at a stretch of 1, where
+    /// [`StreamMap::of`] stores the clip's normal form.
+    pub anchor: Samples,
     pub looping: Option<ClipLoop>,
     /// The clip's stretch, 1.0 when it is not a finite positive number (as the mix reads it).
     pub stretch: f64,
@@ -148,13 +151,13 @@ pub struct StreamMap {
 }
 
 impl StreamMap {
-    /// What a ring was filled with besides the clip id (FNV-1a over offset, loop, stretch and
-    /// length): a ring cued under another mapping of the same clip (a slip, a trim, a loop or
+    /// What a ring was filled with besides the clip id (FNV-1a over offset, anchor, loop, stretch
+    /// and length): a ring cued under another mapping of the same clip (a slip, a trim, a loop or
     /// stretch change) is a miss, never a read of the old content.
     pub fn fingerprint(&self) -> u64 {
         let (ls, le, lf) = self.looping.map_or((0, 0, 0u8), |l| (l.start, l.end, 1));
         let mut h: u64 = 0xcbf2_9ce4_8422_2325;
-        let words = [self.offset as u64, ls as u64, le as u64, u64::from(lf), self.stretch.to_bits(), self.length as u64];
+        let words = [self.offset as u64, self.anchor as u64, ls as u64, le as u64, u64::from(lf), self.stretch.to_bits(), self.length as u64];
         for w in words {
             for b in w.to_le_bytes() {
                 h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
@@ -163,11 +166,12 @@ impl StreamMap {
         h
     }
 
-    /// The map of an audio clip; `None` for a MIDI clip.
+    /// The map of an audio clip, in its canonical form (a stretch of 1 reads from `x(0)` with anchor
+    /// 0, ADR 0056 decision 5.3); `None` for a MIDI clip.
     pub fn of(clip: &Clip) -> Option<StreamMap> {
-        let ClipContent::Audio { offset, .. } = clip.content else { return None };
-        let stretch = if clip.stretch.is_finite() && clip.stretch > 0.0 { clip.stretch } else { 1.0 };
-        Some(StreamMap { clip: clip.id.0, offset, looping: clip.looping, stretch, length: clip.length })
+        let (offset, anchor) = clip.canonical_mapping()?;
+        let stretch = crate::clip_map::playable_stretch(clip.stretch);
+        Some(StreamMap { clip: clip.id.0, offset, anchor, looping: clip.looping, stretch, length: clip.length })
     }
 }
 
@@ -234,6 +238,7 @@ struct Request {
     clip: AtomicU64,
     k: AtomicI64,
     offset: AtomicI64,
+    anchor: AtomicI64,
     loop_start: AtomicI64,
     loop_end: AtomicI64,
     looped: AtomicBool,
@@ -252,6 +257,7 @@ impl Request {
             clip: AtomicU64::new(0),
             k: AtomicI64::new(0),
             offset: AtomicI64::new(0),
+            anchor: AtomicI64::new(0),
             loop_start: AtomicI64::new(0),
             loop_end: AtomicI64::new(0),
             looped: AtomicBool::new(false),
@@ -268,6 +274,7 @@ impl Request {
         self.clip.store(map.clip, Ordering::Relaxed);
         self.k.store(k, Ordering::Relaxed);
         self.offset.store(map.offset, Ordering::Relaxed);
+        self.anchor.store(map.anchor, Ordering::Relaxed);
         self.loop_start.store(map.looping.map_or(0, |l| l.start), Ordering::Relaxed);
         self.loop_end.store(map.looping.map_or(0, |l| l.end), Ordering::Relaxed);
         self.looped.store(map.looping.is_some(), Ordering::Relaxed);
@@ -289,6 +296,7 @@ impl Request {
         let map = StreamMap {
             clip: self.clip.load(Ordering::Relaxed),
             offset: self.offset.load(Ordering::Relaxed),
+            anchor: self.anchor.load(Ordering::Relaxed),
             looping,
             stretch: f64::from_bits(self.stretch.load(Ordering::Relaxed)),
             length: self.length.load(Ordering::Relaxed),
@@ -305,6 +313,7 @@ impl Request {
             && self.clip.load(Ordering::Relaxed) == map.clip
             && self.k.load(Ordering::Relaxed) == k
             && self.offset.load(Ordering::Relaxed) == map.offset
+            && self.anchor.load(Ordering::Relaxed) == map.anchor
             && self.length.load(Ordering::Relaxed) == map.length
             && self.stretch.load(Ordering::Relaxed) == map.stretch.to_bits()
             && self.looped.load(Ordering::Relaxed) == map.looping.is_some()

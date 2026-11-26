@@ -430,11 +430,11 @@ fn take_and_automation_stacks_follow_preview_commit_and_cancellation_and_child_w
     let mut other = clip.clone();
     other.id = r.app.engine.session_mut().new_clip_id();
     other.take = Some(2);
-    if let ClipContent::Audio { source, offset } = other.content {
+    if let ClipContent::Audio { source, offset, anchor } = other.content {
         let audio = r.app.engine.session().pool.get(source).unwrap().clone();
         let distinct = transit_model::SourceId(source.0 + 100);
         r.app.engine.session_mut().pool.insert(distinct, audio);
-        other.content = ClipContent::Audio { source: distinct, offset };
+        other.content = ClipContent::Audio { source: distinct, offset, anchor };
     }
     r.app.engine.session_mut().track_mut(r.ids[0]).unwrap().playlists =
         vec![transit_model::Playlist { name: "one".into(), clips: vec![clip] }, transit_model::Playlist { name: "two".into(), clips: vec![other] }];

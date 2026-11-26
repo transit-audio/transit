@@ -102,8 +102,11 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
             // The ghost plays the cycle as it would: its audio starts at the loop phase of `a`.
             let mut virt = base.clone();
             virt.looping = Some(base.looping.unwrap_or(ClipLoop { start: 0, end: base.length }));
-            if let ClipContent::Audio { source, offset } = base.content {
-                g.content = ClipContent::Audio { source, offset: offset.saturating_add(virt.content_pos(a - base.start)) };
+            // Through the mapping: the ghost's clip time 0 is the base's content time at the phase
+            // (ADR 0056 decision 4.4, `anchor − phase`).
+            if let ClipContent::Audio { source, offset, anchor } = base.content {
+                g.content = ClipContent::Audio { source, offset, anchor: anchor.saturating_sub(virt.content_pos(a - base.start)) };
+                g.normalize();
             }
             // A MIDI ghost's notes are drawn below from the cycle math; the body draws none.
             if let ClipContent::Midi { sequence } = &mut g.content {
@@ -300,14 +303,15 @@ fn draw_cycles(
         }
         let seg = Rect::from_min_max(pos2(x0, body.min.y), pos2(x1, body.max.y));
         match &c.content {
-            ClipContent::Audio { source, offset } => {
+            ClipContent::Audio { source, offset, anchor } => {
                 if let Some(audio) = s.pool.get(*source) {
                     // The segment as a clip of its own that plays the file from its cycle phase.
                     let mut g = c.clone();
                     g.start = c.start.saturating_add(a);
                     g.length = (b - a).max(1);
                     g.looping = None;
-                    g.content = ClipContent::Audio { source: *source, offset: offset.saturating_add(phase) };
+                    g.content = ClipContent::Audio { source: *source, offset: *offset, anchor: anchor.saturating_sub(phase) };
+                    g.normalize();
                     if i > 0 {
                         g.fade_in = Default::default();
                     }

@@ -304,8 +304,10 @@ fn a_loop_must_be_at_least_the_minimum_cycle() {
 fn set_loop_checks_the_file_through_the_stretch() {
     let (mut e, _, id) = audio();
     e.session_mut().find_clip_mut(id).unwrap().stretch = 2.0;
-    // Clip time 0..2000 reads 0..1000 of the 1000-frame file at stretch 2.
-    assert!(e.execute("clip.set_loop", &json!({"clip": id.0, "start": 0, "end": 2000})).is_ok());
+    // Clip times 0..=1998 read frames 0 to 999 of the 1000-frame file at stretch 2; clip time 1999
+    // reads 999.5, past the last frame, outside the material invariant (ADR 0056 decision 5.5 (e)).
+    assert!(e.execute("clip.set_loop", &json!({"clip": id.0, "start": 0, "end": 1999})).is_ok());
+    assert!(e.execute("clip.set_loop", &json!({"clip": id.0, "start": 0, "end": 2000})).is_err());
     assert!(e.execute("clip.set_loop", &json!({"clip": id.0, "start": 0, "end": 2100})).is_err());
 }
 

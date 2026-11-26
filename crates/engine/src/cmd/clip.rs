@@ -213,6 +213,7 @@ pub fn specs() -> Vec<CommandSpec> {
 /// (the original source is remembered in `edit.values` so Remove Warp restores it).
 fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
     let ids = clip_ids_param(e, p);
+    refuse_anchored(e.session(), "clip.elastic_properties", &ids)?;
     // A ratio within 1e-9 of 1 is 1, so the clip reads its file directly (#604).
     let ratio = transit_model::snap_stretch(f64_or(p, "ratio", 1.0).clamp(0.05, 20.0));
     let s = e.session_mut();
@@ -225,7 +226,7 @@ fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
         let orig = warp_original(s, *id);
         let mut base = c.clone();
         if let Some((src, off, len)) = orig {
-            base.content = transit_model::ClipContent::Audio { source: src, offset: off };
+            base.content = transit_model::ClipContent::Audio { source: src, offset: off, anchor: 0 };
             base.length = len.max(1);
             base.stretch = 1.0;
         }
@@ -238,7 +239,7 @@ fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
         let out_len = transit_time::to_samples(base.length as f64 * ratio).max(1);
         let Some(src) = super::more_util::render_stretched(s, "clip.elastic_properties", &base, out_len)? else { continue };
         if orig.is_none()
-            && let transit_model::ClipContent::Audio { source, offset } = base.content
+            && let transit_model::ClipContent::Audio { source, offset, .. } = base.content
         {
             s.edit.values.insert(key("src"), source.0 as f64);
             s.edit.values.insert(key("off"), offset as f64);
@@ -246,7 +247,7 @@ fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         s.edit.values.insert(key("ratio"), ratio);
         let mut nc = base;
-        nc.content = transit_model::ClipContent::Audio { source: src, offset: 0 };
+        nc.content = transit_model::ClipContent::Audio { source: src, offset: 0, anchor: 0 };
         // The new file holds every cycle already (ADR 0019).
         nc.looping = None;
         nc.length = out_len;
@@ -259,6 +260,7 @@ fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
 
 fn remove_warp(e: &mut Engine, p: &Value) -> Result<Value> {
     let ids = clip_ids_param(e, p);
+    refuse_anchored(e.session(), "clip.remove_warp", &ids)?;
     let s = e.session_mut();
     let mut n = 0;
     for id in &ids {
@@ -267,7 +269,7 @@ fn remove_warp(e: &mut Engine, p: &Value) -> Result<Value> {
         if let Some(c) = s.find_clip_mut(*id) {
             c.stretch = 1.0;
             if let Some((src, off, len)) = orig {
-                c.content = transit_model::ClipContent::Audio { source: src, offset: off };
+                c.content = transit_model::ClipContent::Audio { source: src, offset: off, anchor: 0 };
                 c.length = len.max(1);
                 c.fade_out.len = c.fade_out.len.min(c.length);
                 n += 1;
@@ -278,6 +280,19 @@ fn remove_warp(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"restored": n}))
+}
+
+/// Refuse an inherited processing command on a re-anchored clip (ADR 0056 decision 4.4): it reads or
+/// restores the file from `offset` at the clip's start and would drop or misread the anchor that a
+/// split or start trim of a stretched clip gives it. The whole batch is refused.
+pub(crate) fn refuse_anchored(s: &transit_model::Session, cmd: &str, ids: &[ClipId]) -> Result<()> {
+    match ids.iter().filter_map(|id| s.find_clip(*id)).find(|(_, c)| c.anchor() != 0) {
+        Some((_, c)) => Err(bad(
+            cmd,
+            format!("clip \"{}\" was split or trimmed at its stretch, which this inherited command cannot read; undo that edit first", c.name),
+        )),
+        None => Ok(()),
+    }
 }
 
 /// The audio a warped clip was rendered from, while that file is still in the session.
@@ -462,12 +477,12 @@ fn set_loop(e: &mut Engine, p: &Value) -> Result<Value> {
             continue;
         }
         match &c.content {
-            ClipContent::Audio { source, offset } => {
-                let frames = s.source(*source).map_or(i64::MAX, |src| i64::try_from(src.frames).unwrap_or(i64::MAX));
-                // The range is clip time; a stretched clip reads the file at 1 / stretch.
-                let stretch = if c.stretch.is_finite() && c.stretch > 0.0 { c.stretch } else { 1.0 };
-                let file = |x: Samples| offset.saturating_add((x as f64 / stretch).round() as Samples);
-                if file(start) < 0 || file(end) > frames {
+            ClipContent::Audio { source, .. } => {
+                // The range is clip time: its addressed centers, through the clip's mapping, must lie
+                // in the file (ADR 0056 decisions 5.5 (e) and 5.6). A source with no record bounds only
+                // the file's start, as before.
+                let span = c.clip_span_in_file(s.source(*source).map_or(u64::MAX, |src| src.frames));
+                if start.min(0) < span.start || end > span.end {
                     return Err(bad(id, "the loop range reaches outside the audio file"));
                 }
             }

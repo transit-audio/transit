@@ -141,7 +141,9 @@ fn max_render(s: &Session) -> Samples {
 /// Render the audio a clip plays, time-stretched (pitch preserved) to `out_len` samples, into a new
 /// source. Returns `Ok(None)` for MIDI clips or missing audio.
 pub fn render_stretched(s: &mut Session, cmd: &str, c: &Clip, out_len: Samples) -> Result<Option<SourceId>> {
-    let ClipContent::Audio { source, offset } = c.content else { return Ok(None) };
+    // Reads the file from `offset` at the clip's start: its callers refuse a re-anchored clip first
+    // (ADR 0056 decision 4.4), so the anchor here is 0.
+    let ClipContent::Audio { source, offset, .. } = c.content else { return Ok(None) };
     let Some(audio) = s.pool.get(source).cloned() else { return Ok(None) };
     let max = max_render(s);
     if out_len <= 0 || out_len > max {

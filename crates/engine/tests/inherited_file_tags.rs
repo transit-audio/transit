@@ -226,8 +226,9 @@ fn a_newer_format_version_is_refused() {
     let dir = temp("newer");
     let mut e = transit_engine::demo::demo_engine();
     let newer = "saved by a newer transit (format version 2); open it in that version or later";
-    let text = err_text(e.execute("file.import_clip_groups", &json!({"path": s(&group_copy(&dir, NEW_GROUP, 2))})));
-    assert!(text.contains(newer), "{text}");
+    // A clip group file is read through version 2 (a re-anchored clip, ADR 0056 decision 4.4).
+    let text = err_text(e.execute("file.import_clip_groups", &json!({"path": s(&group_copy(&dir, NEW_GROUP, 3))})));
+    assert!(text.contains("saved by a newer transit (format version 3); open it in that version or later"), "{text}");
     let preset = preset_copy(&dir, NEW_PRESET, 2);
     let text = err_text(e.execute("track.load_preset", &json!({"path": s(&preset), "tracks": ["Lead"]})));
     assert!(text.contains(&format!("{}: {newer}", s(&preset))), "{text}");

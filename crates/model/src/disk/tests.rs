@@ -48,7 +48,7 @@ pub(super) fn memory_read(map: &StreamMap, data: &[Vec<f32>], ch: usize, k: i64)
 }
 
 pub(super) fn map(clip: u64, length: i64) -> StreamMap {
-    StreamMap { clip, offset: 0, looping: None, stretch: 1.0, length }
+    StreamMap { clip, offset: 0, anchor: 0, looping: None, stretch: 1.0, length }
 }
 
 #[test]
@@ -107,9 +107,11 @@ fn looped_and_stretched_clips_stream_what_the_in_memory_read_gives() {
     let data = ramp(1, 4_000);
     let (d, _) = fake(data.clone(), 2_048);
     let maps = [
-        StreamMap { clip: 1, offset: 100, looping: Some(ClipLoop { start: 200, end: 1_000 }), stretch: 1.0, length: 3_000 },
-        StreamMap { clip: 2, offset: 7, looping: None, stretch: 1.5, length: 3_000 },
-        StreamMap { clip: 3, offset: 0, looping: Some(ClipLoop { start: -50, end: 700 }), stretch: 0.75, length: 3_000 },
+        StreamMap { clip: 1, offset: 100, anchor: 0, looping: Some(ClipLoop { start: 200, end: 1_000 }), stretch: 1.0, length: 3_000 },
+        StreamMap { clip: 2, offset: 7, anchor: 0, looping: None, stretch: 1.5, length: 3_000 },
+        StreamMap { clip: 3, offset: 0, anchor: 0, looping: Some(ClipLoop { start: -50, end: 700 }), stretch: 0.75, length: 3_000 },
+        // A split piece of a stretched clip: its offset read at clip time -300 (ADR 0056 slice 1).
+        StreamMap { clip: 4, offset: 900, anchor: -300, looping: None, stretch: 1.5, length: 3_000 },
     ];
     for m in maps {
         let mut k = 0;
@@ -355,7 +357,9 @@ fn a_ring_cued_under_another_mapping_of_the_clip_is_a_miss() {
     let slipped = StreamMap { offset: 100, ..m };
     let longer = StreamMap { length: 6_000, ..m };
     let looped = StreamMap { looping: Some(ClipLoop { start: 0, end: 500 }), ..m };
-    for other in [slipped, longer, looped] {
+    // A re-anchored mapping (ADR 0056 decision 5.1) is another mapping too.
+    let anchored = StreamMap { anchor: -100, ..m };
+    for other in [slipped, longer, looped, anchored] {
         assert!(d.stream(&other, 64, 64).is_none(), "{other:?}");
         d.underrun(&other, 64);
         d.pump();

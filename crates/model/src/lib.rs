@@ -8,6 +8,7 @@
 mod automation;
 pub mod b64;
 mod clip;
+mod clip_map;
 pub mod device_pages;
 #[cfg(test)]
 mod device_pages_tests;
@@ -55,9 +56,9 @@ pub use unplaced_take::UnplacedTake;
 
 pub use automation::{AutoParam, AutomationLane, AutomationMode, AutomationPoint};
 pub use clip::{
-    Clip, ClipContent, ClipLoop, Fade, FadeShape, MAX_STRETCH, MIN_CYCLE, MIN_STRETCH, WholeFades, is_stretch_load_note, snap_stretch,
-    stretch_load_note,
+    Clip, ClipContent, ClipLoop, Fade, FadeShape, MAX_STRETCH, MIN_CYCLE, MIN_STRETCH, WholeFades, clip_load_note, is_clip_load_note, snap_stretch,
 };
+pub use clip_map::{MAX_ANCHOR, new_clip_domain_problem};
 pub use device_pages::{DeviceRef, MAX_USER_PAGES, PagesError, UserPage};
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
 pub use input_map::{InputMap, adopt_input, adopt_input_ports};

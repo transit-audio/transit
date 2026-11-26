@@ -260,7 +260,7 @@ fn a_full_request_table_drops_the_request_without_allocating() {
     let data = content(4_000);
     let disk = fake_source(&data, 512);
     mark_audio_thread();
-    let maps: Vec<StreamMap> = (0..40u64).map(|c| StreamMap { clip: c, offset: 0, looping: None, stretch: 1.0, length: 4_000 }).collect();
+    let maps: Vec<StreamMap> = (0..40u64).map(|c| StreamMap { clip: c, offset: 0, anchor: 0, looping: None, stretch: 1.0, length: 4_000 }).collect();
     let (_, stats) = transit_rt::testing::measure(|| {
         for m in &maps {
             disk.underrun(m, 0);

@@ -25,7 +25,7 @@ fn report(e: &mut Engine, _: &Value) -> Result<Value> {
         for (index, playlist) in track.playlists.iter().enumerate() {
             let active = index == track.active_playlist;
             for clip in &playlist.clips {
-                let ClipContent::Audio { source, offset } = clip.content else { continue };
+                let ClipContent::Audio { source, .. } = clip.content else { continue };
                 clips += 1;
                 if active {
                     active_end = active_end.max(clip.end());
@@ -80,10 +80,11 @@ fn report(e: &mut Engine, _: &Value) -> Result<Value> {
                         "This clip is sped up more than 32 times (a stretch below 1/32); it plays as silence. Set its stretch to 0.05 or more.",
                     );
                 }
-                let stretch = if clip.stretch.is_finite() && clip.stretch > 0.0 { clip.stretch } else { 1.0 };
-                // Match the mixer's last requested source sample, including elastic playback.
-                let last = offset as f64 + clip.length.saturating_sub(1).max(0) as f64 / stretch;
-                if offset < 0 || last >= audio.frames() as f64 {
+                // The clip's addressed centers through its mapping, the positions the mixer reads (ADR
+                // 0056 decisions 5.5 and 5.6): the first and last, since the mapping is monotone.
+                let (first, last) = clip.addressed();
+                let (a, b) = (clip.source_pos(first), clip.source_pos(last));
+                if a.min(b) < 0.0 || a.max(b) >= audio.frames() as f64 {
                     add("source_bounds", "Clip extends outside the loaded audio; part will be silent. Trim the clip or replace its source.");
                 }
             }
@@ -156,7 +157,7 @@ mod tests {
         let clip = &mut e.session_mut().tracks.first_mut().unwrap().playlists[0].clips[0];
         clip.length = i64::MAX;
         clip.stretch = f64::NAN;
-        clip.content = ClipContent::Audio { source: id, offset: i64::MAX };
+        clip.content = ClipContent::Audio { source: id, offset: i64::MAX, anchor: 0 };
         let r = check(&mut e);
         assert_eq!(r["issues"][0]["code"], "invalid_clip");
         assert_eq!(r["issues"][1]["code"], "source_bounds");

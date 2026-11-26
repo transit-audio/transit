@@ -1,7 +1,8 @@
 //! How an audio clip reads its source (ADR 0056 decisions 5.3, 8 and 8.6; issue #604).
 //!
 //! Every reader of a clip, in memory or from disk, live or offline, reads through
-//! [`ClipReader::read`] (from [`StreamMap::reader`]): the loop, then the clip's mapping `x = offset + rel·q` with `q = 1 / stretch`.
+//! [`ClipReader::read`] (from [`StreamMap::reader`]): the loop, then the clip's mapping
+//! `x = offset + (rel − anchor)·q` with `q = 1 / stretch` (decision 5.3).
 //! A stretch of exactly 1 is the direct index (the source frame itself, bit for bit); any other
 //! stretch goes through the band-limited reader of decision 8 (`transit_resample`), whose taps reach
 //! `16·max(1, q)` source frames on both sides of `x`. A disk-backed source makes those frames resident
@@ -101,9 +102,9 @@ pub struct ClipReader {
 impl ClipReader {
     /// Source channels `first..first + out.len()` at clip time `k` into `out` (channels past the
     /// source's read 0): the loop (ADR 0019), then the mapping. At `q = 1` exactly the source frame
-    /// `offset + rel` itself; otherwise the reader at `x = offset + rel·q`, formed as decision 5.3
-    /// states (`rel·q` rounded once, then added to the offset), so a position never depends on the
-    /// block it falls in. A rate above [`MAX_RATE`] reads silence (a loaded clip never has one:
+    /// `offset + rel − anchor` itself; otherwise the reader at `x = offset + (rel − anchor)·q`, formed
+    /// as decision 5.3 states (the difference exact in `i64`, its product with `q` rounded once, then
+    /// added to the offset), so a position never depends on the block it falls in. A rate above [`MAX_RATE`] reads silence (a loaded clip never has one:
     /// `Clip::sanitize` clamps the stretch).
     ///
     /// Real time: no allocation, no lock, no division; at most `2·16·max(1, q) + 1` taps a channel,
@@ -115,7 +116,7 @@ impl ClipReader {
         let rel = crate::clip::content_pos(m.looping, k);
         let q = self.q;
         if q == 1.0 {
-            let at = m.offset.saturating_add(rel);
+            let at = m.offset.saturating_add(rel.saturating_sub(m.anchor));
             if !S::RESIDENT {
                 src.need(at..at.saturating_add(1));
             }
@@ -124,7 +125,7 @@ impl ClipReader {
             }
             return;
         }
-        let x = m.offset as f64 + rel as f64 * q;
+        let x = crate::clip_map::map_pos(m.offset, m.anchor, q, rel);
         if !S::RESIDENT {
             src.need(taps(x, q));
         }

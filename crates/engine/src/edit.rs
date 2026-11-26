@@ -452,6 +452,11 @@ pub fn trim_end_to(s: &mut Session, track: TrackId, at: Samples) -> usize {
 }
 
 /// Heal separations inside `range`: merge neighbouring audio clips that continue the same file.
+///
+/// Two touching pieces continue each other when splitting the merged clip at the seam gives the
+/// later piece's mapping back, compared in canonical form (ADR 0056 decision 5.4): the same source
+/// and stretch, and the later piece reading at every sample the position the earlier piece would
+/// read there. At rate 1 that is today's offset continuity; at any other rate it is the anchor's.
 pub fn heal(s: &mut Session, track: TrackId, range: Range) -> usize {
     let Some(pl) = s.track_mut(track).and_then(|t| t.playlist_mut()) else { return 0 };
     pl.sort();
@@ -460,10 +465,7 @@ pub fn heal(s: &mut Session, track: TrackId, range: Range) -> usize {
     for c in pl.clips.drain(..) {
         if let Some(prev) = out.last_mut() {
             let contiguous = prev.end() == c.start && c.start >= range.start && c.start <= range.end;
-            let same = match (&prev.content, &c.content) {
-                (ClipContent::Audio { source: a, offset: oa }, ClipContent::Audio { source: b, offset: ob }) => a == b && oa + prev.length == *ob,
-                _ => false,
-            };
+            let same = prev.is_audio() && c.is_audio() && continues(prev, &c);
             if contiguous && same && prev.looping.is_none() && c.looping.is_none() && (prev.gain_db - c.gain_db).abs() < 1e-6 {
                 prev.length += c.length;
                 prev.fade_out = c.fade_out;
@@ -475,6 +477,19 @@ pub fn heal(s: &mut Session, track: TrackId, range: Range) -> usize {
     }
     pl.clips = out;
     healed
+}
+
+/// Whether `next`, touching `prev`'s end, is what a split of the two merged at the seam gives back
+/// (both unlooped audio clips): the same source and stretch and, in canonical form, the same mapping
+/// as `prev` start-trimmed to the seam.
+fn continues(prev: &Clip, next: &Clip) -> bool {
+    if prev.stretch.to_bits() != next.stretch.to_bits() {
+        return false;
+    }
+    let mut probe = prev.clone();
+    probe.length = probe.length.saturating_add(next.length);
+    probe.trim_start_to(next.start);
+    probe.canonical().content == next.canonical().content
 }
 
 /// Move clips by `delta`, overwriting what they land on; `dest` sends whole tracks of them
@@ -592,10 +607,15 @@ pub fn trim_bounds(s: &Session, c: &Clip, shuffle: bool) -> TrimBounds {
     TrimBounds { start, end: end_limit(s, c, hi), room_end: hi }
 }
 
-/// The span of the file under a clip, as timeline positions (None for MIDI).
+/// The span of the file under a clip, as timeline positions (None for MIDI): the clip times whose
+/// positions lie in the file through the clip's mapping (ADR 0056 decisions 5.5 and 5.6), widened to
+/// the clip's own edges, so a clip partly outside its file may only move its edges toward it.
 fn file_span(s: &Session, c: &Clip) -> Option<(Samples, Samples)> {
-    let start = c.start.saturating_sub(c.source_offset());
-    material_len(s, c).map(|n| (start.min(c.start), start.saturating_add(n).max(c.end())))
+    let span = c.clip_span_in_file(source_frames(s, c)?);
+    if span.is_empty() {
+        return Some((c.start, c.end()));
+    }
+    Some((c.start.saturating_add(span.start).min(c.start), c.start.saturating_add(span.end).max(c.end())))
 }
 
 /// The latest end of `c` under the end bound `hi`: a looped clip repeats, so its file does not
@@ -883,12 +903,20 @@ pub fn trim_clip(s: &mut Session, id: ClipId, start: Option<Samples>, end: Optio
     Some(c)
 }
 
-/// Length of the file under a clip; None for MIDI, which has no end.
-fn material_len(s: &Session, c: &Clip) -> Option<Samples> {
+/// Frames of the file under a clip (the stored source record, known while the file is missing);
+/// None for MIDI, which has no end.
+fn source_frames(s: &Session, c: &Clip) -> Option<u64> {
     match c.content {
-        ClipContent::Audio { source, .. } => s.source(source).map(|src| i64::try_from(src.frames).unwrap_or(i64::MAX)),
+        ClipContent::Audio { source, .. } => s.source(source).map(|src| src.frames),
         ClipContent::Midi { .. } => None,
     }
+}
+
+/// How far `c` can extend past its end and before its start and still read inside its file, through
+/// its mapping (ADR 0056 decision 5.5): its crossfade handles. 0 for MIDI and where nothing is left.
+fn handles(s: &Session, c: &Clip) -> (Samples, Samples) {
+    let Some(span) = source_frames(s, c).map(|f| c.clip_span_in_file(f)).filter(|r| !r.is_empty()) else { return (0, 0) };
+    (span.end.saturating_sub(c.length).max(0), span.start.saturating_neg().max(0))
 }
 
 /// Create fades from a selection (the incumbent's Edit › Fades › Create semantics):
@@ -897,9 +925,9 @@ pub fn create_fades(s: &mut Session, track: TrackId, range: Range, shape: FadeSh
     if range.is_empty() {
         return 0;
     }
-    let handles: Vec<(ClipId, Samples)> = {
+    let handles: Vec<(ClipId, (Samples, Samples))> = {
         let Some(tr) = s.track(track) else { return 0 };
-        tr.clips().iter().map(|c| (c.id, material_len(s, c).map_or(0, |n| n.saturating_sub(c.source_offset()).saturating_sub(c.length)))).collect()
+        tr.clips().iter().map(|c| (c.id, handles(s, c))).collect()
     };
     let Some(pl) = s.track_mut(track).and_then(|t| t.playlist_mut()) else { return 0 };
     pl.sort();
@@ -913,8 +941,8 @@ pub fn create_fades(s: &mut Session, track: TrackId, range: Range, shape: FadeSh
         if b.start == boundary && range.start < boundary && range.end > boundary {
             let before = boundary - range.start.max(a.start);
             let after = range.end.min(b.end()) - boundary;
-            let a_handle = handles.iter().find(|h| h.0 == a.id).map_or(0, |h| h.1);
-            let b_handle = b.source_offset();
+            let a_handle = handles.iter().find(|h| h.0 == a.id).map_or(0, |h| h.1.0);
+            let b_handle = handles.iter().find(|h| h.0 == b.id).map_or(0, |h| h.1.1);
             // Extend each clip into the other's territory using its handles.
             let ext_a = after.min(a_handle).max(0);
             let ext_b = before.min(b_handle).max(0);

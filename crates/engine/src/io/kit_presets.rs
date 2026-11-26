@@ -22,7 +22,7 @@ pub const MAX_FILE_BYTES: u64 = 8 << 20;
 /// The plug-in id whose user preset folder holds the kits.
 pub const PLUGIN: &str = "sampler";
 
-const TAGS: Tags = Tags { current: FORMAT, accepted_legacy: &[], refused_pre_0_7: &[], what: "Sampler kit" };
+const TAGS: Tags = Tags { version: crate::file_tags::VERSION, current: FORMAT, accepted_legacy: &[], refused_pre_0_7: &[], what: "Sampler kit" };
 
 /// The folder of the user's kits under the settings folder `root`.
 #[must_use]

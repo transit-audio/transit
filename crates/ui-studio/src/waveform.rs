@@ -26,10 +26,10 @@ pub fn draw(painter: &Painter, s: &Session, tl: Rect, clip: &Clip, audio: &Sourc
 fn disk_channel(painter: &Painter, s: &Session, tl: Rect, clip: &Clip, peaks: &transit_model::disk::DiskPeaks, ch: usize, band: Rect, wave: Color32) {
     let Some(g) = Grid::new(painter, s, tl, band) else { return };
     let (rectified, outlines) = (s.edit.flag("waveform.rectified"), s.edit.flag("waveform.outlines"));
-    let origin = clip.start.saturating_sub(clip.source_offset()) as f64;
+    let axis = SourceAxis::of(clip);
     let gain = |pos: f64| clip.gain_at((pos as Samples).saturating_sub(clip.start).min(clip.length).max(0)) * s.edit.zoom.waveform_zoom;
-    let (start, overlap) = (g.start() - origin, g.overlap());
-    let step = g.step.max(1.0);
+    let (start, overlap) = (axis.frame_at(g.start()), axis.frames(g.overlap()));
+    let step = axis.frames(g.step.max(1.0));
     let base = g.cy + g.half;
     let ys: Vec<Option<(f32, f32)>> = (0..g.cols)
         .map(|c| {
@@ -46,6 +46,40 @@ fn disk_channel(painter: &Painter, s: &Session, tl: Rect, clip: &Clip, peaks: &t
     g.paint(painter, &ys, wave, outlines, rectified);
 }
 
+/// Where a clip's source frames sit on the timeline, through the clip's mapping (ADR 0056 decisions
+/// 5.3 and 5.6): frame `i` at timeline position `origin + i / q`, and position `p` at frame
+/// `(p − origin)·q`, with `origin` the position where frame 0 would play. At rate 1 the origin is the
+/// integer `start + anchor − offset` and both directions are the plain difference they always were.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct SourceAxis {
+    origin: f64,
+    q: f64,
+}
+
+impl SourceAxis {
+    pub(crate) fn of(clip: &Clip) -> SourceAxis {
+        let q = clip.rate();
+        let at = clip.start.saturating_add(clip.anchor());
+        let origin = if q == 1.0 { at.saturating_sub(clip.source_offset()) as f64 } else { at as f64 - clip.source_offset() as f64 / q };
+        SourceAxis { origin, q }
+    }
+
+    /// The source frame under timeline position `pos`.
+    pub(crate) fn frame_at(self, pos: f64) -> f64 {
+        (pos - self.origin) * self.q
+    }
+
+    /// The timeline position of source frame `frame`.
+    pub(crate) fn pos_of(self, frame: f64) -> f64 {
+        self.origin + frame / self.q
+    }
+
+    /// Source frames in `n` timeline samples.
+    pub(crate) fn frames(self, n: f64) -> f64 {
+        n * self.q
+    }
+}
+
 fn bands(body: Rect, n: usize) -> impl Iterator<Item = Rect> {
     let h = body.height() / n as f32;
     (0..n).map(move |k| Rect::from_min_size(pos2(body.min.x, body.min.y + h * k as f32), vec2(body.width(), h)))
@@ -55,24 +89,25 @@ fn channel(painter: &Painter, s: &Session, tl: Rect, clip: &Clip, audio: &Source
     let (Some(samples), Some(peaks)) = (audio.channel(ch), audio.peaks.get(ch)) else { return };
     let Some(g) = Grid::new(painter, s, tl, band) else { return };
     let (rectified, power, outlines) = (s.edit.flag("waveform.rectified"), s.edit.flag("waveform.power"), s.edit.flag("waveform.outlines"));
-    let origin = clip.start.saturating_sub(clip.source_offset()) as f64;
+    let axis = SourceAxis::of(clip);
     let gain = |pos: f64| clip.gain_at((pos as Samples).saturating_sub(clip.start).min(clip.length).max(0)) * s.edit.zoom.waveform_zoom;
-    if g.step <= 1.0 {
-        let first = (g.pos_at(g.vis.min.x) - origin).floor().max(0.0) as usize;
-        let last = (g.pos_at(g.vis.max.x) - origin).ceil() as usize;
+    let step = axis.frames(g.step);
+    if step <= 1.0 {
+        let first = axis.frame_at(g.pos_at(g.vis.min.x)).floor().max(0.0) as usize;
+        let last = axis.frame_at(g.pos_at(g.vis.max.x)).ceil() as usize;
         let from = first.saturating_sub(1);
         let points = samples.get(from..samples.len().min(last.saturating_add(2))).unwrap_or_default().iter().zip(from..).map(|(&v, i)| {
-            let pos = origin + i as f64;
+            let pos = axis.pos_of(i as f64);
             pos2(g.x_at(pos), g.cy - level(v * gain(pos)) * g.half)
         });
         painter.add(Shape::line(points.collect(), Stroke::new(g.weight, wave)));
         return;
     }
-    let (start, overlap) = (g.start() - origin, g.overlap());
+    let (start, overlap) = (axis.frame_at(g.start()), axis.frames(g.overlap()));
     let spans = if power {
-        peaks.rms_spans(samples, start, g.step, overlap, g.cols).into_iter().map(|r| r.map(|r| (-r, r))).collect()
+        peaks.rms_spans(samples, start, step, overlap, g.cols).into_iter().map(|r| r.map(|r| (-r, r))).collect()
     } else {
-        peaks.spans(samples, start, g.step, overlap, g.cols)
+        peaks.spans(samples, start, step, overlap, g.cols)
     };
     let base = g.cy + g.half;
     let ys: Vec<Option<(f32, f32)>> = spans
@@ -240,5 +275,35 @@ impl Grid {
                 push(mesh, &mut prev, x + half, span);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SourceAxis;
+    use transit_model::{Clip, ClipId, SourceId};
+
+    /// `the_waveform_draws_the_mapped_source` (ADR 0056 slice 1): the arrangement draws each source
+    /// frame where the clip's mapping plays it, at rate 1 and at stretch 0.5, 2, 1.3 and 0.77, and a
+    /// piece of a split draws its frames exactly where the whole clip drew them. Negative control: the
+    /// base's origin `start − offset` draws a stretched clip at rate 1.
+    #[test]
+    fn the_waveform_draws_the_mapped_source() {
+        for stretch in [1.0, 0.5, 2.0, 1.3, 0.77] {
+            let mut whole = Clip::audio(ClipId(1), "w", SourceId(1), 100, 1_000, 700);
+            whole.stretch = stretch;
+            let axis = SourceAxis::of(&whole);
+            for c in [0, 1, 99, 250, 699] {
+                let pos = (1_000 + c) as f64;
+                assert!((axis.frame_at(pos) - whole.source_pos(c)).abs() < 1e-9, "stretch {stretch}, clip time {c}");
+                assert!((axis.pos_of(whole.source_pos(c)) - pos).abs() < 1e-9, "stretch {stretch}, clip time {c}");
+            }
+            assert_eq!(axis.frames(10.0), 10.0 / stretch);
+            let mut right = whole.clone();
+            right.trim_start_to(1_250);
+            assert_eq!(SourceAxis::of(&right), axis, "stretch {stretch}: the piece draws where the whole clip drew");
+        }
+        let plain = Clip::audio(ClipId(1), "w", SourceId(1), 100, 1_000, 700);
+        assert_eq!(SourceAxis::of(&plain).frame_at(1_000.0).to_bits(), 100f64.to_bits(), "rate 1 is the plain difference");
     }
 }

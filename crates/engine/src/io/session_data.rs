@@ -48,9 +48,10 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
         e.message(transit_model::legacy_sampler::summary(n));
     }
     // A donor clip whose stretch was outside what a clip can play was clamped on parse (ADR 0056
-    // decision 5.2, #604): the donor's line for each picked track, as an Open says it.
+    // decision 5.2, #604), or whose anchor was outside its bound reset (decision 5.5): the donor's
+    // line for each picked track, as an Open says it.
     for t in &picked {
-        for line in other.load_notes.iter().filter(|n| transit_model::is_stretch_load_note(n, &t.name)) {
+        for line in other.load_notes.iter().filter(|n| transit_model::is_clip_load_note(n, &t.name)) {
             e.message(line.clone());
         }
     }

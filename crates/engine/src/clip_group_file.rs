@@ -19,7 +19,11 @@ pub const EXTENSION: &str = "tclips";
 const FORMAT: &str = "transit.clipgroup";
 /// The fork's tag (ADR 0049): read through v0.7.x; from the v0.8.0 tag it moves to `refused_pre_0_7`.
 const LEGACY_FORMAT: &str = "soundcraft.clipgroup";
-const TAGS: Tags = Tags { current: FORMAT, accepted_legacy: &[LEGACY_FORMAT], refused_pre_0_7: &[], what: "clip group file" };
+const TAGS: Tags = Tags { version: VERSION, current: FORMAT, accepted_legacy: &[LEGACY_FORMAT], refused_pre_0_7: &[], what: "clip group file" };
+/// The format version a group file holding a re-anchored clip is written at (ADR 0056 decision 4.4):
+/// a build without the clip's `anchor` would play it from the wrong place, so it refuses the file by
+/// ADR 0049's newer-version rule. A file without one is written at version 1, as before.
+const VERSION: u64 = 2;
 /// Refuse files that would place absurd numbers of clips, tracks or audio files.
 const MAX_CLIPS: usize = 10_000;
 
@@ -104,7 +108,9 @@ pub fn export(e: &Engine, ids: &[ClipId], path: &str) -> Result<usize> {
         }
         out_lanes.push(lane);
     }
-    let file = GroupFile { format: FORMAT.into(), version: 1, sample_rate: s.sample_rate.hz(), length: end - start, lanes: out_lanes, audio };
+    let version = if out_lanes.iter().flatten().any(|c| c.anchor() != 0) { VERSION } else { 1 };
+    let file =
+        GroupFile { format: FORMAT.into(), version: version as u32, sample_rate: s.sample_rate.hz(), length: end - start, lanes: out_lanes, audio };
     let text = serde_json::to_string_pretty(&file).map_err(|err| EngineError::Io(err.to_string()))?;
     crate::io::write_path(&p, text)?;
     Ok(n)
@@ -176,9 +182,18 @@ pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -
         file_of.insert(*old, n);
     }
     let src_rate = f64::from(file.sample_rate.max(1));
-    let s = e.session_mut();
-    let ratio = f64::from(s.sample_rate.hz()) / src_rate;
+    let ratio = f64::from(e.session().sample_rate.hz()) / src_rate;
     let scale = |v: Samples| -> Samples { (v as f64 * ratio).round() as Samples };
+    // Every clip's rescaled mapping inside the numeric bounds before anything is added (ADR 0056
+    // decision 4.4): one clip outside them refuses the file.
+    for c in file.lanes.iter().flatten() {
+        let mut probe = c.clone();
+        rescale(&mut probe, scale);
+        if let Some(why) = probe.domain_problem() {
+            return Err(EngineError::BadParams(id.into(), format!("the clip group file cannot be placed at this sample rate: {why}")));
+        }
+    }
+    let s = e.session_mut();
     let sources: Vec<SourceId> = decoded
         .into_iter()
         .map(|(rel, buf)| {
@@ -210,16 +225,15 @@ pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -
             }
         };
         for mut c in lane {
-            if let ClipContent::Audio { source, offset } = &mut c.content {
+            if let ClipContent::Audio { source, .. } = &mut c.content {
                 let Some(n) = map.get(&source.0) else { continue };
                 *source = *n;
-                *offset = scale(*offset);
             } else if !matches!(c.content, ClipContent::Midi { .. }) {
                 continue;
             }
+            rescale(&mut c, scale);
             c.id = s.new_clip_id();
-            c.start = at.saturating_add(scale(c.start.max(0)));
-            c.length = scale(c.length);
+            c.start = at.saturating_add(c.start);
             c.group = Some(group_id);
             // A stretch outside what a clip can play is clamped and said (ADR 0056 decision 5.2).
             stretch_notes.extend(c.sanitize_noting());
@@ -236,6 +250,19 @@ pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -
         e.message(n.clone());
     }
     Ok(Imported { clips: placed, note })
+}
+
+/// A group file clip's positions at this session's rate: start, length, and an audio clip's offset
+/// and anchor, each rounded to the nearest sample (the clip-time and source-frame scales change
+/// together, so the clip's rate is unchanged; ADR 0056 decision 4.4). The loop, fades, sync point
+/// and envelope are not rescaled, as before.
+fn rescale(c: &mut Clip, scale: impl Fn(Samples) -> Samples) {
+    if let ClipContent::Audio { offset, anchor, .. } = &mut c.content {
+        *offset = scale(*offset);
+        *anchor = scale(*anchor);
+    }
+    c.start = scale(c.start.max(0));
+    c.length = scale(c.length);
 }
 
 fn with_extension(path: &str) -> PathBuf {
@@ -380,6 +407,73 @@ mod tests {
         assert!(e.execute("file.import_clip_groups", &json!({"path": p.to_string_lossy()})).is_err());
         std::fs::write(&p, "{}").unwrap();
         assert!(e.execute("file.import_clip_groups", &json!({"path": p.to_string_lossy()})).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ADR 0056 decision 4.4, export: a group file holding a re-anchored clip (a split piece of a
+    /// stretched clip) is written at format version 2, which a build reading only version 1 refuses
+    /// instead of playing the piece from the wrong place; this build imports it with its anchor. A
+    /// file without one is written at version 1, as before.
+    #[test]
+    fn a_group_file_with_an_anchored_clip_is_written_at_the_next_version() {
+        use transit_model::{ChannelFormat, Clip, TrackKind};
+        let dir = transit_test_support::TestDir::new("grp-anchor");
+        let _ = std::fs::create_dir_all(&dir);
+        let mut e = crate::Engine::default();
+        let s = e.session_mut();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        let audio = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![(0..4_000).map(|i| i as f32).collect()] };
+        let src = crate::io::add_source(s, "Ramp", audio, None, transit_audio_io::FileFormat::Wav);
+        let id = s.new_clip_id();
+        let mut c = Clip::audio(id, "Ramp", src, 100, 0, 400);
+        c.stretch = 2.0;
+        crate::edit::place_clip(s, t, c);
+        s.edit.selected_tracks = vec![t];
+        let plain = dir.join("plain.tclips").to_string_lossy().into_owned();
+        e.execute("file.export_clip_groups", &json!({"path": plain, "clips": [id.0]})).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&plain).unwrap()).unwrap();
+        assert_eq!(v["version"], 1, "an unsplit stretched clip has no anchor");
+        e.execute("edit.separate", &json!({"tracks": [t.0], "at": 100})).unwrap();
+        let piece = e.session().track(t).unwrap().clips()[1].clone();
+        assert_eq!(piece.anchor(), -100);
+        let path = dir.join("piece.tclips").to_string_lossy().into_owned();
+        e.execute("file.export_clip_groups", &json!({"path": path, "clips": [piece.id.0]})).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["version"], 2);
+        let older = super::Tags { version: crate::file_tags::VERSION, ..super::TAGS };
+        assert!(matches!(older.check(&v), Err(super::Refusal::Message(m)) if m.contains("newer transit")), "a build reading version 1 refuses it");
+        let r = e.execute("file.import_clip_groups", &json!({"path": path, "at": 10_000})).unwrap();
+        let placed = e.session().find_clip(transit_model::ClipId(r["clips"][0].as_u64().unwrap())).unwrap().1.clone();
+        assert_eq!((placed.source_offset(), placed.anchor(), placed.stretch, placed.length), (100, -100, 2.0, 300));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// ADR 0056 decision 4.4, import: a 44.1 kHz group file into a 48 kHz session rescales the
+    /// anchor with the offset (each rounded to the nearest sample, so the rate is unchanged); a clip
+    /// whose rescaled anchor leaves +-2^46 refuses the whole file and adds nothing.
+    #[test]
+    fn a_group_file_import_rescales_the_anchor_with_the_offset() {
+        let dir = transit_test_support::TestDir::new("grp-rescale");
+        let _ = std::fs::create_dir_all(&dir);
+        let audio = transit_audio_io::AudioBuffer { sample_rate: 44_100, channels: vec![vec![0.25; 4_410]] };
+        std::fs::write(dir.join("k.wav"), transit_audio_io::encode(&audio, &transit_audio_io::EncodeOptions::default()).unwrap()).unwrap();
+        let clip = |anchor: i64| {
+            json!({"id": 1, "name": "k", "start": 441, "length": 882, "stretch": 2.0,
+                "content": {"Audio": {"source": 1, "offset": 441, "anchor": anchor}}})
+        };
+        let file = |anchor: i64| json!({"format": "transit.clipgroup", "version": 2, "sample_rate": 44100, "length": 1323, "lanes": [[clip(anchor)]], "audio": {"1": "k.wav"}});
+        let p = dir.join("k.tclips");
+        std::fs::write(&p, file(-441).to_string()).unwrap();
+        let mut e = crate::demo::demo_engine();
+        let r = e.execute("file.import_clip_groups", &json!({"path": p.to_string_lossy(), "at": 0})).unwrap();
+        let c = e.session().find_clip(transit_model::ClipId(r["clips"][0].as_u64().unwrap())).unwrap().1.clone();
+        assert_eq!((c.source_offset(), c.anchor(), c.start, c.length), (480, -480, 480, 960));
+        let far = (transit_model::MAX_ANCHOR as f64 * 44_100.0 / 48_000.0) as i64 + 1_000;
+        std::fs::write(&p, file(-far).to_string()).unwrap();
+        let (sources, tracks) = (e.session().sources.len(), e.session().tracks.len());
+        let err = e.execute("file.import_clip_groups", &json!({"path": p.to_string_lossy(), "at": 0})).unwrap_err();
+        assert!(err.to_string().contains("its anchor"), "{err}");
+        assert_eq!((e.session().sources.len(), e.session().tracks.len()), (sources, tracks), "nothing added");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

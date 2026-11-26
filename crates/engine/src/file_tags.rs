@@ -10,11 +10,13 @@ use serde_json::Value;
 /// The refusal for a file saved by a version before transit 0.7.0, once its tag is no longer read.
 pub const PRE_0_7_REFUSAL: &str = "This file was saved by a version before transit 0.7.0. Open and save it in transit 0.7.0 first: https://github.com/transit-audio/transit/releases/tag/v0.7.0";
 
-/// The highest format `version` the readers understand.
+/// The highest format `version` the readers understand, unless a reader's [`Tags::version`] is newer.
 pub const VERSION: u64 = 1;
 
 /// The tags one reader knows.
 pub struct Tags {
+    /// The highest format `version` this reader understands ([`VERSION`] unless its format moved on).
+    pub version: u64,
     /// What the writer writes.
     pub current: &'static str,
     /// Read as well as `current`; a read tells the caller to write the file again.
@@ -59,7 +61,7 @@ impl Tags {
             return Err(Refusal::Message(format!("not a transit {} (format \"{format}\")", self.what)));
         };
         let version = v.get("version").and_then(Value::as_u64).ok_or(Refusal::Structural)?;
-        if version > VERSION {
+        if version > self.version {
             return Err(Refusal::Message(format!("saved by a newer transit (format version {version}); open it in that version or later")));
         }
         Ok(tag)
@@ -77,7 +79,7 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    const TAGS: Tags = Tags { current: "new", accepted_legacy: &["old"], refused_pre_0_7: &["older"], what: "thing" };
+    const TAGS: Tags = Tags { version: VERSION, current: "new", accepted_legacy: &["old"], refused_pre_0_7: &["older"], what: "thing" };
 
     #[test]
     fn tags_and_versions() {

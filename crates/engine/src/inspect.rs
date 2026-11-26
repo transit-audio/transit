@@ -17,9 +17,12 @@ fn clip_json(e: &Engine, c: &Clip) -> Value {
         v["loop"] = json!({"start": l.start, "end": l.end});
     }
     match &c.content {
-        ClipContent::Audio { source, offset } => {
+        ClipContent::Audio { source, offset, anchor } => {
             v["source"] = json!(source);
             v["offset"] = json!(offset);
+            if *anchor != 0 {
+                v["anchor"] = json!(anchor);
+            }
         }
         ClipContent::Midi { sequence } => {
             v["notes"] = json!(sequence.notes.len());
