@@ -165,11 +165,11 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
                 m.mixer.volume_db = tr.mixer.volume_db;
                 m.mixer.output = tr.mixer.output.clone();
                 m.mixer.sends = tr.mixer.sends.clone();
-                // A stereo source's sides stay where they were: hard left and hard right, exactly the
-                // gains its stereo track's two panners have at their defaults. A wider file's channels
-                // carry no layout here, so they stay centered.
+                // A stereo source's sides stay where they were: each side takes its stereo track's
+                // panner (hard left and hard right at their defaults). A wider file's channels carry
+                // no layout here, so they stay centered.
                 if n == 2 {
-                    m.mixer.pan = vec![if ch == 0 { -1.0 } else { 1.0 }];
+                    m.mixer.pan = vec![stereo_side_pan(&tr, ch)];
                 }
             }
             lanes.push(nt);
@@ -203,6 +203,19 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         out["notice"] = json!(format!("Split to {} mono tracks. The inserts on {} were not copied.", new_tracks.len(), with_inserts.join(", ")));
     }
     Ok(out)
+}
+
+/// The pan of the mono track for side `ch` of a split stereo clip on `tr`: that side's own panner
+/// when the track is stereo (hard left and right at their defaults), else hard left or right. A
+/// stereo track's panners are balance gains (the Zero law); a mono track pans under the pan law
+/// the mix is set to. The split therefore sounds as the stereo track did at hard left and hard
+/// right under every law, and anywhere under the Zero law; a panner between them under another law
+/// (the default is -3 dB) puts the side at that law's gains instead. Pan automation is not carried.
+fn stereo_side_pan(tr: &transit_model::Track, ch: usize) -> f32 {
+    match tr.mixer.pan.as_slice() {
+        [l, r] => [*l, *r][ch.min(1)],
+        _ => [-1.0, 1.0][ch.min(1)],
+    }
 }
 
 /// Channel `ch` of in-memory `audio` as mono audio, its peaks kept (rebuilt when there are none).

@@ -429,3 +429,51 @@ fn a_stereo_and_a_wider_clip_on_one_track_split_onto_separate_tracks() {
     let diff = before.iter().flatten().zip(after.iter().flatten()).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
     assert!(after == before, "the stereo clip renders exactly as before (largest difference {diff})");
 }
+
+/// #771: a stereo track whose panners were moved takes them to its two mono tracks. Swapped to hard
+/// right and hard left the pans are exact under every pan law, so the split renders exactly as the
+/// stereo track did.
+#[test]
+fn a_split_carries_a_stereo_tracks_swapped_panners_and_renders_as_it_did() {
+    let d = transit_test_support::TestDir::new("split-to-mono-swapped");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("Mics.wav");
+    let sample = |i: u32, ch: u16| (((i * if ch == 0 { 37 } else { 91 }) % 2_000) as i16 - 1_000) * 16;
+    std::fs::write(&wav, pcm_wav(4_800, 2, sample)).unwrap();
+    let mut e = Engine::default();
+    let mics = track(&mut e, "stereo");
+    e.session_mut().track_mut(TrackId(mics)).unwrap().mixer.pan = vec![1.0, -1.0];
+    e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": mics, "at": 960})).unwrap();
+    let range = transit_time::Range::new(0, 6_400);
+    let before = transit_mix::render_range(e.session(), range, 512);
+    assert!(before.len() == 2 && before.iter().all(|ch| ch.iter().any(|v| *v != 0.0)), "the stereo track sounds on both sides");
+    let cid = e.session().track(TrackId(mics)).unwrap().clips()[0].id.0;
+    let r = e.execute("clip.split_to_mono", &json!({"clips": [cid]})).unwrap();
+    let pans: Vec<Vec<f32>> = (0..2).map(|i| e.session().track(TrackId(r["tracks"][i].as_u64().unwrap())).unwrap().mixer.pan.clone()).collect();
+    assert_eq!(pans, [vec![1.0], vec![-1.0]], "each side takes its panner");
+    let after = transit_mix::render_range(e.session(), range, 512);
+    let diff = before.iter().flatten().zip(after.iter().flatten()).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(after == before, "the split renders exactly as the stereo track did (largest difference {diff})");
+}
+
+/// #771: panners between hard left and right are carried as they are (exact under the Zero pan law;
+/// under the others a mono track pans by that law's gains: the stated limit), and a stereo clip on a
+/// mono track, which has one panner, keeps hard left and right.
+#[test]
+fn a_split_carries_a_stereo_tracks_moved_panners_and_a_mono_track_keeps_hard_sides() {
+    let d = transit_test_support::TestDir::new("split-to-mono-moved");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("Mics.wav");
+    std::fs::write(&wav, stereo_wav(480, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    let (wide, mono) = (track(&mut e, "stereo"), track(&mut e, "mono"));
+    e.session_mut().track_mut(TrackId(wide)).unwrap().mixer.pan = vec![-0.5, 0.25];
+    let mut clips = Vec::new();
+    for t in [wide, mono] {
+        e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": t})).unwrap();
+        clips.push(e.session().track(TrackId(t)).unwrap().clips()[0].id.0);
+    }
+    let r = e.execute("clip.split_to_mono", &json!({"clips": clips})).unwrap();
+    let pans: Vec<Vec<f32>> = r["tracks"].as_array().unwrap().iter().map(|t| e.session().track(TrackId(t.as_u64().unwrap())).unwrap().mixer.pan.clone()).collect();
+    assert_eq!(pans, [vec![-0.5], vec![0.25], vec![-1.0], vec![1.0]]);
+}
