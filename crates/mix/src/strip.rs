@@ -81,9 +81,14 @@ pub(crate) fn process_strip(t: &Track, strip: &mut Strip, block: &StripRender<'_
 }
 
 /// Whether audio track `t` hears its live input this block instead of its clips: Input Monitoring,
-/// or record arm while stopped or recording when Monitor Armed Tracks is on (#730).
+/// or record arm while stopped or recording when Monitor Armed Tracks is on (#730). A frozen track
+/// never does: it plays its render (the plan's session makes it an audio track of that render and
+/// keeps its arm and Input Monitoring, `Session::with_frozen_audio`; a freeze whose render is
+/// missing is cleared there and plays live, so it monitors as any track).
 pub(crate) fn hears_input(t: &Track, live: &LiveInput<'_>) -> bool {
-    !live.input.is_empty() && (t.mixer.input_monitor || (live.monitor_armed && t.mixer.record_arm && (live.monitor_only || live.recording)))
+    !live.input.is_empty()
+        && t.freeze.is_none()
+        && (t.mixer.input_monitor || (live.monitor_armed && t.mixer.record_arm && (live.monitor_only || live.recording)))
 }
 
 /// The live input channel strip channel `k` of `t` reads (of `n_in`), or `None` when it reads

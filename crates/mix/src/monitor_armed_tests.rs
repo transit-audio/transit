@@ -1,5 +1,6 @@
 //! Options > Monitor Armed Tracks (#730): off, arming an audio track does not monitor it; Input
-//! Monitoring still does; instrument and MIDI tracks are not affected.
+//! Monitoring still does; instrument and MIDI tracks are not affected. A frozen track never
+//! monitors its input.
 
 use super::tests::{PlanRig, session_with_dc, synth_session};
 
@@ -57,4 +58,35 @@ fn off_an_armed_instrument_track_still_sounds() {
         loudest = loudest.max(rig.render(0).iter().flatten().fold(0.0f32, |m, x| m.max(x.abs())));
     }
     assert!(loudest > 0.01, "the played note sounds: {loudest}");
+}
+
+/// The frozen dc track (its render 0.5), armed, with a live input of 0.25: what it renders at
+/// sample 100.
+fn frozen(monitor_only: bool, recording: bool, input_monitor: bool) -> f32 {
+    let (mut s, t) = session_with_dc(0.5, 4800);
+    let tr = s.track_mut(t).unwrap();
+    tr.mixer.record_arm = true;
+    tr.mixer.input_monitor = input_monitor;
+    // The render is the dc source itself; it is in the pool, so the freeze plays it.
+    tr.freeze =
+        Some(transit_model::Frozen { source: transit_model::SourceId(900), start: 0, length: 4800, hash: tr.freeze_hash(), revision: 0, latency: 0 });
+    let mut rig = PlanRig::new(512);
+    rig.publish(&s);
+    rig.eng.input = vec![vec![0.25; 512]];
+    rig.eng.monitor_only = monitor_only;
+    rig.eng.recording = recording;
+    rig.eng.monitor_armed = true;
+    rig.render(0)[0][100]
+}
+
+/// With Monitor Armed Tracks on, a frozen armed track does not play its hardware input: stopped it
+/// is silent, recording or playing it plays its render; Input Monitoring does not bring the input
+/// in either.
+#[test]
+fn a_frozen_armed_track_does_not_monitor_its_input() {
+    for input_monitor in [false, true] {
+        assert_eq!(frozen(true, false, input_monitor), 0.0, "stopped, Input Monitoring {input_monitor}: silence");
+        assert!((frozen(false, true, input_monitor) - CLIP).abs() < 1e-3, "recording, Input Monitoring {input_monitor}: the render");
+        assert!((frozen(false, false, input_monitor) - CLIP).abs() < 1e-3, "playing, Input Monitoring {input_monitor}: the render");
+    }
 }

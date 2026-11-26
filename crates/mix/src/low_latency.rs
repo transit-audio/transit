@@ -168,7 +168,8 @@ struct Paths {
 
 impl Paths {
     /// `monitor_armed` is Options > Monitor Armed Tracks: off, a record-armed audio track is not a
-    /// live path unless Input Monitoring is on (instrument and MIDI tracks stay seeds).
+    /// live path unless Input Monitoring is on (instrument and MIDI tracks stay seeds). A frozen
+    /// track is never a seed: it monitors nothing.
     fn new(s: &Session, io: &transit_model::IoMap, target: RenderTarget, monitor_armed: bool) -> Self {
         let main = s.tracks.len() + s.busses.len();
         let mut route = RouteScratch::new();
@@ -214,7 +215,8 @@ impl Paths {
                 seeds[main] = true;
                 continue;
             }
-            seeds[i] = t.mixer.input_monitor || (t.mixer.record_arm && (monitor_armed || t.kind != TrackKind::Audio));
+            // A frozen track plays its render, never its input, armed or not (#730).
+            seeds[i] = t.freeze.is_none() && (t.mixer.input_monitor || (t.mixer.record_arm && (monitor_armed || t.kind != TrackKind::Audio)));
             terminal[i] = sink::sink_routes(t, &sinks).iter().any(Option::is_some);
         }
         Self { main, edges, order, seeds, terminal, sinks }
@@ -339,5 +341,23 @@ mod tests {
             [false, true, true],
             "armed audio drops out; input monitoring and instruments stay"
         );
+    }
+
+    #[test]
+    fn a_frozen_track_never_seeds_a_live_path() {
+        let mut s = Session::default();
+        let armed = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+        let monitored = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+        let synth = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+        let frozen = transit_model::Frozen { source: transit_model::SourceId(1), start: 0, length: 1000, hash: 0, revision: 0, latency: 0 };
+        for t in [armed, monitored, synth] {
+            let t = s.track_mut(t).unwrap();
+            t.mixer.record_arm = true;
+            t.freeze = Some(frozen.clone());
+        }
+        s.track_mut(monitored).unwrap().mixer.input_monitor = true;
+        let io = transit_model::IoMap::for_device("test", "duplex", 2, 2);
+        let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 64, out_channels: 2, in_channels: 2 };
+        assert_eq!(&Paths::new(&s, &io, target, true).seeds[..3], [false, false, false], "frozen: armed, monitored and instrument alike");
     }
 }
