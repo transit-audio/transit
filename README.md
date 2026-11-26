@@ -21,7 +21,7 @@ A desktop DAW in pure Rust with Ableton/Logic-style ergonomics and its own audio
 layer and egui UI.
 
 > [!NOTE]
-> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.7.4](https://github.com/transit-audio/transit/releases/tag/v0.7.4) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
+> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.7.5](https://github.com/transit-audio/transit/releases/tag/v0.7.5) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
 > correctness, stability and performance, measured on real hardware, ahead of new features.
 > Expect rough edges in the UI and some missing features; the audio engine, recording alignment
 > and device handling get fixed first, following [the engineering principles](docs/principles.md).
@@ -50,7 +50,7 @@ Send us a measurement with the [measurement issue template](https://github.com/t
 
 ## Downloads
 
-The current release is [v0.7.4](https://github.com/transit-audio/transit/releases/tag/v0.7.4). The files are `transit-v0.7.4-windows-x86_64.msi` and `.zip`, `transit-v0.7.4-macos-arm64.dmg` and `.tar.gz`, `transit-v0.7.4-linux-x86_64.tar.gz`, and `transit-0.7.4-linux-x86_64.AppImage`, `.deb` and `.rpm`.
+The current release is [v0.7.5](https://github.com/transit-audio/transit/releases/tag/v0.7.5). The files are `transit-v0.7.5-windows-x86_64.msi` and `.zip`, `transit-v0.7.5-macos-arm64.dmg` and `.tar.gz`, `transit-v0.7.5-linux-x86_64.tar.gz`, and `transit-0.7.5-linux-x86_64.AppImage`, `.deb` and `.rpm`.
 
 - **Windows (x86_64):** one download, the `.zip` (portable) or the `.msi` (installer with the standard install dialogs and license; it registers `.transit` and `.transitz`). It has native WASAPI and native ASIO.
 - **macOS (Apple silicon):** the `.dmg`; open it and drag `transit.app` to Applications.
@@ -178,6 +178,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Freeze, Unfreeze and Flatten a track (the snowflake on the track header); a frozen track plays its rendered audio, with its key sources running.
 - Group tracks: Track > New Group Track or the "+ Group" quick-add; Ctrl+G folds the selected tracks into a group, Ctrl+Shift+G ungroups, and you can drag track headers into a folder. Edit Group… is the separate edit-group feature.
 - Clip fades: the whole top corner of a clip is the fade zone, and fades are drawn as visible dimmed areas with their curve. Drag a fade to set its length, drag the curve to bend it, and drag a fade across the junction into an overlapping clip to crossfade. Fade In, Fade Out and Crossfade lengths and curves are in the clip inspector; Alt+[ and Alt+] fade to the cursor.
+- Split to Mono Tracks: right-click a stereo or wider audio clip and each channel goes to a new mono track below it, with the clip's timing, fades and gain; the original is muted and the whole split is one undo step. A file dropped from the file manager lands on the track under the pointer, at the pointer's time, or on a new track below the tracks.
 - Clip tools: Join or Consolidate (Ctrl+J), Crop (Ctrl+Shift+J), Trim Start and Trim End to the cursor (`[` and `]`), Nudge by grid with Alt+arrows (Alt+Shift for fine), and Rename and Color in the clip menu; right-clicking a clip shows clip actions only.
 - Clip-internal loops: drag the loop handle at a clip header's upper right to repeat the clip in cycles (dividers show each cycle; Alt-drag makes independent copies, Ctrl/Cmd-drag overwrites the clips in the way). Edits inside the loop apply to every cycle.
 - Track height from 16 to 440 points: drag a header's bottom edge (Alt resizes every track), Alt+wheel over one track, Alt+= and Alt+- for the presets, View > Track Height to reset. Heights are saved in the session; automation and take lanes follow their track.
@@ -203,7 +204,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Hosts CLAP and VST3 plug-ins, with their own editor windows, saved state, and reported latency. A preset picked in a plug-in's own editor does not show as modified, Audio > Scan Plug-ins rescans every file, a scan that finds files and loads none says why, and Help > Debug Logging adds a trace of the calls between transit and each plug-in.
 - Audio Units (macOS) are not supported yet: a unit loads and processes audio, but its editor window cannot be opened, and sidechain inputs and extra buses are not connected ([#755](https://github.com/transit-audio/transit/issues/755)). Use the VST3 or CLAP build of a plug-in on the Mac.
 - The plug-in window header has a preset dropdown (Save, Save As…, Load…, previous/next), Bypass and a menu (Reset, Copy/Paste state, Delete, Show in chain). User presets are `.vstpreset` files other hosts can read.
-- Plug-in editors scale with the display: VST3 and CLAP editors receive the window's content scale, rescale when dragged between monitors with different scaling, and CLAP editors are sharp embedded and floating.
+- Plug-in editors scale with the display: VST3 and CLAP editors receive the window's content scale, rescale when dragged between monitors with different scaling, and CLAP editors are sharp embedded and floating. On Windows, the plug-in window's menu has a Scale submenu (Auto, or 50% to 200%, remembered per plug-in on this machine), and an editor that cannot draw itself at the display's scale can be enlarged by Windows when you pick that explicitly; Automatic never stretches.
 - The device card shows Loading while a heavy plug-in instantiates.
 - Plug-ins load on a host thread, so a slow or stuck plug-in no longer freezes the UI: its slot reads "Loading…" while it instantiates and "Not responding" if it stops answering. A slow load shows how long it has taken, the phase it is in and how long it took last time; the status line reports loads and editor opens over 2 s.
 - Plug-in browser with a background scan and your own search folders.
@@ -285,6 +286,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Stems by output path from the Export Audio dialog.
 - A take that could not be placed (an audio take wholly before bar 1, a deleted track, an unreadable file) is listed under Unplaced takes with its reason and file, and Save As keeps the listing working. A hosted plug-in's own state changes mark the session modified, and transit autosaves the plug-ins' settings every two minutes. ASIO close, reopen and stop are safe against a driver or plug-in that misbehaves, and a recording says when and where a take lost input.
 - Bounce in Place turns a track's clips, or only the selected clips, into audio: to a new track or an existing one, with the source left, muted or hidden, and its clips and takes always kept.
+- Dialogs hold the app: a modal dialog opens centered and cannot be dragged, dims everything behind it, and keys, shortcuts, the transport and clicks behind it do nothing until you answer it; Escape and Enter answer only the top dialog.
 - Full undo history; every edit is a command.
 - Autosave, and sessions saved as versioned, human-readable JSON in `.transit` files.
 - Long takes stay with their session: a session recovered after a crash keeps its long takes and offline files in its own folder, and Save As, Save Copy In and the first save of an untitled session copy long take files into the session's Audio Files folder; if a copy fails, the save fails naming the file and the earlier session file is left as it was. After the copy the open session plays that take from the new folder at once, and a save warning (a take that could not be moved) shows in the status line. An unreadable take refuses bounces and exports naming the take, instead of rendering silence. A preset name keeps its dots ("Bass v1.5" and "Bass v1.2" are two presets), and saving a track preset, Sampler kit or plug-in preset over an existing file through the command channel is refused unless the call says `replace: true`.
