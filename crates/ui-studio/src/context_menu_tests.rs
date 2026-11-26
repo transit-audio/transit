@@ -301,6 +301,37 @@ fn split_to_mono_tracks_says_the_inserts_were_not_copied() {
     assert_eq!(t.app.status, "Split to 2 mono tracks. The inserts on Mics were not copied.");
 }
 
+/// #771: the row is disabled, with the engine's reason, for a stereo clip on a frozen track and
+/// for a clip of more than 64 channels, where the command would refuse: a click runs nothing, so
+/// no refusal reaches the status line.
+#[test]
+fn split_to_mono_tracks_is_disabled_where_the_engine_would_refuse() {
+    let mut t = T::new();
+    let (frozen_track, frozen) = audio_clip(&mut t, "Frozen", 2);
+    let (_, wide) = audio_clip(&mut t, "Wide", 65);
+    let status = t.app.status.clone();
+    let source = transit_model::SourceId(1);
+    t.app.engine.session_mut().track_mut(frozen_track).unwrap().freeze =
+        Some(transit_model::Frozen { source, start: 0, length: 4_800, hash: 0, revision: 0, latency: 0 });
+    for (what, clip, reason) in [
+        ("a stereo clip on a frozen track", frozen, "Frozen is frozen: unfreeze it to split its clips"),
+        ("a 65-channel clip", wide, "Wide has 65 channels: a clip splits into at most 64 tracks"),
+    ] {
+        t.app.engine.session_mut().edit.selected_clips = vec![clip];
+        t.frames(3);
+        assert_eq!(crate::arrange::split_to_mono_blocked(t.app.engine.session()).as_deref(), Some(reason), "{what}");
+        let tracks = t.app.engine.session().tracks.len();
+        let at = t.app.arrange.layout.clips.iter().find(|c| c.id == clip.0).unwrap().rect;
+        t.click(at, "secondary");
+        let row = find(&t.app.arrange.menu, "Split to Mono Tracks");
+        assert!(drawn_in(&t, &row, "Split to Mono Tracks").is_some(), "{what}: the row is shown");
+        t.click(row.rect, "primary");
+        assert_eq!(t.app.engine.session().tracks.len(), tracks, "{what}: nothing split");
+        assert_eq!(t.app.status, status, "{what}: the disabled row runs nothing, so no refusal is said");
+        t.input("ui.key", json!({"key": "escape"}));
+    }
+}
+
 const ADD_ROWS: [&str; 4] = ["Add Mono Audio Track", "Add Stereo Audio Track", "Add Instrument Track", "Add MIDI Track"];
 
 /// Where `label` is drawn inside the popup that holds `anchor` (a recorded row), if it is.

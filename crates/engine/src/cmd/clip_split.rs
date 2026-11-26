@@ -50,6 +50,26 @@ fn with_label(base: &str, sep: &str, label: &str, max: usize) -> String {
     format!("{}{sep}{label}", base.chars().take(keep).collect::<String>())
 }
 
+/// Why splitting `ids` is refused before anything is written, in the words the command and the clip
+/// menu both give: a clip of more than [`MAX_CHANNELS`] channels, or a stereo or wider clip on a
+/// frozen track (muting the original edits the track). `None` when neither applies.
+pub fn split_refusal(s: &transit_model::Session, ids: &[ClipId]) -> Option<String> {
+    for id in ids {
+        let Some((t, c)) = s.find_clip(*id) else { continue };
+        let ClipContent::Audio { source, .. } = c.content else { continue };
+        let n = s.pool.get(source).map_or(0, |a| a.buffer.num_channels());
+        if n > MAX_CHANNELS {
+            return Some(format!("{} has {n} channels: a clip splits into at most {MAX_CHANNELS} tracks", c.name));
+        }
+        if let (true, Some(tr)) = (n > 1, s.track(t))
+            && tr.freeze.is_some()
+        {
+            return Some(format!("{} is frozen: unfreeze it to split its clips", tr.name));
+        }
+    }
+    None
+}
+
 /// A channel's audio, ready to become a source.
 enum Mono {
     Memory(SourceAudio),
@@ -65,25 +85,25 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut seen = std::collections::HashSet::new();
     ids.retain(|id| seen.insert(*id));
     let s = e.session();
+    if let Some(id) = ids.iter().find(|id| s.find_clip(**id).is_none()) {
+        return Err(bad(ID, format!("unknown clip {}", id.0)));
+    }
+    // Refused before any file is written.
+    if let Some(why) = split_refusal(s, &ids) {
+        return Err(bad(ID, why));
+    }
     // The clips to split on each track, in track order, with their sources' channel counts.
     let mut by_track: BTreeMap<usize, (TrackId, Vec<(ClipId, SourceId, usize)>)> = BTreeMap::new();
     for id in &ids {
-        let (t, c) = s.find_clip(*id).ok_or_else(|| bad(ID, format!("unknown clip {}", id.0)))?;
+        let Some((t, c)) = s.find_clip(*id) else { continue };
         let ClipContent::Audio { source, .. } = c.content else { continue };
         let n = s.pool.get(source).map_or(0, |a| a.buffer.num_channels());
-        if n > MAX_CHANNELS {
-            return Err(bad(ID, format!("{} has {n} channels: a clip splits into at most {MAX_CHANNELS} tracks", c.name)));
-        }
         if let (true, Some(i)) = (n > 1, s.track_index(t)) {
             by_track.entry(i).or_insert((t, Vec::new())).1.push((*id, source, n));
         }
     }
     if by_track.is_empty() {
         return Err(bad(ID, "no stereo or wider audio clip is selected"));
-    }
-    // Muting the originals edits their tracks: refused before any file is written.
-    if let Some(tr) = by_track.values().filter_map(|(t, _)| s.track(*t)).find(|t| t.freeze.is_some()) {
-        return Err(bad(ID, format!("{} is frozen: unfreeze it to split its clips", tr.name)));
     }
     // Every channel's audio before the session changes, so a refusal leaves it as it was and no
     // file written for it behind.

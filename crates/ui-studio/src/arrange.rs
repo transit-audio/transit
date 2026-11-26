@@ -858,9 +858,8 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
         // Each channel of the selected stereo or wider clips on a new mono track below; disabled
         // while no selected clip has more than one channel (the engine refuses those).
         if on_clip {
-            let b = ui
-                .add_enabled(splits_to_mono(s), crate::chrome::MenuRow::new(SPLIT_TO_MONO))
-                .on_disabled_hover_text("Select a stereo audio clip first");
+            let why = split_to_mono_blocked(s);
+            let b = ui.add_enabled(why.is_none(), crate::chrome::MenuRow::new(SPLIT_TO_MONO)).on_disabled_hover_text(why.unwrap_or_default());
             app.arrange.menu.retain(|m| m.label != SPLIT_TO_MONO);
             app.arrange.menu.push(crate::mixer::MenuItem::at(ui, SPLIT_TO_MONO.into(), String::new(), b.rect));
             if b.clicked() {
@@ -875,15 +874,20 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
 
 const SPLIT_TO_MONO: &str = "Split to Mono Tracks";
 
-/// Whether a selected clip is an audio clip of two or more channels: what Split to Mono Tracks
-/// takes.
-fn splits_to_mono(s: &Session) -> bool {
-    s.edit.selected_clips.iter().any(|id| {
+/// Why Split to Mono Tracks cannot run on the selection (the reason the greyed row shows), or
+/// `None` when it can: no selected clip is an audio clip of two or more channels, or the engine
+/// would refuse the selection (a clip too wide to split, a stereo clip on a frozen track).
+pub(crate) fn split_to_mono_blocked(s: &Session) -> Option<String> {
+    let splits = s.edit.selected_clips.iter().any(|id| {
         s.find_clip(*id).is_some_and(|(_, c)| match c.content {
             ClipContent::Audio { source, .. } => s.pool.get(source).is_some_and(|a| a.buffer.num_channels() > 1),
             _ => false,
         })
-    })
+    });
+    if !splits {
+        return Some("Select a stereo audio clip first".into());
+    }
+    transit_engine::cmd::split_refusal(s, &s.edit.selected_clips)
 }
 
 /// The empty lane's "Add ... Track" rows.

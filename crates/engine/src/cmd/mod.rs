@@ -14,6 +14,7 @@ pub(crate) mod clip_bounce;
 mod clip_list;
 mod clip_more;
 mod clip_split;
+pub use clip_split::split_refusal;
 mod device_pages;
 mod edit;
 mod edit_more;

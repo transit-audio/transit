@@ -364,3 +364,35 @@ fn long_track_names_that_differ_at_the_end_stay_unique_through_a_save() {
     assert_eq!(after, before, "a reopen changes no name");
     assert_eq!(after.iter().collect::<std::collections::HashSet<_>>().len(), 6, "{} names, all different", after.len());
 }
+
+/// #771: the refusals the clip menu shows as the reason of its greyed row are the command's own:
+/// `split_refusal` and `clip.split_to_mono` give the same words, and a refusal changes nothing.
+#[test]
+fn a_frozen_track_or_a_too_wide_clip_is_refused_in_the_words_the_menu_shows() {
+    let mut e = Engine::default();
+    let audio = |e: &mut Engine, name: &str, channels: usize| {
+        let t = e.execute("track.new", &json!({"kind": "audio", "format": "stereo", "name": name})).unwrap()["tracks"][0].as_u64().unwrap();
+        let s = e.session_mut();
+        let buf = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.1; 480]; channels] };
+        let src = transit_engine::io::add_source(s, name, buf, None, transit_audio_io::FileFormat::Wav);
+        let id = s.new_clip_id();
+        s.track_mut(TrackId(t)).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::audio(id, name, src, 0, 0, 480));
+        (TrackId(t), src, id)
+    };
+    let (frozen_track, src, frozen) = audio(&mut e, "Frozen", 2);
+    let (_, _, wide) = audio(&mut e, "Wide", 65);
+    let (_, _, fine) = audio(&mut e, "Fine", 64);
+    e.session_mut().track_mut(frozen_track).unwrap().freeze =
+        Some(transit_model::Frozen { source: src, start: 0, length: 480, hash: 0, revision: 0, latency: 0 });
+    let tracks = e.session().tracks.len();
+    for (clip, why) in [
+        (frozen, "Frozen is frozen: unfreeze it to split its clips"),
+        (wide, "Wide has 65 channels: a clip splits into at most 64 tracks"),
+    ] {
+        assert_eq!(transit_engine::cmd::split_refusal(e.session(), &[clip]).as_deref(), Some(why));
+        let r = e.execute("clip.split_to_mono", &json!({"clips": [clip.0]}));
+        assert!(r.as_ref().is_err_and(|err| err.to_string().contains(why)), "{r:?}");
+        assert_eq!(e.session().tracks.len(), tracks, "a refusal adds no track");
+    }
+    assert_eq!(transit_engine::cmd::split_refusal(e.session(), &[fine]), None, "64 channels split");
+}
