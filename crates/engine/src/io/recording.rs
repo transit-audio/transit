@@ -219,37 +219,33 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
     let mut out = Vec::new();
     let mut unplaced = Vec::new();
     for (tid, path) in takes {
-        let got = match take_audio(e, &path) {
+        let mut got = match take_audio(e, &path) {
             Ok(got) => got,
             Err(entry) => {
                 unplaced.extend(entry);
                 continue;
             }
         };
+        // Every length below is in session samples, the take's length on the timeline: a take the
+        // interface recorded at another rate is converted before it is measured (#442). A take
+        // played from its file is at the session's rate already.
+        let rate = e.session().sample_rate.hz();
+        let resampled = match &mut got {
+            Got::Memory(buf) => {
+                let other = buf.sample_rate != rate;
+                super::to_rate(buf, rate);
+                other
+            }
+            Got::Disk(_) => false,
+        };
         if got.frames() == 0 {
             e.message(format!("The take {} is empty; no audio was recorded.", path.display()));
             continue;
         }
         let mut not_placed = e.session().track(tid).is_none().then(|| "track was deleted".to_string());
-        let s = e.session_mut();
-        let name = path.file_stem().and_then(|x| x.to_str()).unwrap_or("Take");
-        let src = match got {
-            Got::Memory(buf) => {
-                let resampled = buf.sample_rate != s.sample_rate.hz();
-                let src = add_source(s, name, buf, Some(&path.to_string_lossy()), FileFormat::Wav);
-                if let Some(x) = s.sources.last_mut() {
-                    x.unsaved = resampled;
-                }
-                src
-            }
-            // A long take is one clip on one source played from its file (ADR 0035).
-            Got::Disk(audio) => super::disk::add_disk_source(s, name, audio, &path.to_string_lossy()),
-        };
-        // The take's length on the timeline, in session samples: its source is at the session's
-        // rate, whatever rate the interface recorded the file at (#442).
-        let Some(frames) = s.source(src).map(|x| i64::try_from(x.frames).unwrap_or(0)) else { continue };
         if new_take && not_placed.is_none() {
             // A loop's laps all lie over the loop.
+            let frames = i64::try_from(got.frames()).unwrap_or(0);
             let (pieces, _) = from_bar_one(take_pieces(start, pass, cycle, frames, end.unwrap_or(frames)).0);
             let span = pieces.iter().map(|p| Range::new(p.at, p.at + p.len)).reduce(|a, b| Range::new(a.start.min(b.start), a.end.max(b.end)));
             let span = span.unwrap_or(Range::point(start));
@@ -267,11 +263,25 @@ pub fn add_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId,
         let base = e.session().track(tid).map_or(0, |t| t.active_playlist);
         let first = out.len();
         let s = e.session_mut();
+        let name = path.file_stem().and_then(|x| x.to_str()).unwrap_or("Take");
+        let src = match got {
+            Got::Memory(buf) => {
+                let src = add_source(s, name, buf, Some(&path.to_string_lossy()), FileFormat::Wav);
+                if let Some(x) = s.sources.last_mut() {
+                    x.unsaved = resampled;
+                }
+                src
+            }
+            // A long take is one clip on one source played from its file (ADR 0035).
+            Got::Disk(audio) => super::disk::add_disk_source(s, name, audio, &path.to_string_lossy()),
+        };
         if let Some(reason) = not_placed {
             s.unplaced_takes.push(transit_model::UnplacedTake::new(path.display().to_string(), reason.clone(), Some(src), false));
             e.warn(format!("Take kept at {} but not placed: {reason}.", path.display()));
             continue;
         }
+        let Some(x) = s.source(src) else { continue };
+        let frames = i64::try_from(x.frames).unwrap_or(0);
         let (pieces, merged, short) = take_pieces(start, pass, cycle, frames, end.unwrap_or(frames));
         let early_laps = (pieces.len() > 1).then(|| pieces.iter().filter(|p| p.at < 0).count());
         let (pieces, hidden) = from_bar_one(pieces);

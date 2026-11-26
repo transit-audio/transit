@@ -166,12 +166,16 @@ fn unique_audio_rel(s: &Session, stem: &str) -> String {
 
 /// Register decoded audio as a new source. Resamples to the session rate if needed.
 pub fn add_source(s: &mut Session, name: &str, mut buf: AudioBuffer, path: Option<&str>, format: FileFormat) -> SourceId {
-    let sr = s.sample_rate.hz();
-    if buf.sample_rate != sr && buf.sample_rate > 0 {
-        buf.channels = transit_dsp::offline::resample(&buf.channels, buf.sample_rate, sr);
-        buf.sample_rate = sr;
-    }
+    to_rate(&mut buf, s.sample_rate.hz());
     add_source_audio(s, name, Arc::new(SourceAudio::new(buf)), path, format)
+}
+
+/// Resample `buf` to `rate` if it is at another (known) rate, as [`add_source`] does.
+pub(crate) fn to_rate(buf: &mut AudioBuffer, rate: u32) {
+    if buf.sample_rate != rate && buf.sample_rate > 0 {
+        buf.channels = transit_dsp::offline::resample(&buf.channels, buf.sample_rate, rate);
+        buf.sample_rate = rate;
+    }
 }
 
 /// Register prepared audio at its admitted rate, with its peaks built.

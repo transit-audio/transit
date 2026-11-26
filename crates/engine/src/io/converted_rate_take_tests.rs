@@ -49,6 +49,36 @@ fn a_take_at_44_1_khz_in_a_48_khz_session_stacks_on_a_clip_its_session_length_re
     assert_eq!(stacks[0].takes.iter().map(|k| k.number).collect::<Vec<_>>(), vec![1, 2], "the old clip, then the new take");
 }
 
+/// Record a take of `frames` frames at `take_rate`, latched at 0, over a clip at `clip_at` in a
+/// session at `session` Hz with new takes on, then Undo and Redo.
+fn record_over_a_clip_then_undo_and_redo(tag: &str, session: u32, take_rate: u32, frames: usize, clip_at: Samples) {
+    let dir = transit_test_support::TestDir::new(tag);
+    let path = dir.join("Audio Files/Vox_02.wav");
+    write_take(&path, frames, take_rate);
+    let (mut e, vox, _) = track_with_clip(session, clip_at, 4_800);
+    let before = e.session().clone();
+    let ids = place_recording_take(&mut e, &Recording { rate: take_rate, ..Recording::new(0) }, vec![(vox, path)], true);
+    assert_eq!(ids.len(), 1);
+    assert_eq!(e.session().track(vox).unwrap().playlists.len(), 2, "the take stacks on the clip under it");
+    let recorded = e.session().clone();
+    assert!(e.undo());
+    let s = e.session();
+    let names = |s: &transit_model::Session| s.sources.iter().map(|x| (x.id, x.name.clone())).collect::<Vec<_>>();
+    assert_eq!(names(s), names(&before), "Undo takes the take's source away");
+    assert_eq!(s.pool.ids().collect::<Vec<_>>(), before.pool.ids().collect::<Vec<_>>(), "and its audio");
+    assert_eq!(s, &before, "Undo gives back the session from before the recording");
+    assert!(e.redo());
+    assert_eq!(e.session(), &recorded, "Redo gives the recording back");
+}
+
+/// Undo of a take that stacked on a clip leaves no trace of the take, at the session's rate and
+/// at a converted one; Redo brings it back.
+#[test]
+fn undo_of_a_take_stacked_on_a_clip_takes_its_source_away_and_redo_brings_it_back() {
+    record_over_a_clip_then_undo_and_redo("undo-stack-equal", 48_000, 48_000, 9_600, 4_800);
+    record_over_a_clip_then_undo_and_redo("undo-stack-converted", 48_000, 44_100, 176_400, 180_000);
+}
+
 /// The other way round: a 1 s take from an interface at 48 kHz in a 44.1 kHz session ends at
 /// 44,100 session samples, before a clip at 46,000, so nothing is under it: no take stack and the
 /// clip is untouched. Measured in interface frames (48,000) the take seemed to reach the clip.
