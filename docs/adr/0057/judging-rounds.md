@@ -88,3 +88,13 @@ The revision that brought the record to `main` e3ffc964 and wrote in the maintai
 6. **Slices.** P3a, P3b and CAP tests use fixture effects; X repeats them with the real devices; CAP needs P4; the chord panel defers the C2 and C3 controls.
 
 Notes applied: K2b adds an automatable flag and its enforcement; Play automation behavior; round provenance removed from the normative sections; the registry's three public effects; randomized totals marked as not reproducible from the public text.
+
+## Revision of 2026-11-26, judging round 2
+
+Findings 3, 5 and 6 were resolved and both new Arpeggiator rows replayed. Three remained, each now decided (by delegation from the maintainer, marked in the record):
+
+1. **Latency changes at runtime.** The replan path is asynchronous (`observe_raw` after rendering, a plan request, replacement delay lines prepared by the compiler), so "compensated from that block" could not hold. Deferred activation: a stage reports the latency its parameters ask for and plays with the latency the adopted plan provisions, so nothing is ever uncompensated. Key alignment, which overwrites the strip's latency from `head_latency`, adds the chain's figure too.
+2. **Capture.** Four cases broke "within half a tick": a sub-tick note (now written one tick long, its release up to a tick late), same-key overlaps (the later note is shortened too; stated as the clip renderer plays it), the exclusive grid end (the clip now ends one tick past the tick nearest the range end), and compensation off (the capture now always renders compensated). The test asserts exactly these rules. The maintainer confirmed tick fidelity for the first cut.
+3. **Learn.** Arming keeps only outputs actually sounding and starts nothing; while armed, input is forwarded plainly with no counting rule.
+
+Also decided: a count-in entered while playing is a Stop-equivalent reset (P2). Notes applied: "at or after" for a release on a step; K2b's and P2's file lists; the early P2 test named as a fixture test; provenance out of 0059's decisions; the design hand-off listed as needed before K2a's dimensions and scrolling are final.
