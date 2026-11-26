@@ -288,8 +288,8 @@ pub struct LoopbackCalibration {
     pub input_ports: Vec<String>,
     /// On JACK, `period` is the buffer the active client ran when the loop was measured (ADR 0021,
     /// amendment for #760, rule 7). A JACK record without it was keyed by the requested buffer
-    /// (0 when none was chosen), whatever the server ran: it stays in the file, is not applied,
-    /// and asks to be measured again. Unused on other systems.
+    /// (0 when none was chosen), whatever the server ran: it stays in the file and is not
+    /// applied. Unused on other systems.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub running_period: bool,
 }
@@ -523,8 +523,8 @@ impl AudioConfig {
 
     /// A JACK record an earlier build stored for `key`'s output, mode, rate and input group, at any
     /// period: it lacks the evidence that its period is the buffer the server ran (a stored 256
-    /// may have been measured while 1024 ran), so it stays in the file, is not applied, and asks
-    /// to be measured again (ADR 0021, amendment for #760, rule 7). `None` when a record applies,
+    /// may have been measured while 1024 ran), so it stays in the file and is not applied (ADR
+    /// 0021, amendment for #760, rule 7). `None` when a record applies,
     /// or none of an earlier build is saved. Measuring again under the same key replaces it.
     pub fn jack_calibration_unproven(&self, key: &CalibrationKey) -> Option<&LoopbackCalibration> {
         if self.jack_calibration(key).is_some() {

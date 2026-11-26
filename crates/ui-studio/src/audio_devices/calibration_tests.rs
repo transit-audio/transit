@@ -457,11 +457,11 @@ fn a_jack_calibration_measured_through_another_input_group_is_not_applied_and_th
 
 /// ADR 0021, amendment for #760, rule 7: a JACK record an earlier build stored (keyed by the
 /// requested buffer, without the marker that its period is the one the server ran) is kept and not
-/// applied, and the page asks for it to be measured again; a record that carries the marker applies.
+/// applied, and the page says so without asking for a new measurement, which nothing on the JACK
+/// system can make (#760); a record that carries the marker applies.
 #[test]
-fn a_jack_calibration_an_earlier_build_stored_is_not_applied_and_the_page_asks_to_measure_again() {
-    const NOTE: &str =
-        "The loopback calibration of “Headset” was saved without the buffer size the JACK server ran, so it is not applied: measure again.";
+fn a_jack_calibration_an_earlier_build_stored_is_not_applied_and_the_page_names_no_action() {
+    const NOTE: &str = "The loopback calibration of “Headset” was saved without the buffer size the JACK server ran, so it is not applied.";
     let record = measured_on_mic(&T::new());
     assert!(record.running_period);
     for (stored, applies) in [(transit_playback::LoopbackCalibration { running_period: false, ..record.clone() }, false), (record, true)] {

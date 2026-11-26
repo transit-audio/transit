@@ -2,8 +2,9 @@
 //! keyed by the output and the input port group that opened, so one measured through another
 //! group (or saved before the key named the group, when it measured the output's own) is not
 //! used, and the Audio Devices notes and the status line say so. A record an earlier build stored
-//! lacks the buffer size the server ran and asks to be measured again (ADR 0021, amendment for
-//! #760, rule 7).
+//! lacks the buffer size the server ran and is not applied either (ADR 0021, amendment for #760,
+//! rule 7). No note asks for a new measurement: nothing on the JACK system can measure a loop (the
+//! app's Measure is native ASIO only), so none names an action (#760).
 
 use crate::StudioApp;
 use transit_playback::devices;
@@ -17,18 +18,18 @@ impl StudioApp {
         let key = player.calibration_key.as_ref()?;
         let opened = key.input.as_deref()?;
         // Stored by an earlier build, keyed by the requested buffer whatever the server ran: kept,
-        // not applied, measured again once (ADR 0021, amendment for #760, rule 7).
+        // not applied (ADR 0021, amendment for #760, rule 7).
         if self.ui.audio.jack_calibration_unproven(key).is_some() {
             return Some(format!(
-                "The loopback calibration of “{}” was saved without the buffer size the JACK server ran, so it is not applied: measure again.",
+                "The loopback calibration of “{}” was saved without the buffer size the JACK server ran, so it is not applied.",
                 key.device
             ));
         }
         // Measured through this input group, over other ports of a virtual device (or before its
-        // ports were recorded): measure again (amendment for #431, rule 13).
+        // ports were recorded): not applied (amendment for #431, rule 13).
         if self.ui.audio.jack_calibration_ports_changed(key).is_some() {
             return Some(format!(
-                "The loopback calibration of “{}” was measured through other ports of input “{opened}”: measure again.",
+                "The loopback calibration of “{}” was measured through other ports of input “{opened}”, so it is not applied.",
                 key.device
             ));
         }

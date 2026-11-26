@@ -199,9 +199,10 @@ fn use_the_current_ports_shows_only_on_a_mismatch_and_works_only_while_stopped()
 }
 
 /// Rule 13: a JACK loopback calibration measured through a virtual input with one port order is
-/// not applied after the order changes, and the notes and the status line say "measure again".
+/// not applied after the order changes, and the notes and the status line say so, without asking
+/// for a new measurement, which nothing on the JACK system can make (#760).
 #[test]
-fn a_calibration_through_a_virtual_input_says_measure_again_after_its_ports_changed() {
+fn a_calibration_through_a_virtual_input_is_not_applied_after_its_ports_changed_and_names_no_action() {
     let mut t = T::new();
     t.control("audio.fake_devices", jack_listing()).unwrap();
     let jack = client(&["output_FL", "output_FR"]);
@@ -215,7 +216,7 @@ fn a_calibration_through_a_virtual_input_says_measure_again_after_its_ports_chan
     t.app.player = Some(player);
     t.app.ui.audio = cfg;
     t.frames(2);
-    let note = "The loopback calibration of “Headset” was measured through other ports of input “Firefox”: measure again.";
+    let note = "The loopback calibration of “Headset” was measured through other ports of input “Firefox”, so it is not applied.";
     assert_eq!(t.app.audio_devices.notes, [note], "and no input note: Firefox is listed, as a virtual device");
     assert_eq!(t.app.status, note);
 }
