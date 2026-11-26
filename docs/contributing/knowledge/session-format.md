@@ -51,6 +51,19 @@ file as usual. It cannot warn from builds that shipped before it existed: an old
 drops a loop on save (known issue K40). Add an entry to `needs()` and `KNOWN_NEEDS` together when
 a new feature would be lost by an older reader, and test a round-trip with and without it.
 
+## Clip anchor (#554, ADR 0056 decision 5)
+
+An audio clip's content is `{"Audio": {"source", "offset", "anchor"}}`: source frame `offset` is
+read at clip time `anchor`, and the clip time around it at the clip's rate (`Clip::source_pos`).
+`anchor` is written only when it is not 0. Every clip at rate 1 is stored in normal form (anchor
+0, the offset moved instead), and so is a stretched clip that was never split or start-trimmed, so
+those sessions save byte for byte as before this field existed. A split or start-trimmed piece of a
+clip with a stretch other than 1 keeps its offset and moves its anchor (the fix for #554), writes
+`anchor` and lists `clip_anchor` under `needs`; an older build reads such a piece from `offset` at
+its start, the wrong part of the file. A loaded anchor outside ±2^46 (only a hand edit makes one) is
+reset to 0 with a load note. A clip group file holding a re-anchored clip is written at format
+version 2, which builds without the field refuse.
+
 ## Sampler patch (#269, ADR 0041)
 
 `Insert::sampler_patch` holds the built-in Sampler's patch (`crates/model/src/sampler_patch.rs`),
