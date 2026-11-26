@@ -19,6 +19,10 @@ through an alias that includes the volume name, and Finder resolves it by that n
 versioned name the window keeps its size and icon positions but shows no background (tested).
 The DMG file name (`transit-v<version>-macos-<arch>.dmg`) still carries the version.
 
+The same lookup means two transit disk images mounted at once can show each other's background
+(#727). Accepted as a cosmetic limit: the app inside each image is its own build. Eject the older
+image before opening the new one.
+
 ## Rules
 
 - **Finder draws the icon labels in black in light and dark mode** when a window has a background,
