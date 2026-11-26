@@ -310,9 +310,10 @@ fn the_domain_is_closed() {
     assert_eq!(back.tracks[0].clips(), e.session().track(t).unwrap().clips());
 }
 
-/// `inherited_processing_refuses_an_anchored_clip`: Elastic properties (on an Elastic track and on a
-/// plain one), TCE to Timeline, Remove Pitch Shift, Conform to Tempo and Remove Warp refuse a split
-/// piece of a stretched clip and change nothing. Negative control: the base's `render_stretched`
+/// `inherited_processing_refuses_an_anchored_clip`: Elastic properties on an Elastic track, TCE to
+/// Timeline, Remove Pitch Shift, Conform to Tempo and Remove Warp refuse a split piece of a stretched
+/// clip and change nothing (on a plain track Elastic properties is a varispeed and is allowed:
+/// `elastic_properties_on_a_plain_track_keeps_an_anchored_clip_in_place`). Negative control: the base's `render_stretched`
 /// reads that piece from `offset`, its clip start.
 #[test]
 fn inherited_processing_refuses_an_anchored_clip() {
@@ -333,7 +334,7 @@ fn inherited_processing_refuses_an_anchored_clip() {
             e.execute("track.elastic", &json!({"track": t.0, "algorithm": "polyphonic"})).unwrap();
         }
         let before = e.session().to_json().unwrap();
-        for (cmd, p) in &calls {
+        for (cmd, p) in calls.iter().filter(|(cmd, _)| track_elastic || *cmd != "clip.elastic_properties") {
             let err = e.execute(cmd, p).unwrap_err();
             assert!(err.to_string().contains("split or trimmed at its stretch"), "{cmd}: {err}");
             assert_eq!(e.session().to_json().unwrap(), before, "{cmd} changed nothing");
@@ -344,6 +345,51 @@ fn inherited_processing_refuses_an_anchored_clip() {
     let (mut e, _, id) = ramp(48_000, 100, 4_000, 2.0, None);
     e.execute("clip.remove_warp", &json!({"clips": [id.0]})).unwrap();
     assert_eq!(the_clip(&e, id).stretch, 1.0);
+}
+
+/// ADR 0056 decision 4.4 refuses Elastic properties only on an Elastic track (the rendering path):
+/// on a plain or varispeed track it only sets the stretch, so a split piece of a stretch-2 clip
+/// takes ratio 1.5 and reads, at every sample, what the whole clip reads at stretch 1.5 (its anchor
+/// keeps its source frame); ratio 1 brings it to rate 1 in normal form. Negative control: the
+/// unconditional refusal.
+#[test]
+fn elastic_properties_on_a_plain_track_keeps_an_anchored_clip_in_place() {
+    for algorithm in [None, Some("varispeed")] {
+        let (mut e, t, id) = ramp(48_000, 100, 4_000, 2.0, None);
+        if let Some(a) = algorithm {
+            e.execute("track.elastic", &json!({"track": t.0, "algorithm": a})).unwrap();
+        }
+        let whole = the_clip(&e, id);
+        e.execute("edit.separate", &json!({"tracks": [t.0], "at": 2_000})).unwrap();
+        let piece = clips(&e, t)[1].clone();
+        assert_ne!(piece.anchor(), 0);
+        e.execute("clip.elastic_properties", &json!({"clips": [piece.id.0], "ratio": 1.5})).unwrap();
+        let got = the_clip(&e, piece.id);
+        assert_eq!((got.stretch, got.source_offset(), got.anchor()), (1.5, piece.source_offset(), piece.anchor()), "{algorithm:?}");
+        let mut at = whole.clone();
+        at.stretch = 1.5;
+        assert_pieces_read_like(&at, &[got], &format!("{algorithm:?} at 1.5"));
+        e.execute("clip.elastic_properties", &json!({"clips": [piece.id.0], "ratio": 1.0})).unwrap();
+        let got = the_clip(&e, piece.id);
+        assert_eq!((got.stretch, got.anchor()), (1.0, 0), "{algorithm:?}: the normal form at rate 1");
+        at.stretch = 1.0;
+        assert_pieces_read_like(&at, &[got], &format!("{algorithm:?} at 1"));
+    }
+}
+
+/// On an Elastic track the refusal holds for a batch: an unanchored clip and a re-anchored piece
+/// together are refused, and neither changes.
+#[test]
+fn elastic_properties_on_an_elastic_track_refuses_a_batch_with_an_anchored_clip() {
+    let (mut e, t, _) = ramp(48_000, 100, 4_000, 2.0, None);
+    e.execute("edit.separate", &json!({"tracks": [t.0], "at": 2_000})).unwrap();
+    e.execute("track.elastic", &json!({"track": t.0, "algorithm": "polyphonic"})).unwrap();
+    let ids: Vec<u64> = clips(&e, t).iter().map(|c| c.id.0).collect();
+    assert_eq!(ids.len(), 2);
+    let before = e.session().to_json().unwrap();
+    let err = e.execute("clip.elastic_properties", &json!({"clips": ids, "ratio": 1.5})).unwrap_err();
+    assert!(err.to_string().contains("split or trimmed at its stretch"), "{err}");
+    assert_eq!(e.session().to_json().unwrap(), before, "the whole batch is refused");
 }
 
 /// #554's AudioSuite case: processing a stretched clip bakes the stretch into the new file, so the

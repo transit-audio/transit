@@ -213,7 +213,18 @@ pub fn specs() -> Vec<CommandSpec> {
 /// (the original source is remembered in `edit.values` so Remove Warp restores it).
 fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
     let ids = clip_ids_param(e, p);
-    refuse_anchored(e.session(), "clip.elastic_properties", &ids)?;
+    // Only the rendering path reads the file from `offset` at the clip's start (ADR 0056 decision
+    // 4.4): an audio clip on an Elastic track. Preflighted, so a batch is all or nothing.
+    let rendered_ids: Vec<ClipId> = ids
+        .iter()
+        .copied()
+        .filter(|id| {
+            e.session()
+                .find_clip(*id)
+                .is_some_and(|(t, c)| c.is_audio() && e.session().track(t).is_some_and(|x| x.elastic.as_deref().is_some_and(|a| a != "varispeed")))
+        })
+        .collect();
+    refuse_anchored(e.session(), "clip.elastic_properties", &rendered_ids)?;
     // A ratio within 1e-9 of 1 is 1, so the clip reads its file directly (#604).
     let ratio = transit_model::snap_stretch(f64_or(p, "ratio", 1.0).clamp(0.05, 20.0));
     let s = e.session_mut();
@@ -231,8 +242,11 @@ fn elastic(e: &mut Engine, p: &Value) -> Result<Value> {
             base.stretch = 1.0;
         }
         if elastic.is_none() || !base.is_audio() {
+            // A varispeed: the anchor keeps its source frame, so a split piece reads what the whole
+            // clip reads at the new stretch; back at rate 1 the clip takes the normal form.
             if let Some(cm) = s.find_clip_mut(*id) {
                 cm.stretch = ratio;
+                cm.normalize();
             }
             continue;
         }
