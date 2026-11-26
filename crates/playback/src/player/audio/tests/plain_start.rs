@@ -363,3 +363,48 @@ fn the_hold_lasts_across_a_loop_wrap_inside_the_lead() {
         control.retire(audio.plans, audio.actions);
     }
 }
+
+/// Without a device clock an audio pass on a duplex device is placed by the input frame ordinal,
+/// approximately: the earlier alternative within one input block of the input frame that
+/// coincides with the latch. At a converted rate the latch is the converter's lead after the next
+/// consumed output frame, so the input frame moves by that lead too; it used to stay at the block
+/// about to render, early by the lead and outside the one block. At equal rates the lead is 0 and
+/// the placement is as before.
+#[test]
+fn an_unclocked_duplex_start_is_placed_within_one_block_of_its_latch_at_a_converted_rate_too() {
+    const NEXT: u64 = 1_000;
+    const BLOCK: u64 = 64;
+    for rate in [44_100u32, 96_000, 48_000] {
+        let (mut control, mut audio, _) = fixture(rate);
+        for _ in 0..20 {
+            fill(&mut audio, &mut [0.0; 256]);
+            control.service(&mut make);
+        }
+        let (mut start, publisher) = start::pair(transit_mix::EngineEpoch(1));
+        audio.transport.record_start = publisher;
+        let reader = start.prepare().unwrap();
+        reader.mark_audio();
+        start.input_progress().publish(NEXT, BLOCK);
+        let (mut mapping, input_start) = start::mapping::pair(reader.clone(), ClockKey { generation: 9, domain: 9, direction: Direction::Input });
+        assert!(audio.transport.clock_map.is_none(), "{rate}: no device clock");
+        let lead = audio.read.ahead_after(audio.pending, STEP);
+        assert_eq!(lead > 0, rate != 48_000, "{rate}: the start leads in only at a converted rate");
+        let latch = audio.transport.timeline.next_output() + lead;
+        send(&mut control, Start::Record, &reader, 300);
+        fill(&mut audio, &mut [0.0; 8]);
+        let start::Status::Started(point) = reader.status() else { panic!("{rate}: a duplex audio pass must not wait for the clock") };
+        assert_eq!((point.output_frame, point.host_ns), (latch, 0), "{rate}");
+        let Some(start::Fallback { input_frame: Some(frame), approximate: true }) = reader.fallback() else {
+            panic!("{rate}: placed by the input frame ordinal: {:?}", reader.fallback())
+        };
+        // The input frames that coincide with the block about to render lie within one block
+        // before NEXT; those that coincide with the latch lie `lead` later.
+        assert!((NEXT + lead - BLOCK..=NEXT + lead).contains(&frame), "{rate}: input frame {frame} for a lead of {lead}");
+        assert!(mapping.service(None, None));
+        assert_eq!(input_start.frame(), Ok(Some(frame)), "{rate}");
+        if rate == 48_000 {
+            assert_eq!(frame, NEXT - BLOCK, "equal rates: as before");
+        }
+        control.retire(audio.plans, audio.actions);
+    }
+}

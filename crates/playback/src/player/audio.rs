@@ -187,14 +187,16 @@ impl Transport {
     /// and the session position, which is all a MIDI-only pass uses. An audio pass also has to
     /// align the input stream with the output: by the validated clock maps when there are some,
     /// else, on a duplex device whose two streams belong to one driver, by the input stream's own
-    /// position (approximate by up to one block). With neither it is an error.
-    fn start_basis(&self, output_frame: u64, audio: bool) -> Result<Basis, device_clock::Unavailable> {
+    /// position (approximate by up to one block). With neither it is an error. `lead`: output
+    /// frames from the next consumed one to `output_frame` (the converter's lead at a converted
+    /// rate, #725), by which the input frame, read for the block about to render, moves too.
+    fn start_basis(&self, output_frame: u64, lead: u64, audio: bool) -> Result<Basis, device_clock::Unavailable> {
         let mapped = match (self.clock_map, self.clock_now) {
             (Some(map), Some(now)) => map.frame_to_host(self.clock_key, output_frame, now),
             (None, _) => Err(device_clock::Unavailable::WarmingUp),
             (Some(_), None) => Err(device_clock::Unavailable::Stale),
         };
-        let input_frame = if audio { self.record_start.duplex_input_frame() } else { None };
+        let input_frame = if audio { self.record_start.duplex_input_frame().map(|frame| frame.saturating_add(lead)) } else { None };
         match mapped {
             Ok(host_ns) => Ok(Basis { host_ns, input_frame, approximate: false }),
             Err(_) if !audio => Ok(Basis { host_ns: 0, input_frame: None, approximate: false }),
@@ -324,7 +326,7 @@ impl Transport {
             let requested = if from.is_some() { ahead } else { 0 };
             let ahead = if timeline.lead_in(requested).is_ok() { requested } else { 0 };
             let output_frame = timeline.next_output().checked_add(ahead).ok_or(ActionResult::Timeline(timeline_map::MapError::Arithmetic))?;
-            let basis = self.start_basis(output_frame, audio).map_err(ActionResult::RecordingClock)?;
+            let basis = self.start_basis(output_frame, ahead, audio).map_err(ActionResult::RecordingClock)?;
             Ok((timeline, epoch, start::Point { host_ns: basis.host_ns, output_frame, position }, basis, ahead != requested))
         })();
         let (timeline, epoch, point, basis, restart) = match prepared {
@@ -395,7 +397,7 @@ impl Transport {
         // Same preconditions as the start itself, so a clock that cannot come good fails now, not
         // after the bars. A clock still warming up is waited for when the bars end.
         let audio = self.record_start.audio_pass();
-        if let Err(reason) = self.start_basis(self.timeline.next_output(), audio)
+        if let Err(reason) = self.start_basis(self.timeline.next_output(), 0, audio)
             && !Self::clock_may_validate(reason)
         {
             self.record_start.fail(ticket, StartFailure::of(ActionResult::RecordingClock(reason)));
