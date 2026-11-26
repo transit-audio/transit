@@ -646,21 +646,22 @@ impl Session {
         TRACK_COLORS.get(n % TRACK_COLORS.len()).copied().unwrap_or([128, 128, 128])
     }
 
-    /// A unique track name: `base`, or `base 1`, `base 2` … like the incumbent ("Audio 1").
+    /// A unique track name: `base`, or `base 1`, `base 2` … like the incumbent ("Audio 1"). A name
+    /// that needs a number loses the end of its stem instead of going past [`MAX_NAME_CHARS`]: a
+    /// longer name is cut on a save, and two names that differed only at the end would meet there.
     pub fn unique_track_name(&self, base: &str) -> String {
         let taken = |n: &str| self.tracks.iter().any(|t| t.name == n);
         if !base.is_empty() && !taken(base) && !matches!(base, "Audio" | "Aux" | "MIDI" | "Inst" | "VCA" | "Folder" | "Master") {
             return base.to_string();
         }
-        let prefix = format!("{base} ");
-        let used: std::collections::HashSet<u64> = self
-            .tracks
-            .iter()
-            .filter_map(|t| t.name.strip_prefix(&prefix))
-            .filter_map(|n| n.parse().ok().filter(|i: &u64| i.to_string() == n))
-            .collect();
-        let i = (1..).find(|i| !used.contains(i)).unwrap_or(1);
-        format!("{base} {i}")
+        (1..)
+            .map(|i: u64| {
+                let number = format!(" {i}");
+                let keep = MAX_NAME_CHARS.saturating_sub(number.chars().count());
+                format!("{}{number}", base.chars().take(keep).collect::<String>())
+            })
+            .find(|n| !taken(n))
+            .unwrap_or_else(|| base.to_string())
     }
 
     /// Add a track with defaults; returns its id.
@@ -1137,6 +1138,23 @@ mod tests {
         assert_eq!(s.unique_track_name("Piano"), "Piano 2");
         assert_eq!(s.unique_track_name("Organ"), "Organ");
         assert_eq!(s.unique_track_name("Audio"), "Audio 1");
+    }
+
+    /// #771: a numbered name stays within the limit by shortening its stem, so two long names that
+    /// differed only at the end are still two names after a save cuts them to the limit.
+    #[test]
+    fn a_numbered_track_name_never_passes_the_name_limit() {
+        let mut s = Session::default();
+        let long = format!("{}x", "T".repeat(MAX_NAME_CHARS - 1));
+        let a = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(&long));
+        let b = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(&long));
+        let c = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(&long));
+        let names: Vec<String> = [a, b, c].iter().map(|t| s.track(*t).unwrap().name.clone()).collect();
+        assert!(names.iter().all(|n| n.chars().count() <= MAX_NAME_CHARS), "{names:?}");
+        let back = Session::from_json(&s.to_json().unwrap()).unwrap();
+        let reopened: Vec<String> = back.tracks.iter().map(|t| t.name.clone()).collect();
+        assert_eq!(reopened, names, "a save cuts nothing");
+        assert_eq!(reopened.iter().collect::<std::collections::HashSet<_>>().len(), 3, "{reopened:?}");
     }
 
     #[test]

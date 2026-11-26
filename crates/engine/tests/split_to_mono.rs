@@ -332,3 +332,35 @@ fn a_long_takes_split_files_keep_their_channel_endings() {
         assert!(src.disk && src.path.ends_with(&format!("S.{side}.wav")), "{:?}", src.path);
     }
 }
+
+/// #771: two tracks whose 256-character names differ only at the very end get names that are
+/// still different after a split, a save and a reopen: a numbered name is cut at its stem, within
+/// the limit, so the save has nothing to cut.
+#[test]
+fn long_track_names_that_differ_at_the_end_stay_unique_through_a_save() {
+    let d = transit_test_support::TestDir::new("split-to-mono-unique");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("Mics.wav");
+    std::fs::write(&wav, stereo_wav(480, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    let max = transit_model::MAX_NAME_CHARS;
+    let mut clips = Vec::new();
+    for end in ["a", "b"] {
+        let t = track(&mut e, "stereo");
+        e.session_mut().track_mut(TrackId(t)).unwrap().name = format!("{}{end}", "T".repeat(max - 1));
+        e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": t})).unwrap();
+        clips.push(e.session().track(TrackId(t)).unwrap().clips()[0].id.0);
+    }
+    e.execute("clip.split_to_mono", &json!({"clips": clips})).unwrap();
+    let names = |e: &Engine| e.session().tracks.iter().map(|t| t.name.clone()).collect::<Vec<_>>();
+    let before = names(&e);
+    assert_eq!(before.len(), 6);
+    assert!(before.iter().all(|n| n.chars().count() <= max), "every name is within the limit");
+    let file = d.join("unique.transit");
+    e.execute("session.save", &json!({"path": file.to_string_lossy()})).unwrap();
+    let mut f = Engine::default();
+    f.execute("session.open", &json!({"path": file.to_string_lossy()})).unwrap();
+    let after = names(&f);
+    assert_eq!(after, before, "a reopen changes no name");
+    assert_eq!(after.iter().collect::<std::collections::HashSet<_>>().len(), 6, "{} names, all different", after.len());
+}
