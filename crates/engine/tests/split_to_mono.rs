@@ -385,10 +385,9 @@ fn a_frozen_track_or_a_too_wide_clip_is_refused_in_the_words_the_menu_shows() {
     e.session_mut().track_mut(frozen_track).unwrap().freeze =
         Some(transit_model::Frozen { source: src, start: 0, length: 480, hash: 0, revision: 0, latency: 0 });
     let tracks = e.session().tracks.len();
-    for (clip, why) in [
-        (frozen, "Frozen is frozen: unfreeze it to split its clips"),
-        (wide, "Wide has 65 channels: a clip splits into at most 64 tracks"),
-    ] {
+    for (clip, why) in
+        [(frozen, "Frozen is frozen: unfreeze it to split its clips"), (wide, "Wide has 65 channels: a clip splits into at most 64 tracks")]
+    {
         assert_eq!(transit_engine::cmd::split_refusal(e.session(), &[clip]).as_deref(), Some(why));
         let r = e.execute("clip.split_to_mono", &json!({"clips": [clip.0]}));
         assert!(r.as_ref().is_err_and(|err| err.to_string().contains(why)), "{r:?}");
@@ -420,7 +419,8 @@ fn a_stereo_and_a_wider_clip_on_one_track_split_onto_separate_tracks() {
     let r = e.execute("clip.split_to_mono", &json!({"clips": ids})).unwrap();
     let names: Vec<String> = e.session().tracks.iter().map(|t| t.name.clone()).collect();
     assert_eq!(names, ["Mics", "Mics L", "Mics R", "Mics 1", "Mics 2", "Mics 3", "Mics 4"], "{names:?}");
-    let pans: Vec<Vec<f32>> = r["tracks"].as_array().unwrap().iter().map(|t| e.session().track(TrackId(t.as_u64().unwrap())).unwrap().mixer.pan.clone()).collect();
+    let pans: Vec<Vec<f32>> =
+        r["tracks"].as_array().unwrap().iter().map(|t| e.session().track(TrackId(t.as_u64().unwrap())).unwrap().mixer.pan.clone()).collect();
     assert_eq!(pans[..2], [vec![-1.0], vec![1.0]], "the stereo clip keeps hard left and right");
     assert!(pans[2..].iter().all(|p| *p == [0.0]), "the wider clip stays centered: {pans:?}");
     let per_track: Vec<usize> = e.session().tracks[1..].iter().map(|t| t.clips().len()).collect();
@@ -474,6 +474,7 @@ fn a_split_carries_a_stereo_tracks_moved_panners_and_a_mono_track_keeps_hard_sid
         clips.push(e.session().track(TrackId(t)).unwrap().clips()[0].id.0);
     }
     let r = e.execute("clip.split_to_mono", &json!({"clips": clips})).unwrap();
-    let pans: Vec<Vec<f32>> = r["tracks"].as_array().unwrap().iter().map(|t| e.session().track(TrackId(t.as_u64().unwrap())).unwrap().mixer.pan.clone()).collect();
+    let pans: Vec<Vec<f32>> =
+        r["tracks"].as_array().unwrap().iter().map(|t| e.session().track(TrackId(t.as_u64().unwrap())).unwrap().mixer.pan.clone()).collect();
     assert_eq!(pans, [vec![-0.5], vec![0.25], vec![-1.0], vec![1.0]]);
 }

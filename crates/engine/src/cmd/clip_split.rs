@@ -230,11 +230,7 @@ fn mono_audio(audio: &SourceAudio, ch: usize) -> SourceAudio {
 /// Each source's channels, in memory or as one mono WAV per channel written beside its file (a
 /// number added while a name is taken). The files are opened to play from disk only once every
 /// one is complete; each path created is in `written`, for the caller to remove on a failure.
-fn prepare(
-    s: &transit_model::Session,
-    by_track: &Groups,
-    written: &mut Vec<PathBuf>,
-) -> Result<Vec<Split>> {
+fn prepare(s: &transit_model::Session, by_track: &Groups, written: &mut Vec<PathBuf>) -> Result<Vec<Split>> {
     let mut out: Vec<(SourceId, u64, Vec<(String, Option<SourceAudio>)>, Option<Arc<DiskSource>>)> = Vec::new();
     for (_, clips) in by_track.values() {
         for &(_, src, n) in clips {
