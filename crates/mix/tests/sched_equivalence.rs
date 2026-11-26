@@ -153,6 +153,8 @@ const INCOMPLETE: &[(&str, &[&str])] = &[
     ("v0.7.3-features.transit", &["sampler"]),
     ("v0.7.4-demo.transit", &[]),
     ("v0.7.4-features.transit", &["sampler"]),
+    ("v0.7.5-demo.transit", &[]),
+    ("v0.7.5-features.transit", &["sampler"]),
     ("returns-and-groups.transit", &[]),
 ];
 

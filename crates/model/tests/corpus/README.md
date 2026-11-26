@@ -32,6 +32,8 @@ v0.7.3 adds its two files. The v0.7.3 features session also carries a MIDI clip 
 
 v0.7.4 adds its two files. In them every built-in instrument stores its whole parameter table at the build's defaults (#753), as a track added in the app does: the Sampler's Output and each synth's Level are saved at -12 dB, where a v0.7.3 file stores none.
 
+v0.7.5 adds its two files. The session format has no new content in this release: the measured hardware insert and External Instrument figures that gained a device rate (#709) are stored per machine with the path table, not in a session, so the features session is unchanged.
+
 One file is hand-written, not saved by a build: `v0.3.2-video.transit` has an audio track, a Video
 track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 (it opens with the video
 dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`
