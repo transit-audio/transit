@@ -44,6 +44,18 @@ pub(crate) const DETACHED: u8 = 3;
 /// A rate or buffer size not observed yet: the session's figures before its client is active.
 pub(crate) const UNKNOWN: u32 = 0;
 
+/// Cycles whose lateness waits for the first published rate (the few that can run between
+/// activation and the start's publication); later ones before it are not judged.
+const UNRATED: usize = 16;
+
+/// How late a cycle started: its `interval` since the previous cycle beyond that cycle's `frames`
+/// at `rate` (nonzero).
+fn record_late(shared: &Shared, interval: Duration, frames: u32, rate: u32) {
+    let period = Duration::from_nanos(u64::from(frames) * 1_000_000_000 / u64::from(rate));
+    let late = interval.saturating_sub(period);
+    Shared::record(&shared.late_us, &shared.max_late_us, u64::try_from(late.as_micros()).unwrap_or(u64::MAX));
+}
+
 /// What the control side and the process callback share for one direction.
 #[derive(Debug)]
 pub(crate) struct SideShared {
@@ -502,6 +514,10 @@ pub(crate) struct Engine {
     position: Option<(u64, u32)>,
     last_frames: u32,
     last_arrival: Option<Instant>,
+    /// The intervals (and the frames of the cycle before each) of cycles that ran before the rate
+    /// was published, for the lateness figures once it is; beyond [`UNRATED`] they are not judged.
+    unrated: [(Duration, u32); UNRATED],
+    unrated_len: usize,
     xruns_seen: u64,
     /// Tests: panic inside the engine itself (outside the user callbacks) once a direction is in
     /// flight.
@@ -519,6 +535,8 @@ impl Engine {
             position: None,
             last_frames: 0,
             last_arrival: None,
+            unrated: [(Duration::ZERO, 0); UNRATED],
+            unrated_len: 0,
             xruns_seen,
             #[cfg(test)]
             fault: false,
@@ -543,12 +561,24 @@ impl Engine {
         shared.last_frames.store(cycle.frames, Ordering::Relaxed);
         let frames = cycle.frames as usize;
         if let Some(previous) = self.last_arrival {
-            // The rate the callbacks or the start published (unknown before activation: the
-            // engine is built before the client is active, ADR 0021, amendment for #760, rule 1).
-            let rate = shared.sample_rate().max(1);
-            let due = previous + Duration::from_nanos(u64::from(self.last_frames) * 1_000_000_000 / u64::from(rate));
-            let late = cycle.arrival.saturating_duration_since(due);
-            Shared::record(&shared.late_us, &shared.max_late_us, u64::try_from(late.as_micros()).unwrap_or(u64::MAX));
+            // The rate the callbacks or the start published. It is unknown in the cycles that run
+            // before it is published (the engine is built before the client is active, ADR 0021,
+            // amendment for #760, rule 1): those cycles' intervals wait, a bounded few, and are
+            // judged at the first rate published (#760).
+            let interval = cycle.arrival.saturating_duration_since(previous);
+            let rate = shared.sample_rate();
+            if rate == UNKNOWN {
+                if let Some(slot) = self.unrated.get_mut(self.unrated_len) {
+                    *slot = (interval, self.last_frames);
+                    self.unrated_len += 1;
+                }
+            } else {
+                for &(interval, frames) in &self.unrated[..self.unrated_len] {
+                    record_late(&shared, interval, frames, rate);
+                }
+                self.unrated_len = 0;
+                record_late(&shared, interval, self.last_frames, rate);
+            }
         }
         self.last_arrival = Some(cycle.arrival);
         // The device position, unwrapped from JACK's 32-bit frame counter.

@@ -773,3 +773,30 @@ fn a_panic_while_the_engine_is_busy_releases_the_busy_flag() {
     assert!(!busy.is_taken(), "the unwind released the flag");
     assert!(busy.try_take().is_some(), "the next cycle takes it: no permanent silence");
 }
+
+/// #760: a cycle that runs before the session published the rate is judged for lateness at the
+/// first rate published, not at a stand-in rate (which made it look on time).
+#[test]
+fn lateness_before_the_rate_is_published_is_judged_at_the_published_rate() {
+    let shared = Arc::new(Shared::new(engine::UNKNOWN, engine::UNKNOWN));
+    let mut engine = Engine::new(Arc::clone(&shared));
+    let mut outputs = vec![vec![0.0f32; 256]; 2];
+    let inputs = vec![vec![0.0f32; 256]; 2];
+    let start = Instant::now();
+    let mut run = |at: Duration| {
+        let at = engine::Cycle { frames: 256, arrival: start + at, clock: None };
+        engine.process(at, &mut VecPlanes(&mut outputs), &InVecPlanes(&inputs));
+    };
+    run(Duration::ZERO);
+    // 256 frames at 48 kHz last 5,333,333 ns: this cycle starts 4,666,667 ns late.
+    run(Duration::from_millis(10));
+    let stats = shared.stats(true);
+    assert_eq!(stats.wake_late_us.iter().sum::<u64>(), 0, "nothing judged before the rate is known");
+    shared.publish_active(48_000, 256);
+    run(Duration::from_millis(10) + Duration::from_nanos(5_333_333));
+    let stats = shared.stats(true);
+    assert_eq!(stats.max_wake_late_us, 4_666, "judged at 48 kHz");
+    assert_eq!(stats.wake_late_us.iter().sum::<u64>(), 2, "both cycles after the first are judged");
+    assert_eq!(stats.wake_late_us[ab::StreamStats::bin_of_us(4_666)], 1);
+    assert_eq!(stats.wake_late_us[0], 1, "the cycle at the published rate is on time");
+}
