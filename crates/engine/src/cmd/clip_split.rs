@@ -1,9 +1,11 @@
 //! Split to Mono Tracks (`clip.split_to_mono`): each channel of the selected stereo or wider audio
 //! clips on a new mono track below its track, the originals muted, in one undo step: two
-//! microphones recorded onto one stereo track come apart this way. The clips of one track share
-//! its new tracks. An in-memory source splits in memory (each channel is written to `Audio Files`
-//! on save, as a recording is); a source played from its file (ADR 0035) gets one mono WAV per
-//! channel written beside that file, played from disk in turn.
+//! microphones recorded onto one stereo track come apart this way. The stereo clips of one track
+//! share two new tracks and its wider clips share others, since a stereo clip's sides are panned
+//! hard left and right and a wider clip's channels stay centered. An in-memory source splits in
+//! memory (each channel is written to `Audio Files` on save, as a recording is); a source played
+//! from its file (ADR 0035) gets one mono WAV per channel written beside that file, played from
+//! disk in turn.
 
 use super::*;
 use crate::cmd;
@@ -50,6 +52,12 @@ fn with_label(base: &str, sep: &str, label: &str, max: usize) -> String {
     format!("{}{sep}{label}", base.chars().take(keep).collect::<String>())
 }
 
+/// The clips to split onto one group of new tracks: a track's stereo clips are one group and its
+/// wider clips another, so the stereo ones can be panned hard left and right while the wider stay
+/// centered. Keyed by the track's index and whether the group is wider than stereo, so a track's
+/// groups sit together, stereo first; each holds the track, and its clips with their sources and channel counts.
+type Groups = BTreeMap<(usize, bool), (TrackId, Vec<(ClipId, SourceId, usize)>)>;
+
 /// Why splitting `ids` is refused before anything is written, in the words the command and the clip
 /// menu both give: a clip of more than [`MAX_CHANNELS`] channels, or a stereo or wider clip on a
 /// frozen track (muting the original edits the track). `None` when neither applies.
@@ -93,13 +101,13 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(ID, why));
     }
     // The clips to split on each track, in track order, with their sources' channel counts.
-    let mut by_track: BTreeMap<usize, (TrackId, Vec<(ClipId, SourceId, usize)>)> = BTreeMap::new();
+    let mut by_track: Groups = BTreeMap::new();
     for id in &ids {
         let Some((t, c)) = s.find_clip(*id) else { continue };
         let ClipContent::Audio { source, .. } = c.content else { continue };
         let n = s.pool.get(source).map_or(0, |a| a.buffer.num_channels());
         if let (true, Some(i)) = (n > 1, s.track_index(t)) {
-            by_track.entry(i).or_insert((t, Vec::new())).1.push((*id, source, n));
+            by_track.entry((i, n != 2)).or_insert((t, Vec::new())).1.push((*id, source, n));
         }
     }
     if by_track.is_empty() {
@@ -132,13 +140,16 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     let (mut new_tracks, mut new_clips, mut with_inserts) = (Vec::new(), Vec::new(), Vec::new());
+    // How many new tracks sit below each track so far: a track's second group goes below its first.
+    let mut below: std::collections::HashMap<TrackId, usize> = std::collections::HashMap::new();
     for (t, clips) in by_track.into_values() {
         let Some(tr) = s.track(t).cloned() else { continue };
         // Inserts are not copied: a stereo chain may not run on a mono track, and its settings
         // were made for the mix of both channels. The status line says so.
-        if tr.mixer.inserts.iter().any(Option::is_some) {
+        if tr.mixer.inserts.iter().any(Option::is_some) && !with_inserts.contains(&tr.name) {
             with_inserts.push(tr.name.clone());
         }
+        let first = below.get(&t).copied().unwrap_or(0);
         let n = clips.iter().map(|c| c.2).max().unwrap_or(0);
         let mut lanes = Vec::with_capacity(n);
         for ch in 0..n {
@@ -146,7 +157,7 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
             // Taken out before `t` is found: a new track goes in before a Master, which may sit above `t`.
             if let Some(from) = s.track_index(nt) {
                 let moved = s.tracks.remove(from);
-                let at = s.track_index(t).map_or(s.tracks.len(), |at| at + 1 + ch);
+                let at = s.track_index(t).map_or(s.tracks.len(), |at| at + 1 + first + ch);
                 s.tracks.insert(at.min(s.tracks.len()), moved);
             }
             if let Some(m) = s.track_mut(nt) {
@@ -164,6 +175,7 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
             lanes.push(nt);
             new_tracks.push(nt);
         }
+        below.insert(t, first + n);
         for (cid, src, channels) in clips {
             let Some(orig) = s.find_clip(cid).map(|(_, c)| c.clone()) else { continue };
             let ClipContent::Audio { offset, anchor, .. } = orig.content else { continue };
@@ -207,7 +219,7 @@ fn mono_audio(audio: &SourceAudio, ch: usize) -> SourceAudio {
 /// one is complete; each path created is in `written`, for the caller to remove on a failure.
 fn prepare(
     s: &transit_model::Session,
-    by_track: &BTreeMap<usize, (TrackId, Vec<(ClipId, SourceId, usize)>)>,
+    by_track: &Groups,
     written: &mut Vec<PathBuf>,
 ) -> Result<Vec<Split>> {
     let mut out: Vec<(SourceId, u64, Vec<(String, Option<SourceAudio>)>, Option<Arc<DiskSource>>)> = Vec::new();

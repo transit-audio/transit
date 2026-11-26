@@ -396,3 +396,36 @@ fn a_frozen_track_or_a_too_wide_clip_is_refused_in_the_words_the_menu_shows() {
     }
     assert_eq!(transit_engine::cmd::split_refusal(e.session(), &[fine]), None, "64 channels split");
 }
+
+/// #771: a stereo clip and a wider clip selected together on one track do not share destination
+/// tracks: the stereo clip's two tracks keep their hard left and right and render as the stereo
+/// track did, the wider clip's tracks stay centered, all below the track, the stereo pair first.
+#[test]
+fn a_stereo_and_a_wider_clip_on_one_track_split_onto_separate_tracks() {
+    let d = transit_test_support::TestDir::new("split-to-mono-mixed");
+    std::fs::create_dir_all(&*d).unwrap();
+    let (stereo, wide) = (d.join("Mics.wav"), d.join("Room.wav"));
+    let sample = |i: u32, ch: u16| (((i * if ch == 0 { 37 } else { 91 }) % 2_000) as i16 - 1_000) * 16;
+    std::fs::write(&stereo, pcm_wav(4_800, 2, sample)).unwrap();
+    std::fs::write(&wide, pcm_wav(480, 4, |_, ch| 1_000 * (i16::try_from(ch).unwrap() + 1))).unwrap();
+    let mut e = Engine::default();
+    let mics = e.execute("track.new", &json!({"kind": "audio", "format": "stereo", "name": "Mics"})).unwrap()["tracks"][0].as_u64().unwrap();
+    e.execute("file.import_audio", &json!({"path": stereo.to_string_lossy(), "track": mics, "at": 960})).unwrap();
+    e.execute("file.import_audio", &json!({"path": wide.to_string_lossy(), "track": mics, "at": 9_600})).unwrap();
+    let ids: Vec<u64> = e.session().track(TrackId(mics)).unwrap().clips().iter().map(|c| c.id.0).collect();
+    // The wide clip starts after the range rendered, so the comparison is of the stereo clip alone.
+    let range = transit_time::Range::new(0, 6_400);
+    let before = transit_mix::render_range(e.session(), range, 512);
+    assert!(before.len() == 2 && before.iter().all(|ch| ch.iter().any(|v| *v != 0.0)), "the stereo clip sounds on both sides");
+    let r = e.execute("clip.split_to_mono", &json!({"clips": ids})).unwrap();
+    let names: Vec<String> = e.session().tracks.iter().map(|t| t.name.clone()).collect();
+    assert_eq!(names, ["Mics", "Mics L", "Mics R", "Mics 1", "Mics 2", "Mics 3", "Mics 4"], "{names:?}");
+    let pans: Vec<Vec<f32>> = r["tracks"].as_array().unwrap().iter().map(|t| e.session().track(TrackId(t.as_u64().unwrap())).unwrap().mixer.pan.clone()).collect();
+    assert_eq!(pans[..2], [vec![-1.0], vec![1.0]], "the stereo clip keeps hard left and right");
+    assert!(pans[2..].iter().all(|p| *p == [0.0]), "the wider clip stays centered: {pans:?}");
+    let per_track: Vec<usize> = e.session().tracks[1..].iter().map(|t| t.clips().len()).collect();
+    assert_eq!(per_track, [1, 1, 1, 1, 1, 1], "each new track holds one channel of one clip");
+    let after = transit_mix::render_range(e.session(), range, 512);
+    let diff = before.iter().flatten().zip(after.iter().flatten()).map(|(a, b)| (a - b).abs()).fold(0.0f32, f32::max);
+    assert!(after == before, "the stereo clip renders exactly as before (largest difference {diff})");
+}
