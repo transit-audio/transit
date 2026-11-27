@@ -35,6 +35,7 @@ fn spec(port: &str, number: u8) -> MapSpec {
         max: 1.0,
         toggle: true,
         button: false,
+        target: None,
     }
 }
 

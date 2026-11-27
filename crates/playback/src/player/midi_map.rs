@@ -35,6 +35,16 @@ pub struct MapSpec {
     pub button: bool,
     /// Also deliver the message to the track's routes (default off: a mapped message is consumed).
     pub pass_through: bool,
+    /// What the mapping drives: the resolved track and control. Part of the mapping's identity
+    /// ([`same_mapping`]), so a retarget is a new mapping (new cells, a new epoch for its events, a
+    /// new start) and a value from before it never reaches the new target. `None` only where
+    /// nothing in particular is driven (tests of the matcher).
+    pub target: Option<(transit_model::TrackId, transit_model::Control)>,
+}
+
+/// Whether two specs are the same mapping: same source, takeover, range, flags and target.
+fn same_mapping(a: &MapSpec, b: &MapSpec) -> bool {
+    a == b
 }
 
 impl MapSpec {
@@ -52,6 +62,7 @@ impl MapSpec {
             toggle: m.toggle,
             button: r.control.is_button(),
             pass_through: m.pass_through,
+            target: Some((r.track, r.control.clone())),
         }
     }
 }
@@ -465,15 +476,17 @@ impl Wanted {
         self.cells.iter().enumerate().filter_map(|(i, c)| c.take().map(|(v, n)| (i as u32, v, n))).collect()
     }
 
-    /// Replace the wanted mappings. Equal lists change nothing (pickup state survives).
+    /// Replace the wanted mappings. Equal lists change nothing (pickup state survives). Any other
+    /// list is a new epoch with new cells: the worker's events of the old list (presses by epoch,
+    /// moves through the old cells) never reach the new one, whose indices may name other targets.
     pub fn set(&mut self, specs: Vec<MapSpec>) {
-        if specs == self.specs {
+        if specs.len() == self.specs.len() && specs.iter().zip(&self.specs).all(|(a, b)| same_mapping(a, b)) {
             return;
         }
         self.cells = specs.iter().map(|_| Arc::new(Cell::new(0.0))).collect();
         // An unchanged mapping keeps where it starts matching; each old one is carried once.
         let mut old: Vec<(MapSpec, Option<(u64, u64)>)> = std::mem::take(&mut self.specs).into_iter().zip(std::mem::take(&mut self.from)).collect();
-        self.from = specs.iter().map(|spec| old.iter().position(|(was, _)| was == spec).and_then(|i| old.swap_remove(i).1)).collect();
+        self.from = specs.iter().map(|spec| old.iter().position(|(was, _)| same_mapping(was, spec)).and_then(|i| old.swap_remove(i).1)).collect();
         self.specs = specs;
         self.epoch = self.epoch.wrapping_add(1);
     }
@@ -579,7 +592,19 @@ mod tests {
     use transit_mix::NoteId;
 
     fn spec(kind: SourceKind, number: u8, mode: MapMode, button: bool) -> MapSpec {
-        MapSpec { port: "KeyStep".into(), channel: Some(0), kind, number, mode, min: 0.0, max: 1.0, toggle: true, button, pass_through: false }
+        MapSpec {
+            port: "KeyStep".into(),
+            channel: Some(0),
+            kind,
+            number,
+            mode,
+            min: 0.0,
+            max: 1.0,
+            toggle: true,
+            button,
+            pass_through: false,
+            target: None,
+        }
     }
     fn snap(spec: &MapSpec, current: f32) -> (Snapshot, Arc<Cell>) {
         let cell = Arc::new(Cell::new(current));

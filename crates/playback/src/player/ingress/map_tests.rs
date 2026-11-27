@@ -68,12 +68,13 @@ fn build(routed: bool) -> Rig {
 impl Rig {
     /// Queue these mappings for the worker as Main does, with "KeyStep" open as input `PORT`: a
     /// mapping new to the port matches from the port's cutoff now. The worker applies them at its
-    /// next step.
+    /// next step. An equal list queues nothing, as on Main.
     fn queue_maps(&mut self, specs: Vec<MapSpec>) {
         self.wanted.set(specs);
         let cutoff = self._handle.boundary().cutoff();
-        let snapshot = self.wanted.rebuild(vec![Some(PORT); self.wanted.len()], |_| cutoff).unwrap();
-        self.send.send(Update::Maps(snapshot)).ok().unwrap();
+        if let Some(snapshot) = self.wanted.rebuild(vec![Some(PORT); self.wanted.len()], |_| cutoff) {
+            self.send.send(Update::Maps(snapshot)).ok().unwrap();
+        }
     }
 
     /// Hand the worker these mappings, with "KeyStep" open as input `PORT`.
@@ -112,7 +113,19 @@ impl Rig {
 }
 
 fn spec(kind: SourceKind, number: u8, mode: MapMode, button: bool) -> MapSpec {
-    MapSpec { port: "KeyStep".into(), channel: Some(0), kind, number, mode, min: 0.0, max: 1.0, toggle: true, button, pass_through: false }
+    MapSpec {
+        port: "KeyStep".into(),
+        channel: Some(0),
+        kind,
+        number,
+        mode,
+        min: 0.0,
+        max: 1.0,
+        toggle: true,
+        button,
+        pass_through: false,
+        target: None,
+    }
 }
 
 #[test]
@@ -480,11 +493,64 @@ fn the_first_move_after_a_mapping_is_queued_is_matched_and_the_older_backlog_is_
 #[test]
 fn an_unchanged_mapping_keeps_its_start_across_a_later_update() {
     let mut rig = rig();
-    rig.queue_maps(vec![spec(SourceKind::Cc, 7, MapMode::Jump, false)]);
+    rig.queue_maps(vec![aimed(cc(7), 1)]);
     rig.port.deliver(0, &[0xB0, 7, 127]);
-    rig.queue_maps(vec![spec(SourceKind::Cc, 7, MapMode::Jump, false), spec(SourceKind::Cc, 8, MapMode::Jump, false)]);
+    rig.queue_maps(vec![aimed(cc(7), 1), aimed(cc(8), 2)]);
     rig.worker.step();
     assert_eq!(rig.moves(), vec![1.0], "the CC7 move after its mapping was queued");
+}
+
+/// A Jump CC mapping on "KeyStep" over 0..1.
+fn cc(number: u8) -> MapSpec {
+    spec(SourceKind::Cc, number, MapMode::Jump, false)
+}
+
+/// `spec` driving track `track`'s volume.
+fn aimed(spec: MapSpec, track: u64) -> MapSpec {
+    MapSpec { target: Some((TrackId(track), Control::Volume)), ..spec }
+}
+
+/// Review of the mapped-control fix: CC7 is mapped to track 1's volume and moves before the worker
+/// applies the mapping; then CC7 is retargeted to track 2's volume, with the same source, range and
+/// flags. The retarget is a new mapping: the move from before it does not reach track 2 (no value
+/// for the new list), and the next move does.
+#[test]
+fn a_value_from_before_a_retarget_never_reaches_the_new_target() {
+    let mut rig = rig();
+    rig.queue_maps(vec![aimed(cc(7), 1)]);
+    let first = rig.wanted.epoch();
+    rig.port.deliver(0, &[0xB0, 7, 127]);
+    rig.queue_maps(vec![aimed(cc(7), 2)]);
+    assert_ne!(rig.wanted.epoch(), first, "a retarget is a new list: its events carry a new epoch");
+    rig.worker.step();
+    assert!(rig.moves().is_empty(), "the value from before the retarget reached the new target");
+    assert_eq!(rig.cc(7, 127), vec![1.0]);
+}
+
+/// The same retarget with another mapping added in the one update: the retargeted mapping does not
+/// carry the old start along.
+#[test]
+fn a_retarget_with_an_added_mapping_takes_a_new_start() {
+    let mut rig = rig();
+    rig.queue_maps(vec![aimed(cc(7), 1)]);
+    rig.port.deliver(0, &[0xB0, 7, 127]);
+    rig.queue_maps(vec![aimed(cc(7), 2), aimed(cc(8), 3)]);
+    rig.worker.step();
+    assert!(rig.moves().is_empty(), "the retargeted mapping kept its old start");
+    assert_eq!(rig.cc(7, 127), vec![1.0]);
+}
+
+/// A range-only change is a changed mapping too: the move from before it is not scaled into the new
+/// range; the next move is.
+#[test]
+fn a_range_change_takes_a_new_start() {
+    let mut rig = rig();
+    rig.queue_maps(vec![aimed(cc(7), 1)]);
+    rig.port.deliver(0, &[0xB0, 7, 127]);
+    rig.queue_maps(vec![MapSpec { max: 0.5, ..aimed(cc(7), 1) }]);
+    rig.worker.step();
+    assert!(rig.moves().is_empty(), "the value from before the range change was applied");
+    assert_eq!(rig.cc(7, 127), vec![0.5]);
 }
 
 /// An input attached in the same worker step as the mappings: a value it received before the
