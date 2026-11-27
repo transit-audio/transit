@@ -13,10 +13,11 @@ pub(crate) struct ImportedSessionData {
 pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<String>>) -> Result<ImportedSessionData> {
     let id = "file.import_session_data";
     let text = read_text(path)?;
-    let mut other = Session::from_json(&text).map_err(|err| {
+    let (mut other, as_stored) = Session::from_json_as_saved(&text).map_err(|err| {
         super::session::log_session_detail(path, &err);
         bad(id, format!("{path}: {err}"))
     })?;
+    crate::cmd::fill_substituted_defaults(&mut other, as_stored.as_ref());
     let donor_rate = std::mem::replace(&mut other.sample_rate, e.session().sample_rate);
     let frozen_notes = super::frozen_recording::load(&mut other, Path::new(path));
     other.sample_rate = donor_rate;

@@ -72,3 +72,27 @@ fn opening_from_bytes_substitutes_and_reads_as_modified_too() {
     assert!(e.messages.iter().any(|m| m.contains(STATUS)), "{:?}", e.messages);
     assert!(e.is_dirty());
 }
+
+/// #753: storing the whole table is not an audible change. The opened session renders exactly what
+/// the same session renders with only the substitute's level stored, as it was before.
+#[test]
+fn the_stored_table_sounds_exactly_as_the_level_only_substitute_did() {
+    let text = fixture("v0.4.1-demo.transit");
+    let mut e = Engine::default();
+    transit_engine::io::open_session_bytes(&mut e, "Demo.transit", text.as_bytes()).unwrap();
+    let end = e.session().content_end().clamp(1, 48_000 * 20);
+    let whole = transit_mix::render_range(e.session(), Range::new(0, end), 512);
+    assert!(whole.iter().flatten().any(|x| x.abs() > 1e-4), "the demo is audible");
+    let mut level_only = e.session().clone();
+    let mut trimmed = 0;
+    for t in &mut level_only.tracks {
+        if let Some(ins) = t.instrument.as_mut().filter(|i| i.plugin == "macro_oscillator") {
+            assert!(ins.params.len() > 1, "the opened substitute stores its whole table");
+            ins.params.retain(|k, _| k == "level");
+            trimmed += 1;
+        }
+    }
+    assert!(trimmed > 0);
+    let before = transit_mix::render_range(&level_only, Range::new(0, end), 512);
+    assert!(whole == before, "the whole table renders the same bits as the level alone");
+}

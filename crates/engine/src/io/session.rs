@@ -395,6 +395,7 @@ fn open_session_as(e: &mut Engine, path: &str, links: &Path, name_file: bool) ->
         log_session_detail(path, &err);
         EngineError::Io(if name_file { open_refusal(path, &err) } else { err.to_string() })
     })?;
+    crate::cmd::fill_substituted_defaults(&mut s, stored.as_ref());
     let dir = Path::new(path).parent().map(Path::to_path_buf).unwrap_or_default();
     let mut missing = Vec::new();
     let mut files = DecodedFiles::new();
@@ -678,6 +679,7 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
         log_session_detail(name, &err);
         EngineError::Io(open_refusal(name, &err))
     })?;
+    crate::cmd::fill_substituted_defaults(&mut s, stored.as_ref());
     let mut missing = Vec::new();
     let sampler_sources = sampler_sources(&s);
     repair_source_rates(&mut s, &sampler_sources);

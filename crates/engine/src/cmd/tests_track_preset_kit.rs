@@ -218,7 +218,11 @@ fn a_preset_with_the_retired_subtractive_synth_gets_a_macro_oscillator_as_a_sess
     let ins = e.session().track(t).unwrap().instrument.clone().unwrap();
     assert_eq!(ins.plugin, transit_model::legacy_synth::DEFAULT_INSTRUMENT);
     assert_eq!(ins.params.get("level"), Some(&transit_model::legacy_synth::SUBSTITUTE_LEVEL_DB), "the session load's substitute");
-    assert!(!ins.params.contains_key("cutoff"));
+    let info = transit_dsp::plugin_info(&ins.plugin).unwrap();
+    // The Macro Oscillator has a `cutoff` of its own: the old synth's 300 is gone, the default is stored.
+    assert_eq!(ins.params.get("cutoff"), info.param("cutoff").map(|p| &p.default), "the old synth's cutoff did not carry over");
+    assert_eq!(ins.params.len(), info.params.len(), "the whole table is stored (#753)");
+    assert!(info.params.iter().filter(|p| p.id != "level").all(|p| ins.params.get(p.id) == Some(&p.default)));
     assert_eq!(e.messages, vec![transit_model::legacy_synth::summary(1)]);
 }
 

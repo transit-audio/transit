@@ -443,6 +443,7 @@ fn paste_clip_effects(e: &mut Engine, p: &Value) -> Result<Value> {
         for (k, v) in &fx {
             s.edit.values.insert(format!("{pre}{k}"), *v);
         }
+        super::fill_clip_fx_defaults(s, *c);
     }
     Ok(json!({"clips": ids.len()}))
 }

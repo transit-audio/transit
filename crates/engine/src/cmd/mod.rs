@@ -53,6 +53,9 @@ mod sampler_slices;
 mod sampler_state;
 mod setup_more;
 mod slice_to_midi;
+#[cfg(test)]
+#[path = "tests_stored_values.rs"]
+mod stored_values_tests;
 mod surround;
 mod tab;
 mod takes;
@@ -352,6 +355,51 @@ pub(crate) fn fill_default_params(ins: &mut transit_model::Insert, info: &transi
 pub(crate) fn fill_builtin_defaults(ins: &mut transit_model::Insert) {
     if let Some(info) = transit_dsp::plugin_info(&ins.plugin) {
         fill_default_params(ins, info);
+    }
+}
+
+/// The whole table of the Macro Oscillator that loading put in place of the retired Subtractive
+/// Synth (#234, #753): every parameter the build has and the substitute does not already store is
+/// written at this build's default, so the session, once saved, no longer follows a later change
+/// of a default. What the substitution stored (its level) is kept. `stored` is the session as the
+/// file had it, which names the tracks that were substituted; `None` (the load changed nothing)
+/// leaves `s` alone. A file that is never saved again still follows the defaults of the build that
+/// opens it.
+pub(crate) fn fill_substituted_defaults(s: &mut transit_model::Session, stored: Option<&transit_model::Session>) {
+    let Some(stored) = stored else { return };
+    for t in &stored.tracks {
+        if t.instrument.as_ref().is_some_and(|i| i.plugin == transit_model::legacy_synth::RETIRED_SYNTH_ID)
+            && let Some(ins) = s.track_mut(t.id).and_then(|x| x.instrument.as_mut())
+        {
+            fill_missing_defaults(ins);
+        }
+    }
+}
+
+/// [`fill_builtin_defaults`] for an insert that already stores some values: the ones it stores stay.
+pub(crate) fn fill_missing_defaults(ins: &mut transit_model::Insert) {
+    if let Some(info) = transit_dsp::plugin_info(&ins.plugin).filter(|i| !transit_mix::is_third_party(i.id)) {
+        for pi in info.params {
+            ins.params.entry(pi.id.to_string()).or_insert(pi.default);
+        }
+    }
+}
+
+/// Writes the whole table of every clip-effect module a clip has switched on (#753): a module runs
+/// while any of its parameters is stored, and a device stores every value, so the first value set
+/// brings the rest at this build's defaults and a later change of a default never moves the clip.
+/// What is stored stays; a module with no stored value stays off. The clip's gain is a single
+/// value, not a table, and is stored only when set.
+pub(crate) fn fill_clip_fx_defaults(s: &mut transit_model::Session, clip: transit_model::ClipId) {
+    let pre = format!("clip_fx.{}.", clip.0);
+    for (module, info) in transit_mix::clip_fx_tables() {
+        let on = format!("{pre}{module}");
+        let stored = s.edit.values.range(on.clone()..).next().is_some_and(|(k, _)| k.starts_with(&on));
+        if stored {
+            for pi in info.params {
+                s.edit.values.entry(format!("{on}{}", pi.id)).or_insert(f64::from(pi.default));
+            }
+        }
     }
 }
 

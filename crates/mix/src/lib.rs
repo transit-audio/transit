@@ -254,6 +254,14 @@ const CLIP_FX_BIT: usize = 1 << (usize::BITS - 1);
 const CLIP_EQ: &str = transit_dsp::plugins::eq::EQ7_INFO.id;
 const CLIP_COMP: &str = transit_dsp::plugins::dynamics::COMP_INFO.id;
 
+/// The modules of a clip's effect chain with the prefix their parameters carry in the session's
+/// `clip_fx.<clip>.` values (`eq.`, `comp.`) and the table each one has. A module runs while any
+/// of its parameters is stored; a device stores every value (#753).
+#[must_use]
+pub fn clip_fx_tables() -> [(&'static str, &'static transit_dsp::PluginInfo); 2] {
+    [("eq.", &transit_dsp::plugins::eq::EQ7_INFO), ("comp.", &transit_dsp::plugins::dynamics::COMP_INFO)]
+}
+
 /// Slot index of a clip's effect module in [`InstanceSpec`]: its EQ
 /// (`comp` false) or its compressor. `None` for a clip id too large to encode (not made by
 /// [`Session::new_clip_id`] in practice); such a clip plays without its effects in realtime.

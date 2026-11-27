@@ -183,6 +183,7 @@ fn effects_set(e: &mut Engine, p: &Value) -> Result<Value> {
         for (k, v) in &vals {
             s.edit.values.insert(format!("clip_fx.{}.{k}", c.0), *v);
         }
+        super::fill_clip_fx_defaults(s, *c);
     }
     Ok(json!({"clips": ids.len(), "params": vals.len()}))
 }

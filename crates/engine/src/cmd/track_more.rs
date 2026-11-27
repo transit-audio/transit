@@ -337,7 +337,11 @@ fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
         let Some(tr) = e.session().track(*t) else { continue };
         let mut ins = if tr.kind == TrackKind::Instrument { instrument.clone() } else { None };
         let mut mx = mixer.clone();
+        let was_retired = ins.as_ref().is_some_and(|i| i.plugin == transit_model::legacy_synth::RETIRED_SYNTH_ID);
         lines.extend(transit_model::legacy::retire_preset_slots(&tr.name, tr.kind, &mut ins, &mut mx));
+        if let Some(i) = ins.as_mut().filter(|_| was_retired) {
+            super::fill_missing_defaults(i);
+        }
         let kit = kit_value.is_some() && ins.as_ref().is_some_and(|i| i.plugin == "sampler" && i.sampler_patch.is_some());
         targets.push(kit::Target { track: *t, mixer: mx, instrument: ins, kit });
     }

@@ -23,6 +23,9 @@ pub const DEFAULT_INSTRUMENT: &str = "macro_oscillator";
 /// to within about 2 dB of the old loudness on that golden.
 pub const SUBSTITUTE_LEVEL_DB: f32 = -19.5;
 
+/// The substitute stores only that level: this crate does not know the Macro Oscillator's table. The
+/// engine writes the rest at the opening build's defaults right after the parse (#753,
+/// `fill_substituted_defaults`), so a saved session no longer follows a later change of a default.
 /// The one-line status of a load that substituted for `n` tracks: `1 track used the retired
 /// Subtractive Synth and now carries the Macro Oscillator`, `2 tracks used ... now carry ...`.
 #[must_use]
