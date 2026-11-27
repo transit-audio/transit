@@ -60,6 +60,9 @@ static PORTS_INCOMPLETE_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.tes
 static PORT_FLOOD_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.port-flood", c"Fixture Port Flood", &NOTE_EFFECT);
 static PROBE_HELPER_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-helper", c"Fixture Probe Helper", &EFFECT);
 static PROBE_ESCAPE_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-escape", c"Fixture Probe Escape", &EFFECT);
+static PROBE_HELPER_CRASH_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-helper-crash", c"Fixture Probe Helper Crash", &EFFECT);
+static PROBE_CHATTER_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-chatter", c"Fixture Probe Chatter", &EFFECT);
+static PROBE_LONG_LINE_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-long-line", c"Fixture Probe Long Line", &EFFECT);
 
 #[cfg(feature = "notes")]
 pub(crate) static DESCS: [&clap_plugin_descriptor; 2] = [&NOTES_DESC, &NOTES_SILENT_DESC];
@@ -68,11 +71,30 @@ pub(crate) static DESCS: [&clap_plugin_descriptor; 3] = [&EFFECT_A_DESC, &EFFECT
 #[cfg(all(feature = "probe-failures", not(any(feature = "notes", feature = "note-effects"))))]
 pub(crate) static DESCS: [&clap_plugin_descriptor; 5] = [&NOTES_DESC, &PROBE_ERROR_DESC, &PROBE_CRASH_DESC, &PROBE_BLOCK_DESC, &NOTES_SILENT_DESC];
 #[cfg(all(feature = "edges", unix, not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
-pub(crate) static DESCS: [&clap_plugin_descriptor; 7] =
-    [&PORT_64_DESC, &PORT_UNREADABLE_DESC, &PORTS_INCOMPLETE_DESC, &PORT_FLOOD_DESC, &PROBE_HELPER_DESC, &PROBE_ESCAPE_DESC, &NOTES_DESC];
+pub(crate) static DESCS: [&clap_plugin_descriptor; 10] = [
+    &PORT_64_DESC,
+    &PORT_UNREADABLE_DESC,
+    &PORTS_INCOMPLETE_DESC,
+    &PORT_FLOOD_DESC,
+    &PROBE_HELPER_DESC,
+    &PROBE_ESCAPE_DESC,
+    &PROBE_HELPER_CRASH_DESC,
+    &PROBE_CHATTER_DESC,
+    &PROBE_LONG_LINE_DESC,
+    &NOTES_DESC,
+];
 #[cfg(all(feature = "edges", not(unix), not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
-pub(crate) static DESCS: [&clap_plugin_descriptor; 6] =
-    [&PORT_64_DESC, &PORT_UNREADABLE_DESC, &PORTS_INCOMPLETE_DESC, &PORT_FLOOD_DESC, &PROBE_HELPER_DESC, &NOTES_DESC];
+pub(crate) static DESCS: [&clap_plugin_descriptor; 9] = [
+    &PORT_64_DESC,
+    &PORT_UNREADABLE_DESC,
+    &PORTS_INCOMPLETE_DESC,
+    &PORT_FLOOD_DESC,
+    &PROBE_HELPER_DESC,
+    &PROBE_HELPER_CRASH_DESC,
+    &PROBE_CHATTER_DESC,
+    &PROBE_LONG_LINE_DESC,
+    &NOTES_DESC,
+];
 
 /// The ports a plug-in declares.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -132,9 +154,18 @@ pub(crate) fn create(id: &CStr) -> Option<*const clap_plugin> {
     } else if id == c"org.soundcraft.test.probe-escape" {
         spawn_helper("escape", true);
         block()
+    } else if id == c"org.soundcraft.test.probe-helper-crash" {
+        spawn_helper("reaped", false);
+        crash()
+    } else if id == c"org.soundcraft.test.probe-chatter" {
+        spawn_chatter("chatter", true);
+        block()
+    } else if id == c"org.soundcraft.test.probe-long-line" {
+        long_line()
     } else {
         return None;
     };
+    note_created();
     let b = Box::new(Note {
         plugin: clap_plugin {
             desc: desc as *const _,
@@ -157,6 +188,15 @@ pub(crate) fn create(id: &CStr) -> Option<*const clap_plugin> {
     unsafe {
         (*raw).plugin.plugin_data = raw.cast::<c_void>();
         Some(&(*raw).plugin)
+    }
+}
+
+/// Appends a line to `created.log` in the working folder: a test sees that a plug-in was created
+/// (that its child got as far as loading the plug-in).
+fn note_created() {
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("created.log") {
+        let _ = writeln!(f, "{}", std::process::id());
     }
 }
 
@@ -196,9 +236,28 @@ fn block() -> ! {
 /// gives up after 3000 checks). `escape`: the helper starts in a process group of its own (Linux
 /// and macOS), as a process that leaves its parent's group on purpose does.
 fn spawn_helper(name: &str, escape: bool) {
+    spawn_role("--hold-output", name, escape);
+}
+
+/// Starts this program with `--chatter <name>`: like a helper from [`spawn_helper`], and it also
+/// writes a line to its standard output (inherited: the scan's pipe) every 10 ms until a write
+/// fails, which ends it. `escape` as for [`spawn_helper`].
+fn spawn_chatter(name: &str, escape: bool) {
+    spawn_role("--chatter", name, escape);
+}
+
+/// Writes 5 MiB without a line end to standard output (the scan's pipe), then blocks.
+fn long_line() -> ! {
+    use std::io::Write as _;
+    let _ = std::io::stdout().write_all(&vec![b'x'; 5 * 1024 * 1024]);
+    let _ = std::io::stdout().flush();
+    block()
+}
+
+fn spawn_role(role: &str, name: &str, escape: bool) {
     let Ok(exe) = std::env::current_exe() else { return };
     let mut c = std::process::Command::new(exe);
-    c.arg("--hold-output").arg(name).stdin(std::process::Stdio::null());
+    c.arg(role).arg(name).stdin(std::process::Stdio::null());
     #[cfg(unix)]
     if escape {
         use std::os::unix::process::CommandExt as _;
@@ -329,6 +388,7 @@ unsafe extern "C" fn get_extension(p: *const clap_plugin, id: *const c_char) -> 
     let id = unsafe { CStr::from_ptr(id) };
     if id == CLAP_EXT_AUDIO_PORTS {
         &AUDIO as *const _ as *const c_void
+    // SAFETY: the host passes a live plug-in of this module (made by `create`, not destroyed).
     } else if id == CLAP_EXT_NOTE_PORTS && unsafe { note(p) }.shape == Shape::PortsIncomplete {
         &NOTE_PORTS_WITHOUT_GET as *const _ as *const c_void
     } else if id == CLAP_EXT_NOTE_PORTS {
