@@ -262,7 +262,7 @@ const GO: &[u8] = b"go\n";
 const ARMED_GO: &[u8] = b"go watch-fails\n";
 
 /// Names the watch failure seam in a child's environment (test-hooks builds read it).
-#[cfg(any(test, feature = "test-hooks"))]
+#[cfg(feature = "test-hooks")]
 const WATCH_FAILS_ENV: &str = "TRANSIT_SCAN_TEST_WATCH_FAILS";
 
 /// Whether the watch failure seam acts: only with both its environment variable and the armed
@@ -303,8 +303,6 @@ pub fn enter_child() {
         }
         None => (watch, None),
     };
-    #[cfg(not(feature = "test-hooks"))]
-    let handshake: Option<String> = None;
     if let Err(e) = watch {
         use std::io::Write as _;
         let answer = serde_json::json!({ "error": format!("the scan process cannot watch its parent ({e}); it loaded nothing") });
@@ -312,7 +310,11 @@ pub fn enter_child() {
         let _ = std::io::stdout().flush();
         std::process::exit(0);
     }
-    if !accepted(&handshake.unwrap_or_else(read_handshake)) {
+    #[cfg(feature = "test-hooks")]
+    let line = handshake.unwrap_or_else(read_handshake);
+    #[cfg(not(feature = "test-hooks"))]
+    let line = read_handshake();
+    if !accepted(&line) {
         std::process::exit(0);
     }
 }
