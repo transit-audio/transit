@@ -29,8 +29,10 @@ fn ev(channel: u8, note_id: i32, message: Message) -> PluginEvent {
     PluginEvent { channel, note_id, message }
 }
 
+/// ADR 0059, Decision 1: each note goes out with its ledger entry's own native `note_id`, and its
+/// release with the same one, so the plug-in cannot pair them differently.
 #[test]
-fn notes_carry_channel_and_note_id_and_pressure_is_an_expression() {
+fn notes_carry_channel_and_their_entrys_note_id_and_pressure_is_an_expression() {
     let mut p = plugin(256);
     let n = NoteId::NONE;
     p.event(10, &ev(2, 7, Message::NoteOn { key: 60, velocity: 127, id: n }));
@@ -39,9 +41,11 @@ fn notes_carry_channel_and_note_id_and_pressure_is_an_expression() {
     p.event(30, &ev(2, 7, Message::NoteOff { key: 60, velocity: 0, id: n }));
     p.event(40, &ev(3, -1, Message::Control { cc: 1, value: 5 }));
     let r = records(&mut p, 256);
+    let (a, b) = (r[0].3, r[1].3);
+    assert_ne!(a, b, "every entry has its own native id");
     assert_eq!(
         r,
-        vec![(1, 10, 2060, 7), (1, 10, 9060, 8), (3, 20, 9060, 1_000_000), (2, 30, 2060, 7), (5, 40, 0xB3_01_05, 0)],
+        vec![(1, 10, 2060, a), (1, 10, 9060, b), (3, 20, 9060, 1_000_000), (2, 30, 2060, a), (5, 40, 0xB3_01_05, 0)],
         "controllers go to the MIDI dialect with the channel nibble"
     );
 }
@@ -57,20 +61,21 @@ fn set_param_at_sends_one_point_per_offset() {
 }
 
 /// #117: a timed point the full queue refuses still lands: the parameter's latest queued point
-/// takes its value (the last point wins).
+/// takes its value (the last point wins). Under ADR 0059 note and MIDI events no longer share the
+/// timed points' budget, so the budget is filled with timed points (1,024 at distinct offsets).
 #[test]
 fn a_timed_point_past_a_full_queue_overwrites_the_latest() {
-    let mut p = plugin(1024);
-    assert!(p.set_param_at(1, "5", 0.25));
-    let n = NoteId::NONE;
-    let mut i = 0u32;
-    while p.event(2, &ev((i % 16) as u8, -1, Message::PolyPressure { key: (i % 128) as u8, value: 1, id: n })) {
-        i += 1;
+    let mut p = plugin(8192);
+    for t in 1..=1024u32 {
+        assert!(p.set_param_at(t, "5", 0.25));
     }
-    assert_eq!(i, 1024 - 257 - 1, "non-releases fill the queue up to the release reserve");
-    assert!(p.set_param_at(40, "5", 0.75), "absorbed by the queued point");
-    let r = records(&mut p, 1024);
-    assert_eq!(r.iter().filter(|x| x.0 == 4).copied().collect::<Vec<_>>(), vec![(4, 1, 5, 750_000)]);
+    let n = NoteId::NONE;
+    assert!(p.event(2, &ev(0, -1, Message::PolyPressure { key: 60, value: 1, id: n })), "MIDI has its own allowance");
+    assert!(p.set_param_at(2000, "5", 0.75), "absorbed by the queued point");
+    let r = records(&mut p, 8192);
+    let points: Vec<_> = r.iter().filter(|x| x.0 == 4).copied().collect();
+    assert_eq!(points.len(), 1024, "no point at 2000");
+    assert_eq!(points.last(), Some(&(4, 1024, 5, 750_000)));
 }
 
 /// #117 review: a block the plug-in is not called for (here: the early return of a block with no
@@ -109,22 +114,26 @@ fn a_value_a_skipped_block_kept_is_pending_until_a_block_delivers_it() {
 
 #[test]
 fn a_note_off_survives_an_overfull_queue() {
-    let mut p = plugin(4096);
+    // ADR 0059: the ordinary allowance is full, a start still gets a ledger entry, and every owned
+    // release is admitted.
+    let mut p = plugin(8192);
     let n = NoteId::NONE;
-    for i in 0..600u32 {
-        assert!(p.event(1, &ev((i % 16) as u8, -1, Message::PolyPressure { key: (i % 128) as u8, value: 1, id: n })));
+    let mut ordinary = 0u32;
+    while p.event(1, &ev((ordinary % 16) as u8, -1, Message::PolyPressure { key: (ordinary % 128) as u8, value: 1, id: n })) {
+        ordinary += 1;
     }
+    assert_eq!(ordinary, 1024, "ordinary events stop at their allowance");
     let admitted: Vec<i32> =
         (0..300).filter(|&i| p.event(2, &ev((i % 16) as u8, i, Message::NoteOn { key: (i % 128) as u8, velocity: 90, id: n }))).collect();
-    assert_eq!(admitted.len(), 1024 - 257 - 600, "non-releases stop at the release reserve");
+    assert_eq!(admitted.len(), 300, "starts take ledger entries, not the ordinary allowance");
     for &i in &admitted {
         assert!(p.event(3, &ev((i % 16) as u8, i, Message::NoteOff { key: (i % 128) as u8, velocity: 0, id: n })), "the off of admitted note {i}");
     }
-    let r = records(&mut p, 4096);
-    let ons: Vec<i64> = r.iter().filter(|x| x.0 == 1).map(|x| x.3).collect();
-    let offs: Vec<i64> = r.iter().filter(|x| x.0 == 2).map(|x| x.3).collect();
-    assert_eq!(ons, admitted.iter().map(|&i| i64::from(i)).collect::<Vec<_>>());
-    assert_eq!(offs, ons, "every admitted note-on got its off");
+    let r = records(&mut p, 8192);
+    let ons: Vec<(i64, i64)> = r.iter().filter(|x| x.0 == 1).map(|x| (x.2, x.3)).collect();
+    let offs: Vec<(i64, i64)> = r.iter().filter(|x| x.0 == 2).map(|x| (x.2, x.3)).collect();
+    assert_eq!(ons.len(), 300);
+    assert_eq!(offs, ons, "every admitted note-on got its off, with its own note id");
 }
 
 /// What `MixEngine::reset` does at Stop: the mix hands over the pedal-up and note-offs, then
@@ -137,7 +146,8 @@ fn a_reset_keeps_the_pedal_up_and_the_note_offs() {
     assert!(p.event(0, &ev(0, -1, Message::Control { cc: 64, value: 127 })));
     assert!(p.event(0, &ev(0, 5, Message::NoteOn { key: 60, velocity: 100, id: n })));
     let r = records(&mut p, 256);
-    assert_eq!(r, vec![(5, 0, 0xB0_40_7F, 0), (1, 0, 60, 5)]);
+    let id = r[1].3;
+    assert_eq!(r, vec![(5, 0, 0xB0_40_7F, 0), (1, 0, 60, id)]);
     assert!(p.event(0, &ev(0, -1, Message::Control { cc: 64, value: 0 })));
     assert!(p.event(0, &ev(0, -1, Message::Control { cc: 123, value: 0 })));
     assert!(p.event(0, &ev(0, 5, Message::NoteOff { key: 60, velocity: 0, id: n })));
@@ -147,7 +157,7 @@ fn a_reset_keeps_the_pedal_up_and_the_note_offs() {
     let r = records(&mut p, 256);
     assert!(r.contains(&(5, 0, 0xB0_40_00, 0)), "the pedal-up survives the reset: {r:?}");
     assert!(r.contains(&(5, 0, 0xB0_7B_00, 0)), "CC 123 survives the reset: {r:?}");
-    assert!(r.contains(&(2, 0, 60, 5)), "the note-off survives the reset: {r:?}");
+    assert!(r.contains(&(2, 0, 60, id)), "the note-off survives the reset: {r:?}");
     assert!(!r.iter().any(|x| x.0 == 5 && x.2 == 0xB0_01_09), "non-releases do not: {r:?}");
 }
 
@@ -198,21 +208,22 @@ fn midi_dialect_uses_delivery_order_and_keeps_channels_separate() {
 
 #[test]
 fn midi_dialect_preserves_last_release_at_saturation_and_reclaims_identities() {
-    let mut p = midi_plugin(4096);
-    // More lifetimes than the bounded table can hold at once: slots must be reclaimed.
+    let mut p = midi_plugin(8192);
+    // More lifetimes than the ledger can hold at once: entries must be reclaimed. (8,192 frames: the
+    // fixture records one event per four frames, and the allowance alone is 1,024 events.)
     for _ in 0..8 {
         for id in 0..224 {
             assert!(p.event(0, &note_on(3, id)));
         }
-        records(&mut p, 4096);
-        for i in 0..767 {
-            assert!(p.event(i, &ev(3, -1, Message::Control { cc: 1, value: 1 })));
+        records(&mut p, 8192);
+        for i in 0..1024 {
+            assert!(p.event(i.min(799), &ev(3, -1, Message::Control { cc: 1, value: 1 })));
         }
-        assert!(!p.event(0, &note_on(3, 9999)), "ordinary queue is saturated");
+        assert!(!p.event(0, &ev(3, -1, Message::Control { cc: 1, value: 1 })), "the ordinary allowance is saturated");
         for id in 0..224 {
             assert!(p.event(800, &note_off(3, id)));
         }
-        let r = records(&mut p, 4096);
+        let r = records(&mut p, 8192);
         assert_eq!(r.iter().filter(|r| r.2 == 0x83_3C_00).count(), 1);
         assert_eq!(r.last(), Some(&(5, 800, 0x83_3C_00, 0)));
     }

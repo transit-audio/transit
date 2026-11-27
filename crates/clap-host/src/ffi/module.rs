@@ -215,7 +215,7 @@ impl Bundle {
             notes: std::ptr::null(),
             state_ext: std::ptr::null(),
             gui: Arc::new(GuiLink::default()),
-            raw: Vec::with_capacity(EVENT_CAP),
+            raw: Vec::with_capacity(EVENT_CAP + NATIVE_EVENTS),
             out_params: Vec::with_capacity(EVENT_CAP),
             active: false,
             processing: false,

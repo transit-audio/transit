@@ -55,11 +55,11 @@ pub(crate) const MAX_PORTS: u32 = 16;
 pub(crate) const MAX_PORT_CHANNELS: u32 = 64;
 /// Most feature strings read from a descriptor.
 const MAX_FEATURES: usize = 64;
-/// Capacity of the per-block event list (preallocated: `process` never allocates).
+/// Timed parameter points one block keeps (preallocated: `process` never allocates).
 pub(crate) const EVENT_CAP: usize = 1024;
-/// Event entries kept for releases (F10): one per note and pedal the mix holds open (224 + 32),
-/// plus one reset. Other events are refused once only these remain.
-pub(crate) const RELEASE_RESERVE: usize = 257;
+/// Note and MIDI events one block can hand: the whole ownership ledger at two events per entry,
+/// the ordinary allowance and the safety slots (ADR 0059, Decision 1).
+pub(crate) const NATIVE_EVENTS: usize = transit_dsp::plugins::instrument_queue::delivery::NATIVE_EVENTS;
 /// Largest plugin state we accept from `clap_plugin_state.save` (hostile-input cap).
 pub(crate) const MAX_STATE_BYTES: usize = 64 << 20;
 /// Most editor parameter edits buffered between two UI frames.
