@@ -240,7 +240,9 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   trigger: `finish` takes each block's deadline. The gate refuses: (1) a pool test with no strip deadline of
   its own, no held worker, no explicit instants (`set_block_deadline`, `finish`, `run_at`) and no serial
   switch (`force_serial(true)` before the first render, never set otherwise), or a host-thread test with no
-  give-up of 5 s or more; (2) a short strip deadline (`from_micros`, `from_millis` under 100) with no held
+  give-up of 5 s or more (in `ui-studio`, where a threaded `Host::new` is the trigger: no wait for a named
+  state, `until(` or `.wait(`, in it or the fixture it calls; a fixed count of frames is no wait, E49
+  recurrence 2026-11-26); (2) a short strip deadline (`from_micros`, `from_millis` under 100) with no held
   worker it waits on (`hold` plus a read of `holding`, `entered` or `held_tracks()`), zero deadline or
   explicit instants; (3) a `while ..render_workers_settled()` wait for some strip to be away in a test that
   injects `stall_ns` and asserts `Queued`, `StaleBinding`, `midi_dropped` or `held_tracks` without reading
@@ -260,6 +262,13 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   the state. The scan cannot see helpers in another file or a track count passed through one; a runtime
   guard is the follow-up (#226). The scan is keyword-based: review still checks order and targets (its known
   blind spots are listed in the audit doc). This rule closes #220.
+- `cargo xtask timing` rule (f) (`xtask/src/timing_waits.rs`): a wait helper in the test code of
+  `playback`, `plugin-host`, `midi-io` or `ui-studio` (a fn that is not a test, with a loop that reads the
+  wall clock: the `until` and `frames_until` family) carries `// timing: stall-bound <reason>` naming the
+  real thread it waits for, or is listed with that reason in the file's exception table. A wait for a named
+  state cannot tell a starved thread from a lost wake or message (E49 recurrence 2026-11-26: a MIDI
+  handoff wait that looked starved was a product race), so the list is meant to shrink as tests drive the
+  work themselves (an inline plug-in host, a stepped clock, a handshake the test controls).
 - No wall-clock latency bound under about 100 ms in a unit test. Assert a deterministic signal
   (a counter, a state, an ordering) or a stall bound with its rationale in a comment; a shared CI
   runner will exceed a tight bound sooner or later (E49, `../../escapes/E49-echo-latency-test-wall-clock-bound.md`).

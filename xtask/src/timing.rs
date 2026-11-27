@@ -22,6 +22,10 @@
 //! never waits for "some strip" before a per-strip assertion, never exits on a quiet period, and runs its
 //! closing blocks at a far deadline before a coverage check, and counts holes only from the instruments'
 //! first block. Its markers are its own (see that module).
+//!
+//! Rule (f), in `timing_waits.rs`: a wall-clock wait in the test code of the crates whose tests drive
+//! real threads names, with `// timing: stall-bound <reason>`, the thread it waits for and why it must
+//! be real (see that module).
 
 use std::path::Path;
 
@@ -29,6 +33,8 @@ use std::path::Path;
 mod loops;
 #[path = "timing_pool.rs"]
 mod pool;
+#[path = "timing_waits.rs"]
+mod waits;
 
 const TAGS: &[&str] = &["stall-bound", "floor-ok", "sleep-ok", "value"];
 const FLOOR_NAMES: &[&str] = &["frames", "blocks", "laps", "iterations", "polls"];
@@ -345,6 +351,7 @@ pub fn scan(path: &str, src: &str, test_file: bool) -> Vec<Hit> {
     }
     hits.extend(loops::scan(path, src, test_file));
     hits.extend(pool::scan(path, src, test_file));
+    hits.extend(waits::scan(path, src, test_file));
     hits
 }
 

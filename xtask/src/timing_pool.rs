@@ -7,8 +7,8 @@
 //! Scanned: test code in `crates/{mix,rt,plugin-host,audio-asio,playback,ui-studio}`. A `#[test]` fn (not
 //! `#[ignore]`) is a pool or host-thread test when its evidence names `start_render_workers`, `WorkerSet`,
 //! `set_of(`, a `rig(`/`keyed_rig(`/`Rig::new(` call in a file that names `common::workers`, `Host::new`,
-//! `Host::spawn_after`, `slow_host(` or `host(` in plug-in host tests, or `rig_watching(`/`hold_host(` in the
-//! ASIO tests. The refusals:
+//! `Host::spawn_after`, `slow_host(` or `host(` in plug-in host tests, `rig_watching(`/`hold_host(` in the
+//! ASIO tests, or `Host::new(` without `inline: true` in the UI tests. The refusals:
 //!
 //! 1. A pool test with no deadline of its own (a far deadline, a held worker, a zero deadline or explicit
 //!    instants, serial rendering), or a host-thread test with no give-up of 5 s or more: the inherited
@@ -73,7 +73,7 @@ fn in_scope(path: &str) -> Option<&'static str> {
 }
 
 /// The fn name of a header line.
-fn fn_name(code: &str) -> Option<String> {
+pub(super) fn fn_name(code: &str) -> Option<String> {
     let at = code.find("fn ")?;
     let ident: String = code[at + 3..].chars().take_while(|c| c.is_alphanumeric() || *c == '_').collect();
     (!ident.is_empty()).then_some(ident)
@@ -296,6 +296,9 @@ fn host_test(ev: &Evidence, krate: &str) -> bool {
                     .any(|l| l.contains("Host::new") || l.contains("Host::spawn_after") || has_call(l, "slow_host") || has_call(l, "host"))
         }
         "audio-asio" => ev.lines.iter().any(|l| has_call(l, "rig_watching") || has_call(l, "hold_host")),
+        // A UI test with its own threaded plug-in host (E49 recurrence 2026-11-26: a marker test read
+        // the slot after a fixed number of frames, before the host thread had made the plug-in).
+        "ui-studio" => !any(&ev.lines, &["inline: true"]) && any(&ev.lines, &["Host::new("]),
         _ => false,
     }
 }
@@ -318,6 +321,14 @@ fn serial(lines: &[String]) -> bool {
     let render = lines.iter().position(|l| ["render_active(", ".block(", "render_range("].iter().any(|r| l.contains(r)));
     let other = lines.iter().any(|l| l.split("force_serial(").skip(1).any(|r| !r.starts_with("true)")));
     on.is_some_and(|on| render.is_none_or(|r| on < r)) && !other
+}
+
+/// Whether a host-thread test waits for the thread itself. A UI test (or the fixture it calls) waits
+/// for a named state (`frames_until(`, `until(`, a `.wait(`): a fixed count of frames is no wait, and
+/// a long duration in its fixture (a display budget) is no give-up. The other crates: a give-up of 5 s
+/// or more.
+fn gives_up(krate: &str, ev: &[String]) -> bool {
+    if krate == "ui-studio" { any(ev, &["until(", ".wait("]) } else { long_give_up(ev) }
 }
 
 /// A give-up of 5 s or more (a wait, a poll's stall bound, a shutdown).
@@ -421,7 +432,7 @@ pub fn scan(path: &str, src: &str, test_file: bool) -> Vec<Hit> {
             if ev.deadlines.contains(&Deadline::Short) && !(held || zero || explicit) {
                 refuse(2, f.start);
             }
-        } else if host_test(&ev, krate) && !long_give_up(&ev.lines) {
+        } else if host_test(&ev, krate) && !gives_up(krate, &ev.lines) {
             refuse(1, f.start);
         }
         // 6: a hole count with no baseline for the instruments' first block.

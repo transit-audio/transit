@@ -88,6 +88,37 @@ fn refusal_1_needs_a_long_give_up_in_a_host_thread_test() {
     assert_eq!(refusals(asio_path, &asio.replace("from_millis(250)", "from_secs(3600)")), vec![]);
 }
 
+/// E49 recurrence 2026-11-26: a UI test with a threaded plug-in host read the slot after a fixed number
+/// of frames; the long display budget in its fixture was no give-up.
+#[test]
+fn refusal_1_needs_a_named_wait_in_a_ui_test_with_a_threaded_host() {
+    let ui = "crates/ui-studio/src/x_tests.rs";
+    let fixture = "fn fixture() -> T {
+    let host = Host::new(Config { timeout, inline: false, ..Config::default() });
+    hooks(host, Duration::from_secs(10))
+}
+";
+    let fixed = format!(
+        "{fixture}#[test]
+fn t() {{
+    let mut t = fixture();
+    t.frames(5);
+    assert!(t.row().alert);
+}}
+"
+    );
+    assert_eq!(refusals(ui, &fixed), vec![(6, 1)], "a fixed frame count and a display budget");
+    let waited = fixed.replace("t.frames(5);", "assert!(t.frames_until(Duration::from_secs(10), |t| t.live()));");
+    assert_eq!(refusals(ui, &waited), vec![], "a wait for the named state");
+    assert_eq!(refusals(ui, &fixed.replace("inline: false", "inline: true")), vec![], "an inline host has no thread");
+    let marked = fixed.replace(
+        "#[test]",
+        "// timing: host-timeout the watchdog is the subject
+#[test]",
+    );
+    assert_eq!(refusals(ui, &marked), vec![]);
+}
+
 #[test]
 fn refusal_2_flags_a_short_deadline_with_no_held_worker_through_a_helper_parameter() {
     let helper = "fn rig(deadline: Duration) -> Rig {\n    let mut rig = Rig::new(6, 0, 128);\n    rig.mix.start_render_workers(64);\n    rig.mix.set_strip_deadline(Some(deadline));\n    rig\n}\n";
