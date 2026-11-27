@@ -210,10 +210,13 @@ mod imp {
         Ok(child.try_wait()?.is_some())
     }
 
+    // The same signature on every system (the Unix ones can fail).
+    #[allow(clippy::unnecessary_wraps)]
     pub fn exit_with_parent(_parent: u32) -> std::io::Result<()> {
         Ok(())
     }
 
+    #[allow(clippy::unnecessary_wraps)]
     pub fn nonblocking(_out: &std::process::ChildStdout) -> std::io::Result<()> {
         Ok(())
     }

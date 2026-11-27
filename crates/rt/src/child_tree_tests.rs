@@ -165,7 +165,7 @@ fn a_tree_is_killed_only_while_its_child_is_unreaped() {
     reaped.wait().unwrap();
     let before = refused_kills();
     late.kill();
-    let refused = if cfg!(unix) { 1 } else { 0 };
+    let refused = usize::from(cfg!(unix));
     assert_eq!(refused_kills(), before + refused, "a tree whose child was reaped is not signalled (Linux and macOS)");
 }
 
