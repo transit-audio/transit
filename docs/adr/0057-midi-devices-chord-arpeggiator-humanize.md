@@ -817,7 +817,7 @@ The first draft (2026-11-12) went through eight judging rounds on 2026-11-12 and
 
 ## Amendment 2026-11-27: hosting-first prerequisites for ADR 0064
 
-This amendment supersedes the Slices section’s requirement that P0 comes first and that P1 precedes P2. The serial host chain is P2 → P3a → P3b → P4. P0 and P1 may land before or after that chain; P1 still follows P0, and K1 still follows P0. All slices touching the mix crate land serially, including ADR 0059 R1 and ADR 0064 HM2 and HM6. For the hosting-first order, R1 lands before P2 and before K2a. R1’s studio work and K2a/K2b work remain serial.
+This amendment supersedes the Slices section’s requirement that P0 comes first and that P1 precedes P2. The serial host chain is P2 → P3a → P3b → P4. P0 and P1 may land before or after that chain; P1 still follows P0, and K1 still follows P0. All slices touching the mix crate land serially, including ADR 0059 R1 and ADR 0064 HM2 and HM6. For the hosting-first order, R1-h and its applicable acceptance evidence land before P2 and before K2a; full R1 remains required before ADR 0057 device visibility or ADR 0064 hosted-MIDI visibility. R1’s studio work and K2a/K2b work remain serial.
 
 Split K2b into K2b-h and the remaining K2b integration. K2b-h needs K2a only. It provides the per-device card-body hook on K2a’s row, drawing into a rectangle at the shared height, and the dispatch seam for hosted cards. ADR 0064 HM4 supplies the hosted card body and editors. K2b-h uses existing `ParamInfo` metadata and adds no parameter flags, built-in device stubs, seeds, presets or help entries. Its acceptance evidence exercises the hook at the shared height and preserves K2a’s behavior and layout checks.
 
