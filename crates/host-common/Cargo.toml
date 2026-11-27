@@ -14,6 +14,10 @@ serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
 
+# Failure seams for the scan tests (`child::hooks`); off in every normal build.
+[features]
+test-hooks = []
+
 [dev-dependencies]
 transit-test-support.workspace = true
 

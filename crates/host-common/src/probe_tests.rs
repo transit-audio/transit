@@ -177,3 +177,48 @@ fn a_probe_child_stopped_by_the_scan_is_not_an_outcome() {
     let script = if cfg!(windows) { "Start-Sleep 60;" } else { "exec sleep 60" };
     assert_eq!(probe_in_child(Path::new(program), flag, Path::new(script), "the-class", || true, &mut Never), None);
 }
+
+/// A deadline that, when first asked, lets the child go on (it creates `release`) and then waits
+/// until the child has written its whole answer and said so (`mark`): the answer is in the pipe,
+/// unread, when the deadline passes.
+struct AnswerInThePipe {
+    release: PathBuf,
+    mark: PathBuf,
+}
+
+impl Deadline for AnswerInThePipe {
+    fn passed(&mut self) -> bool {
+        let _ = std::fs::write(&self.release, b"go on");
+        while !self.mark.exists() {
+            std::thread::yield_now();
+        }
+        true
+    }
+    fn limit(&self) -> Duration {
+        Duration::from_secs(7)
+    }
+}
+
+/// Review round 2, finding E: a complete answer already in the pipe when the deadline passes still
+/// counts (what is readable is read once more before the run rules "deadline").
+#[test]
+fn an_answer_in_the_pipe_at_the_deadline_counts() {
+    let d = transit_test_support::TestDir::new("probe-answer-at-deadline");
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).unwrap();
+    let (release, mark) = (d.join("release"), d.join("mark"));
+    let (program, flag) = shell();
+    let line = reply::<String>(Ok(NOTES));
+    let script = if cfg!(windows) {
+        format!(
+            "while (!(Test-Path '{}')) {{ Start-Sleep -Milliseconds 10 }}; Write-Output '{line}'; New-Item '{}' | Out-Null; Start-Sleep 60;",
+            release.display(),
+            mark.display()
+        )
+    } else {
+        format!("while [ ! -f '{}' ]; do sleep 0.01; done; echo '{line}'; touch '{}'; exec sleep 60", release.display(), mark.display())
+    };
+    let r = probe_in_child(Path::new(program), flag, Path::new(&script), "the-class", || false, &mut AnswerInThePipe { release, mark });
+    assert_eq!(r, Some(Ok(NOTES)));
+    let _ = std::fs::remove_dir_all(&d);
+}
