@@ -16,8 +16,8 @@ use crate::{Session, Track, TrackId, TrackKind};
 /// hardware choice in [`crate::MidiInput::port`] is kept and not used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct MidiFrom {
-    /// The source track. A file without it names track 0, which no session allocates, so the
-    /// destination loads disconnected (decision 6.6).
+    /// The source track. A file without it names track 0, the disconnected sentinel (see
+    /// [`MidiFrom::source`]): the destination loads disconnected (decision 6.6).
     #[serde(default)]
     pub track: TrackId,
     /// The route's Listen switch (decision 5.2): saved, an undo step, on for a new route, and on
@@ -28,6 +28,16 @@ pub struct MidiFrom {
 
 fn listen_on() -> bool {
     true
+}
+
+impl MidiFrom {
+    /// The source track, `None` for track 0: a route stored without its source names no track,
+    /// even in a hand-edited file that holds a track with id 0, so it is disconnected (decision
+    /// 6.6). Every reading of a route's source goes through here.
+    #[must_use]
+    pub fn source(&self) -> Option<TrackId> {
+        (self.track.0 != 0).then_some(self.track)
+    }
 }
 
 /// The suffix of a refusal that keeps a hardware port out of routing until the follow-up record
@@ -97,7 +107,7 @@ pub fn destination_refusal(name: &str, reason: &str) -> String {
 /// for every path that would put an external output or an External Instrument on a routed track.
 #[must_use]
 pub fn takes_route_refusal(s: &Session, destination: &Track) -> String {
-    let from = destination.midi_from.map_or_else(String::new, |m| track_name(s, m.track));
+    let from = destination.midi_from.map_or_else(String::new, |m| source_name(s, m));
     format!("{} takes MIDI from {from}; {HARDWARE_NOT_YET}", destination.name)
 }
 
@@ -107,6 +117,11 @@ pub fn takes_route_refusal(s: &Session, destination: &Track) -> String {
 pub fn freeze_refusal(s: &Session, source: TrackId) -> Option<String> {
     let dest = s.midi_destinations(source).next()?;
     Some(format!("{} sends MIDI to {}; remove that route or freeze {} instead", track_name(s, source), dest.name, dest.name))
+}
+
+/// A route's source by name, or `track <id>` when it names no track of the session.
+fn source_name(s: &Session, m: MidiFrom) -> String {
+    m.source().and_then(|id| s.track(id)).map_or_else(|| format!("track {}", m.track), |t| t.name.clone())
 }
 
 /// A track's name, or `track <id>` when the session has no such track.
@@ -139,7 +154,7 @@ impl Session {
     pub fn midi_route_state(&self, i: usize) -> RouteState {
         let Some(t) = self.tracks.get(i) else { return RouteState::None };
         let Some(from) = t.midi_from else { return RouteState::None };
-        let Some(k) = self.track_index(from.track) else { return RouteState::Disconnected };
+        let Some(k) = from.source().and_then(|id| self.track_index(id)) else { return RouteState::Disconnected };
         if k == i {
             return RouteState::OwnSource;
         }
@@ -154,7 +169,7 @@ impl Session {
 
     /// The tracks that take MIDI from `source` (by their field, in force or not), in session order.
     pub fn midi_destinations(&self, source: TrackId) -> impl Iterator<Item = &Track> {
-        self.tracks.iter().filter(move |t| t.id != source && t.midi_from.is_some_and(|m| m.track == source))
+        self.tracks.iter().filter(move |t| t.id != source && t.midi_from.is_some_and(|m| m.source() == Some(source)))
     }
 
     /// Whether any track takes MIDI from another track (the `midi_routes` need, decision 8).
@@ -182,11 +197,11 @@ pub fn route_load_notes(s: &Session) -> Vec<String> {
             }
             RouteState::OwnSource => notes.push(loop_note(&t.name, &t.name, &crate::describe_cycle(s, &[t.id]))),
             RouteState::BadDestination(_) if sends_to_hardware(t) => {
-                let from = t.midi_from.map_or_else(String::new, |m| track_name(s, m.track));
+                let from = t.midi_from.map_or_else(String::new, |m| source_name(s, m));
                 notes.push(format!("{} takes MIDI from {from}, but {HARDWARE_NOT_YET}.", t.name));
             }
             RouteState::BadDestination(why) => {
-                let from = t.midi_from.map_or_else(String::new, |m| track_name(s, m.track));
+                let from = t.midi_from.map_or_else(String::new, |m| source_name(s, m));
                 notes.push(format!("{} takes MIDI from {from}, but {}.", t.name, destination_refusal(&t.name, why)));
             }
             RouteState::BadSource { source, reason } => {

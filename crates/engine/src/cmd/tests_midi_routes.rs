@@ -205,10 +205,20 @@ fn no_route_into_hardware(e: &Engine) {
 }
 
 #[test]
-fn duplicating_and_undoing_across_route_changes_never_leave_a_route_into_hardware_in_force() {
-    let (mut e, keys, bass) = engine();
+fn undo_and_redo_alternating_external_output_and_routed_snapshots_never_put_a_route_into_hardware_in_force() {
+    // The session opens holding the combination (a hand-edited file): Bass sends to a port and
+    // takes MIDI from Keys, so its route is inert.
+    let mut s = Session::default();
+    let keys = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Keys"));
+    let bass = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Bass"));
+    s.track_mut(bass).unwrap().midi_output = port_out();
+    s.track_mut(bass).unwrap().midi_from = Some(MidiFrom { track: keys, listen: false });
+    let mut e = Engine::new(s);
+    // Routed (port removed), unrouted, external output, internal, routed again, duplicated.
+    e.execute("midi.output", &json!({"track": bass.0, "port": "internal"})).unwrap();
+    e.execute("midi.input", &json!({"track": bass.0, "from": null})).unwrap();
     e.execute("midi.output", &json!({"track": bass.0, "port": port_json()})).unwrap();
-    assert!(e.undo());
+    e.execute("midi.output", &json!({"track": bass.0, "port": "internal"})).unwrap();
     e.execute("midi.input", &json!({"track": bass.0, "from": keys.0, "listen": false})).unwrap();
     e.execute("track.duplicate", &json!({"track": bass.0})).unwrap();
     let dup = e.session().track_by_name("Bass.dup").unwrap().id;
@@ -219,14 +229,53 @@ fn duplicating_and_undoing_across_route_changes_never_leave_a_route_into_hardwar
         json!({"track": dup.0, "port": port_json()}),
         "Bass.dup takes MIDI from Keys; routing to a hardware port is not available yet",
     );
-    no_route_into_hardware(&e);
+    // Walk the whole history both ways, counting what each snapshot holds.
+    let (mut combined, mut external, mut routed) = (0, 0, 0);
+    let mut look = |e: &Engine| {
+        no_route_into_hardware(e);
+        let t = e.session().track(bass).unwrap();
+        let state = e.session().midi_route_state(e.session().track_index(bass).unwrap());
+        combined += usize::from(t.midi_from.is_some() && transit_model::sends_to_hardware(t));
+        external += usize::from(t.midi_from.is_none() && transit_model::sends_to_hardware(t));
+        routed += usize::from(matches!(state, RouteState::InForce { .. }));
+    };
+    look(&e);
     while e.undo() {
-        no_route_into_hardware(&e);
+        look(&e);
     }
     while e.redo() {
-        no_route_into_hardware(&e);
+        look(&e);
     }
+    assert_eq!((combined, external, routed), (1, 2, 6), "the walk passes the inert combination, port-only and routed snapshots");
     assert_eq!(from(&e, dup), Some(MidiFrom { track: keys, listen: false }));
+}
+
+#[test]
+fn a_frozen_destination_flattens_without_its_route_and_undo_restores_it() {
+    let (mut e, keys, bass) = engine();
+    e.execute("midi.input", &json!({"track": bass.0, "from": keys.0, "listen": false})).unwrap();
+    e.session_mut().track_mut(bass).unwrap().freeze = Some(Frozen { source: SourceId(999), start: 0, length: 10, hash: 0, revision: 0, latency: 0 });
+    let pushes = e.undo_pushes();
+    e.execute("track.flatten", &json!({"tracks": [bass.0]})).unwrap();
+    assert_eq!(e.undo_pushes(), pushes + 1, "one undo step");
+    let t = e.session().track(bass).unwrap();
+    assert_eq!((t.kind, t.midi_from), (TrackKind::Audio, None));
+    assert!(e.undo());
+    let t = e.session().track(bass).unwrap();
+    assert_eq!((t.kind, t.midi_from), (TrackKind::Instrument, Some(MidiFrom { track: keys, listen: false })));
+}
+
+#[test]
+fn an_already_frozen_source_cannot_be_flattened() {
+    let (mut e, keys, bass) = engine();
+    // A loaded session: the source is frozen already (its route is inert, but it is a source).
+    let s = e.session_mut();
+    s.track_mut(keys).unwrap().freeze = Some(Frozen { source: SourceId(999), start: 0, length: 10, hash: 0, revision: 0, latency: 0 });
+    s.track_mut(bass).unwrap().midi_from = Some(MidiFrom { track: keys, listen: true });
+    refused(&mut e, "track.flatten", json!({"tracks": [keys.0]}), "Keys sends MIDI to Bass; remove that route or freeze Bass instead");
+    e.execute("midi.input", &json!({"track": bass.0, "from": null})).unwrap();
+    e.execute("track.flatten", &json!({"tracks": [keys.0]})).unwrap();
+    assert_eq!(e.session().track(keys).unwrap().kind, TrackKind::Audio);
 }
 
 #[test]

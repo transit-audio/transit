@@ -10,7 +10,7 @@ use crate::{Session, Track, midi_route};
 /// force: no route, a missing source, the track itself, or an end that is not eligible (see
 /// `midi_route.rs`). A `RouteChange::Midi` for `t` in `changes` replaces its field (the last wins).
 pub(super) fn source_node(s: &Session, t: &Track, i: usize, changes: &[RouteChange]) -> Option<RouteNode> {
-    let mut from = t.midi_from.map(|m| m.track);
+    let mut from = t.midi_from.and_then(|m| m.source());
     for c in changes {
         if let RouteChange::Midi { track, from: f } = c
             && *track == t.id
@@ -18,7 +18,8 @@ pub(super) fn source_node(s: &Session, t: &Track, i: usize, changes: &[RouteChan
             from = *f;
         }
     }
-    let k = s.track_index(from?).filter(|&k| k != i)?;
+    // Track 0 is the disconnected sentinel, from a change as from the field.
+    let k = s.track_index(from.filter(|id| id.0 != 0)?).filter(|&k| k != i)?;
     let src = s.tracks.get(k).filter(|x| on_graph(x))?;
     (midi_route::destination_problem(t).is_none() && midi_route::source_problem(src).is_none()).then_some(RouteNode::Track(k))
 }

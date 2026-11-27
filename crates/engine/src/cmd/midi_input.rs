@@ -102,7 +102,7 @@ fn set_input(e: &mut Engine, p: &Value) -> Result<Value> {
         })
         .transpose()?;
     if port.is_none() && channel.is_none() && from.is_none() && listen.is_none() {
-        return Err(bad(ID, "supply `port`, `channel`, `from` or `listen`"));
+        return Err(bad(ID, "supply `port` or `channel`"));
     }
     if matches!(from, Some(Some(_))) && port.is_some() {
         return Err(bad(ID, "supply `from` or `port`, not both: a port clears the route"));

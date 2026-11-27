@@ -147,8 +147,9 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
     // that came along is followed to its copy; any other gets an id of its own that names nothing
     // here, so the destination is disconnected (decision 6.6), never routed from another track.
     for t in &out {
-        let Some(from) = s.track(*t).and_then(|tr| tr.midi_from) else { continue };
-        let track = renamed.iter().find(|(donor, _)| *donor == from.track).map_or_else(|| TrackId(s.alloc()), |(_, here)| *here);
+        // The disconnected sentinel (track 0) stays as it is.
+        let Some((from, donor_source)) = s.track(*t).and_then(|tr| tr.midi_from).and_then(|m| m.source().map(|id| (m, id))) else { continue };
+        let track = renamed.iter().find(|(donor, _)| *donor == donor_source).map_or_else(|| TrackId(s.alloc()), |(_, here)| *here);
         if let Some(tr) = s.track_mut(*t) {
             tr.midi_from = Some(transit_model::MidiFrom { track, ..from });
         }

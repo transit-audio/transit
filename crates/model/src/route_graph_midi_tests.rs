@@ -121,7 +121,7 @@ fn a_midi_and_key_loop_cuts_the_key_and_keeps_the_route() {
 }
 
 #[test]
-fn a_loop_through_a_bus_keeps_todays_cut_with_a_route_in_it() {
+fn a_loop_through_a_bus_keeps_todays_cut_with_a_route_elsewhere_in_the_session() {
     let mut s = Session::default();
     let synth = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Synth"));
     let fx = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("FX"));

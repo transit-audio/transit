@@ -116,6 +116,13 @@ fn unfreeze(e: &mut Engine, p: &Value) -> Result<Value> {
 
 fn flatten(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "track.flatten", p)?;
+    // ADR 0065 decision 6.3: a route's source is never flattened, frozen already or not (a frozen
+    // track skips `freeze_track`'s own check).
+    for t in &tracks {
+        if let Some(why) = transit_model::freeze_refusal(e.session(), *t) {
+            return Err(bad("track.flatten", why));
+        }
+    }
     let mut done = Vec::new();
     for t in tracks {
         freeze_track(e, "track.flatten", t)?;
@@ -130,12 +137,14 @@ fn flatten(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 /// Makes `tr` an audio track of its render: one clip, no instrument, inserts or plug-in
-/// automation. The fader, pan, sends and other automation stay.
+/// automation, and no MIDI route (ADR 0065 decision 6.3). The fader, pan, sends and other
+/// automation stay.
 fn flatten_into(tr: &mut Track, f: &Frozen, clip: transit_model::ClipId) {
     tr.playlists = vec![Playlist { name: tr.name.clone(), clips: vec![Clip::audio(clip, tr.name.clone(), f.source, 0, f.start, f.length)] }];
     tr.active_playlist = 0;
     tr.kind = TrackKind::Audio;
     tr.instrument = None;
+    tr.midi_from = None;
     tr.mixer.inserts.iter_mut().for_each(|i| *i = None);
     tr.automation.retain(|l| !matches!(l.param, AutoParam::Plugin { .. }));
     tr.ticks_timebase = false;

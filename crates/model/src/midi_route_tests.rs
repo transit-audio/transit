@@ -54,33 +54,84 @@ fn midi_from_round_trips_with_listen_and_is_absent_when_unset() {
     assert!(s.needs().is_empty());
 }
 
+/// The track fields a build before routes reads, shaped as its `Track` reads them: no
+/// `midi_from`, and (like every model struct of that build, which has no `deny_unknown_fields`)
+/// no refusal of a field it does not know.
+#[derive(serde::Deserialize)]
+#[serde(default)]
+struct TrackBeforeRoutes {
+    name: String,
+    kind: TrackKind,
+    midi_input: crate::MidiInput,
+}
+
+impl Default for TrackBeforeRoutes {
+    fn default() -> Self {
+        TrackBeforeRoutes { name: String::new(), kind: TrackKind::Audio, midi_input: crate::MidiInput::default() }
+    }
+}
+
 #[test]
-fn a_build_without_the_entry_warns_and_drops_the_field() {
+fn an_older_reader_warns_and_keeps_the_hardware_choice() {
     let mut s = Session::default();
     let keys = instrument(&mut s, "Keys");
     let bass = instrument(&mut s, "Bass");
+    let kept = crate::MidiInput {
+        port: crate::MidiPort::Device { backend: "winmm".into(), name: "Keyboard".into(), ordinal: 1, id: "usb-kbd".into() },
+        channel: Some(3),
+    };
+    s.track_mut(bass).unwrap().midi_input = kept.clone();
     route(&mut s, keys, bass, true);
     let v: serde_json::Value = serde_json::from_str(&s.to_json().unwrap()).unwrap();
+    // The build before routes warns: `midi_routes` is not among the needs it knows.
     let old = crate::unknown_needs(&v, &BEFORE_ROUTES);
     assert_eq!(old, vec!["midi_routes".to_string()]);
     assert!(crate::unknown_needs_note(&old).unwrap().contains("midi_routes"));
     assert!(Session::KNOWN_NEEDS.contains(&"midi_routes"));
-    // A track reader ignores a field it does not know (it is a field, not a `MidiPort` variant),
-    // so an older build loads the track with its kept hardware choice.
-    let mut bass_json = v["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Bass").unwrap().clone();
-    bass_json.as_object_mut().unwrap().insert("a_field_from_a_later_build".into(), serde_json::json!({"track": 1}));
-    let read: Track = serde_json::from_value(bass_json).unwrap();
-    assert_eq!(read.midi_input, crate::MidiInput::default());
+    // Its track reader skips `midi_from` and plays the track from the kept hardware choice.
+    let bass_json = v["tracks"].as_array().unwrap().iter().find(|t| t["name"] == "Bass").unwrap().clone();
+    assert!(bass_json.get("midi_from").is_some(), "the file holds the route");
+    let read: TrackBeforeRoutes = serde_json::from_value(bass_json).unwrap();
+    assert_eq!((read.name.as_str(), read.kind, read.midi_input), ("Bass", TrackKind::Instrument, kept));
+}
+
+/// A track with id 0, which no session allocates but a hand-edited file can hold.
+fn with_track_zero(s: &mut Session, name: &str) -> TrackId {
+    let id = instrument(s, name);
+    s.track_mut(id).unwrap().id = TrackId(0);
+    TrackId(0)
 }
 
 #[test]
 fn a_route_stored_without_its_fields_loads_disconnected_with_listen_on() {
     let from: MidiFrom = serde_json::from_str("{}").unwrap();
     assert_eq!(from, MidiFrom { track: TrackId(0), listen: true });
+    assert_eq!(from.source(), None);
     let mut s = Session::default();
     let bass = instrument(&mut s, "Bass");
     s.track_mut(bass).unwrap().midi_from = Some(from);
-    assert_eq!(s.midi_route_state(0), RouteState::Disconnected, "no session allocates track 0");
+    let (back, notes) = reopen(&s);
+    assert_eq!(back.midi_route_state(0), RouteState::Disconnected);
+    assert_eq!(notes, ["Bass took MIDI from a track that is not in this session. Its input is disconnected until you choose one."]);
+}
+
+#[test]
+fn track_zero_is_never_a_source_even_when_a_file_holds_one() {
+    let mut s = Session::default();
+    let zero = with_track_zero(&mut s, "Zero");
+    let bass = instrument(&mut s, "Bass");
+    assert!(source_problem(s.track(zero).unwrap()).is_none(), "an eligible instrument track");
+    // `"midi_from": {}` in the file.
+    let mut v: serde_json::Value = serde_json::from_str(&s.to_json().unwrap()).unwrap();
+    let t = v["tracks"].as_array_mut().unwrap().iter_mut().find(|t| t["name"] == "Bass").unwrap();
+    t.as_object_mut().unwrap().insert("midi_from".into(), serde_json::json!({}));
+    let back = Session::from_json(&serde_json::to_string(&v).unwrap()).unwrap();
+    let i = back.track_index(bass).unwrap();
+    assert_eq!(back.midi_route_state(i), RouteState::Disconnected);
+    assert_eq!(back.load_notes, ["Bass took MIDI from a track that is not in this session. Its input is disconnected until you choose one."]);
+    assert!(back.route_graph().edges().iter().all(|e| e.kind != crate::EdgeKind::Midi), "no edge from track 0");
+    assert_eq!(back.midi_destinations(zero).count(), 0, "track 0 feeds nothing, so it can be frozen");
+    assert!(crate::would_create_cycle(&back, &crate::RouteChange::Midi { track: zero, from: Some(TrackId(0)) }).is_none());
 }
 
 #[test]
