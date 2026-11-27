@@ -1112,13 +1112,24 @@ impl InstrumentEvents {
         self.writers = [[None; 2]; 16];
     }
 
-    /// The instrument failed, or its track is inactive: it will not process this queue. Its
+    /// The instrument's track is inactive: it will not process this queue. Its
     /// queued events are dropped (counted `voided`) and its notes and pedals are released at the
     /// plug-in at once. A refused release stays pending for the next attempt.
     pub(crate) fn void(&mut self, plugin: &mut dyn Plugin) {
         if !self.busy() {
             return;
         }
+        let [n, r] = self.queued_counts();
+        self.status.voided[0] = self.status.voided[0].saturating_add(n);
+        self.status.voided[1] = self.status.voided[1].saturating_add(r);
+        self.release_all(plugin);
+    }
+
+    /// The instrument is contained (non-finite output or a reported processing error, ADR 0059,
+    /// Decision 2): its queued events are dropped (counted `voided`) and [`Self::release_all`] runs
+    /// whether or not this table holds anything, so the MIDI effect host ends its notes, forgets its
+    /// carries and resets its devices at the failure, not at Stop.
+    pub(crate) fn contain(&mut self, plugin: &mut dyn Plugin) {
         let [n, r] = self.queued_counts();
         self.status.voided[0] = self.status.voided[0].saturating_add(n);
         self.status.voided[1] = self.status.voided[1].saturating_add(r);

@@ -238,6 +238,9 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                     }
                 }
                 inst.woken = inst.plugin.params_pending();
+                // An instrument that reported a processing error during this call is contained as
+                // for non-finite output, until the next Stop (ADR 0059, Decision 2).
+                let errored = inst.plugin.process_errors() != inst.errors_seen;
                 strip.failures.note_errors(inst, INSTRUMENT_SLOT);
                 if let Some(tap) = &inst.tap {
                     tap.push(&strip.buf, frames, 0.0, None);
@@ -255,11 +258,19 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                         tap.push_positions(at.get(..n).unwrap_or(&[]));
                     }
                 }
-                if contain_failure(inst, &mut strip.buf, frames) {
+                let invalid = contain_failure(inst, &mut strip.buf, frames);
+                if invalid {
                     strip.failures.record(INSTRUMENT_SLOT);
-                    // Out until the next reset: its queue is voided and what it held released (F10).
+                } else if errored {
+                    silence(&mut strip.buf, frames);
+                    inst.failed = true;
+                }
+                if invalid || errored {
+                    // Out until the next reset: its queue is voided and what it held released at
+                    // once, the MIDI effect chain's notes, carries and devices included (F10, ADR
+                    // 0059, Decision 2).
                     if let Some(e) = inst.events.as_deref_mut() {
-                        e.void(&mut *inst.plugin);
+                        e.contain(&mut *inst.plugin);
                     }
                 }
             }
@@ -543,11 +554,16 @@ fn contain_failure(slot: &mut PluginSlot, buf: &mut [Vec<f32>], frames: usize) -
     if buf.iter().all(|c| c.get(..frames).unwrap_or(c).iter().fold(true, |ok, x| ok & x.is_finite())) {
         return false;
     }
+    silence(buf, frames);
+    slot.failed = true;
+    true
+}
+
+/// Zeroes the first `frames` of every channel.
+fn silence(buf: &mut [Vec<f32>], frames: usize) {
     for c in buf.iter_mut() {
         c.iter_mut().take(frames).for_each(|x| *x = 0.0);
     }
-    slot.failed = true;
-    true
 }
 
 /// Record insert latency without processing audio, so this block can compensate for it.

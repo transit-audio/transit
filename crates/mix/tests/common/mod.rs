@@ -42,7 +42,16 @@ struct Recorder {
     fail: Arc<AtomicBool>,
     refuse_releases: Arc<AtomicBool>,
     refuse_downs: Arc<AtomicBool>,
+    /// While set, each block reports a processing error (ADR 0059, Decision 2) and renders 0.25,
+    /// so a test sees whether the mix silenced it.
+    err: Arc<AtomicBool>,
+    errors: u64,
+    /// Every event the instrument admitted: (frames rendered so far, event).
+    admitted: Admitted,
 }
+
+/// What a recording instrument admitted through `event`: (frames it had rendered, event).
+pub(super) type Admitted = Arc<Mutex<Vec<(u64, PluginEvent)>>>;
 
 impl Plugin for Recorder {
     fn info(&self) -> &'static transit_dsp::PluginInfo {
@@ -70,7 +79,17 @@ impl Plugin for Recorder {
             heard.push((self.instance, self.rendered + u64::from(o), e));
         }
         self.rendered += frames as u64;
-        let y = if self.fail.load(Ordering::Relaxed) { f32::NAN } else { 0.0 };
+        let erring = self.err.load(Ordering::Relaxed);
+        if erring {
+            self.errors += 1;
+        }
+        let y = if self.fail.load(Ordering::Relaxed) {
+            f32::NAN
+        } else if erring {
+            0.25
+        } else {
+            0.0
+        };
         for c in io.iter_mut() {
             c.iter_mut().take(frames).for_each(|x| *x = y);
         }
@@ -82,7 +101,11 @@ impl Plugin for Recorder {
             return false;
         }
         self.pending.push((offset, Some(*ev)));
+        self.admitted.lock().unwrap().push((self.rendered, *ev));
         true
+    }
+    fn process_errors(&self) -> u64 {
+        self.errors
     }
     fn all_notes_off(&mut self) {
         self.pending.push((0, None));
@@ -103,6 +126,8 @@ pub(super) struct Rig {
     pub(super) fail: Arc<AtomicBool>,
     pub(super) refuse_releases: Arc<AtomicBool>,
     pub(super) refuse_downs: Arc<AtomicBool>,
+    pub(super) err: Arc<AtomicBool>,
+    pub(super) admitted: Admitted,
 }
 
 pub(super) fn instrument_session(id: &str) -> (Session, TrackId) {
@@ -133,6 +158,8 @@ impl Rig {
             fail: Arc::default(),
             refuse_releases: Arc::default(),
             refuse_downs: Arc::default(),
+            err: Arc::default(),
+            admitted: Arc::default(),
         };
         let s = rig.session.clone();
         rig.publish(&s);
@@ -150,6 +177,7 @@ impl Rig {
         self.generation = self.generation.checked_next().unwrap();
         let (heard, made, fail) = (Arc::clone(&self.heard), Arc::clone(&self.made), Arc::clone(&self.fail));
         let (refuse_releases, refuse_downs) = (Arc::clone(&self.refuse_releases), Arc::clone(&self.refuse_downs));
+        let (err, admitted) = (Arc::clone(&self.err), Arc::clone(&self.admitted));
         let mut make = move |spec: &InstanceSpec, _: SlotGen| -> Option<NewInstance> {
             let mut inner = transit_dsp::create("gain")?;
             inner.prepare(SR as f32, BLOCK, spec.ch);
@@ -164,6 +192,9 @@ impl Rig {
                 fail: Arc::clone(&fail),
                 refuse_releases: Arc::clone(&refuse_releases),
                 refuse_downs: Arc::clone(&refuse_downs),
+                err: Arc::clone(&err),
+                errors: 0,
+                admitted: Arc::clone(&admitted),
             });
             Some(NewInstance { plugin, refused_state: false })
         };

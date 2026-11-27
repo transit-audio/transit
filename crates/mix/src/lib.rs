@@ -314,7 +314,9 @@ pub struct StripMeter {
 /// (`count`, `last`); each stays out until the engine is next reset (playback starts or stops).
 /// And how often a hosted plug-in newly reported that it failed processing (`errors`,
 /// `error_slot`, [`Plugin::process_errors`], #284): its host puts the failed audio out as
-/// silence and it stays in the signal path, so its output returns when the error ends.
+/// silence. An effect insert stays in the signal path, so its output returns when the error ends;
+/// an instrument is taken out until the next reset, like one that puts out NaN (ADR 0059,
+/// Decision 2).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct PluginFailures {
     /// It only grows.

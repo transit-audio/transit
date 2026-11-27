@@ -16,6 +16,8 @@
 //! state are left out. The automation write pass is in [`crate::automation::write_pass`] (slice 7).
 
 mod autosave;
+#[cfg(test)]
+mod error_status_tests;
 pub mod lifecycle;
 mod plugin_state;
 pub(crate) mod reconnect;
@@ -198,10 +200,16 @@ pub(crate) fn failed_plugin_status(s: &transit_model::Session, track: TrackId, s
     Some(format!("{} on {} put out invalid audio, so it is bypassed until playback stops or starts again.", ins.plugin, t.name))
 }
 
-/// The status line naming the plug-in in `slot` that reported a processing error (#284).
+/// The status line naming the plug-in in `slot` that reported a processing error (#284). An
+/// instrument stays out until Stop (ADR 0059, Decision 2); an effect insert's output returns when
+/// the error ends.
 pub(crate) fn plugin_error_status(s: &transit_model::Session, track: TrackId, slot: usize) -> Option<String> {
     let t = s.track(track)?;
-    let ins = if slot == transit_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(slot)?.as_ref() }?;
+    if slot == transit_mix::INSTRUMENT_SLOT {
+        let ins = t.instrument.as_ref()?;
+        return Some(format!("{} on {} reported a processing error. It stays silent until you press Stop.", ins.plugin, t.name));
+    }
+    let ins = t.mixer.inserts.get(slot)?.as_ref()?;
     Some(format!("{} on {} reported a processing error, so its output is silent while the error lasts.", ins.plugin, t.name))
 }
 
