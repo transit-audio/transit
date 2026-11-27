@@ -46,6 +46,7 @@ The first draft was revised twice before acceptance. What changed in the design:
 - Undocumented VST3 legacy pitch bend and poly pressure output is dropped and counted (decision 3); "nothing hangs" is conditional on the host continuing to execute (decisions 6, 7).
 - Five product choices were decided by delegation (decisions 2, 4, 7, 11), listed under For the maintainer to confirm or overturn.
 - After acceptance, the record was reopened to cover whole classes of plug-in it had left implicit: plug-ins with no audio bus are hosted as they are (4.4); a hosted plug-in without an editor gets a permanent host parameter editor, which also serves editor-less hosted inserts and instruments (9.1); a class with a note output and no audio output is listed only as a MIDI effect (2.7); the CLAP input dialect is read again at every activation (4.1); and hosting is ordered before ADR 0057's built-in devices, with Capture no longer a prerequisite of visibility (Slices).
+- The amendment of 2026-11-27, the R1 prerequisite of HM1 and HM2, was written and accepted by the second judge on 2026-11-27 while reviewing the first installment of R1.
 
 ## Decision
 
@@ -243,7 +244,7 @@ Each slice lands alone: it builds and passes the workspace tests on its own comm
 
 | Slice | Why hosting needs it |
 |---|---|
-| ADR 0059 R1 | Admission and release guarantees at every adapter, skipped calls at offset 0, VST3 processing errors counted, processing-error containment |
+| ADR 0059 R1 | Admission and release guarantees at every adapter, skipped calls at offset 0, VST3 processing errors counted, processing-error containment Superseded in part by the amendment of 2026-11-27 below: for internal HM1 and HM2 development this prerequisite means R1-h. |
 | ADR 0057 P2 | Between-block semantics and the count-in reset; a hosted stage waits for the next actual call |
 | ADR 0057 P3a, then P3b | Safe first insertion and edits, pedal release, final admission per hop, host note ownership |
 | ADR 0057 P4, before HM6 and VH | Compensation for a hosted stage's reported latency |
@@ -254,7 +255,7 @@ Not prerequisites of hosting: P0 and P1 (a hosted stage gets the format's transp
 
 **Build order, from the first slice to VH** (slices of other records named by their record; slices in different crates may run in parallel where the rules of their records allow, and the mix-crate slices run one after another):
 
-1. ADR 0059 R1.
+1. ADR 0059 R1. Superseded in part by the amendment of 2026-11-27 below: for internal HM1 and HM2 development this step means R1-h, and full R1 stays required before VH.
 2. HM0 (may run beside 1: host crates, the scan cache and the scan child only).
 3. ADR 0057 P2.
 4. ADR 0057 P3a.
@@ -389,3 +390,7 @@ Decided 2026-11-27 by delegation, each in one sentence:
 ## Related
 
 [ADR 0036](0036-midi-effect-slot.md) (the slot), [ADR 0057](0057-midi-devices-chord-arpeggiator-humanize.md) (decision 16, the host contract a hosted stage inherits; decision 7, latency; decision 9, Capture), [ADR 0059](0059-midi-event-delivery-under-refusal.md) (refusal, adapters, containment; slice R1, a need of HM1 and HM2), [ADR 0018](0018-plugin-host-thread.md) (the plug-in host thread, not responding, inline mode on macOS), [ADR 0023](0023-session-compatibility-markers.md) (`needs`), [ADR 0025](0025-plug-in-state-jobs-and-preset-containers.md) (state jobs and preset files), [ADR 0030](0030-editor-window-cohesion.md) (editor windows), [ADR 0022](0022-external-midi-output.md) (external MIDI output), [ADR 0047](0047-device-macro-strip.md) (pages), [ADR 0052](0052-pre-count-zone.md) (negative positions). Issues: #671 (this record), #641 (unknown MIDI effect ids on load), #330 (retrospective capture), #557 (skipped calls), #559 (events between blocks).
+
+## Amendment 2026-11-27: the R1 prerequisite of HM1 and HM2
+
+For internal HM1 and HM2 development, the R1 prerequisite means completed R1-h as defined by ADR 0059’s hosting-first amendment. Full R1 remains a prerequisite of VH. This changes build order only, not the guarantees required of destination instruments.
