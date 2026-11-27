@@ -10,7 +10,6 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
 use transit_dsp::PluginStateReader;
 use transit_mix::{
     Adoption, DeviceGeneration, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen, realtime_instance_specs,
@@ -71,13 +70,15 @@ fn session() -> Session {
 }
 
 /// A plan engine holding a requests instance made and prepared here, then given
-/// `command` (a fixture `CMD:`), with that instance's state reader.
+/// `command` (a fixture `CMD:`; none when empty), with that instance's state reader.
 fn engine(s: &Session, command: &[u8]) -> (MixEngine, Box<dyn PluginStateReader>) {
     fixture();
     let spec = realtime_instance_specs(s).into_iter().find(|x| x.id == REQUESTS).unwrap();
     let mut p = transit_clap_host::create(REQUESTS).unwrap();
     p.prepare(48_000.0, BLOCK, spec.ch);
-    assert!(p.load_state(command));
+    if !command.is_empty() {
+        assert!(p.load_state(command));
+    }
     let reader = p.state_reader().unwrap();
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: BLOCK as u32, out_channels: 0, in_channels: 0 };
     let mut compiler = PlanCompiler::new(target, PlanLimits::default());
@@ -101,30 +102,29 @@ fn report(reader: &mut Box<dyn PluginStateReader>) -> (u64, Vec<String>) {
 #[test]
 fn a_sleeping_clap_effect_that_requests_process_is_woken_by_the_mixer() {
     let s = session();
-    // The plug-in's IO thread asks to be processed 300 ms from now.
-    let (mut eng, mut reader) = engine(&s, b"CMD:process-after:300");
+    // No request yet: the test makes it below, from the plug-in's IO thread, at a block it chooses.
+    let (mut eng, mut reader) = engine(&s, b"");
     let mut out = vec![vec![0.0f32; BLOCK]; 2];
     let mut pos = 0;
-    let mut blocks = 0;
-    let mut render = |eng: &mut MixEngine| {
-        eng.render_active(pos, BLOCK, &mut out);
-        pos += BLOCK as i64;
-        blocks += 1;
+    let mut render = |eng: &mut MixEngine, n: usize| {
+        for _ in 0..n {
+            eng.render_active(pos, BLOCK, &mut out);
+            pos += BLOCK as i64;
+        }
     };
-    render(&mut eng);
+    render(&mut eng, 1);
     assert_eq!(report(&mut reader).0, 1, "the first block processes it; then it sleeps");
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while report(&mut reader).0 < 2 && Instant::now() < deadline {
-        render(&mut eng);
-        std::thread::sleep(Duration::from_millis(2));
-    }
-    for _ in 0..50 {
-        render(&mut eng);
-    }
+    render(&mut eng, 50);
+    assert_eq!(report(&mut reader).0, 1, "silent input, no editor: it stays asleep");
+    // `process-now` asks from another thread and joins it before the load returns.
+    assert!(reader.load_state(b"CMD:process-now").is_some(), "the fixture takes the command");
+    render(&mut eng, 1);
+    assert_eq!(report(&mut reader).0, 2, "the block after the request processes it");
+    render(&mut eng, 50);
     let (processes, log) = report(&mut reader);
-    assert_eq!(processes, 2, "silent input, no editor: processed once at the start and once when it asked, over {blocks} blocks");
-    let calls: Vec<&str> = log.iter().map(String::as_str).filter(|c| *c == "process" || *c == "request_process").collect();
-    assert_eq!(calls, ["process", "request_process", "process"]);
+    assert_eq!(processes, 2, "answered once; asleep again");
+    let calls: Vec<&str> = log.iter().map(String::as_str).filter(|c| *c == "process" || c.starts_with("cmd ")).collect();
+    assert_eq!(calls, ["process", "cmd process-now", "process"], "{log:?}");
 }
 
 #[test]
