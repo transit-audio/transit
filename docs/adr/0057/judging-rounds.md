@@ -98,3 +98,7 @@ Findings 3, 5 and 6 were resolved and both new Arpeggiator rows replayed. Three 
 3. **Learn.** Arming keeps only outputs actually sounding and starts nothing; while armed, input is forwarded plainly with no counting rule.
 
 Also decided: a count-in entered while playing is a Stop-equivalent reset (P2). Notes applied: "at or after" for a release on a step; K2b's and P2's file lists; the early P2 test named as a fixture test; provenance out of 0059's decisions; the design hand-off listed as needed before K2a's dimensions and scrolling are final.
+
+## Revision of 2026-11-26, judging round 3
+
+Latency and Learn were resolved. One correction remained in Capture's contract: the minimum one-tick length was not carried through. A note heard from 1013 to 1014 at 120 BPM and 48 kHz is written from 1025 to 1050, its release 1.44 ticks late, so the bound approaches one and a half ticks, not one. At the range end, with `b` = 1010, a note starting at 1009 and sounding at `b` keeps its one-tick length (1000 to 1025) over the rounded range-end release. Both cases are now in the rules and the acceptance examples. Notes applied: requested versus provisioned latency sums named in decision 7, with P4's implementation details (one snapshot per plan, session-only plans, fresh stages, a test path that needs the delay); Learn's release rule narrowed to plain entries; the no-overlap summaries qualified by Learn-created plain entries, which can outlive Learn; the overlap example limited to a clip's span, not a release crossing a loop seam or clip boundary.
