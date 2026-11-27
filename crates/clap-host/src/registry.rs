@@ -143,14 +143,20 @@ fn readable(dialects: u32) -> bool {
 /// The first readable output is the lowest-indexed readable output note port.
 pub fn probe_class(path: &Path, plugin_id: &str) -> Result<Capability, ClapError> {
     let inst = Bundle::load(path)?.instantiate(plugin_id)?;
-    let first_note_output = inst.note_port_dialects(false).into_iter().position(readable).and_then(|i| u32::try_from(i).ok());
-    let note_input = inst.note_port_dialects(true).into_iter().any(readable);
-    let audio_outputs = inst.audio_port_count(false);
+    // A port whose information cannot be read, or a port list this host does not read whole, is
+    // no answer: never a "no" that would be kept as one.
+    let fail = |m: String| ClapError::Instantiate(plugin_id.to_string(), m);
+    let outputs = inst.note_port_dialects(false).map_err(fail)?;
+    let inputs = inst.note_port_dialects(true).map_err(fail)?;
+    let audio_outputs = inst.audio_port_count(false).map_err(fail)?;
     drop(inst);
+    let first_note_output = outputs.into_iter().position(readable).and_then(|i| u32::try_from(i).ok());
+    let note_input = inputs.into_iter().any(readable);
     Ok(Capability { note_output: first_note_output.is_some(), note_input, audio_outputs, first_note_output })
 }
 
 pub fn probe_reply(file: &Path, plugin_id: &str) -> String {
+    scan_cache::enter_child();
     probe::reply(probe_class(file, plugin_id))
 }
 
@@ -190,7 +196,7 @@ fn probe_pass() {
     let Some(program) = scanner else { return };
     let stop = || SKIP.load(Ordering::Acquire) || background().pending || lock().generation != generation;
     let host = scan_cache::this_host();
-    let ran = probe::probe_files(
+    probe::probe_files(
         &mut files,
         &host,
         |path, d| {
@@ -207,18 +213,28 @@ fn probe_pass() {
             }
             answer
         },
-        |path, d| publish_probe(generation, path, d),
+        |path, d| {
+            publish_probe(generation, path, d);
+            persist(generation, cache_file.as_deref());
+        },
     );
-    if ran == 0 {
-        return;
-    }
+}
+
+/// Writes the published files, with every probe outcome so far, to the cache file: after each
+/// outcome, so that quitting during a long pass keeps what it found (a class not probed yet, or
+/// stopped, is written with no outcome and probed again by the next scan). Nothing is written once
+/// a newer listing was published (its scan writes the cache).
+fn persist(generation: u64, cache_file: Option<&Path>) {
+    let Some(f) = cache_file else { return };
+    // Taken before the registry lock, as the listing's write takes it after publishing: a write of
+    // an older listing cannot land after the newer listing's own.
     let _one_writer = cache_write_lock();
     let files = {
         let r = lock();
         (r.generation == generation).then(|| r.files.clone())
     };
-    if let (Some(f), Some(files)) = (cache_file, files) {
-        scan_cache::write(&f, &files);
+    if let Some(files) = files {
+        scan_cache::write(f, &files);
     }
 }
 
@@ -585,6 +601,7 @@ pub fn set_scanner(program: Option<PathBuf>) {
 }
 
 pub fn scan_reply(file: &Path) -> String {
+    scan_cache::enter_child();
     scan_cache::reply(load_bundle(file))
 }
 

@@ -33,5 +33,9 @@ sidechain = []
 notes = []
 note-effects = []
 probe-failures = []
+# A readable output port past index 63, an unreadable port, a port extension without `get`, 5000
+# ports, and helper processes that hold the probe child output pipe (one in its own process group
+# on Linux and macOS), then an ordinary plug-in.
+edges = []
 
 [workspace]

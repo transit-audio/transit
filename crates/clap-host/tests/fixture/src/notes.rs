@@ -54,6 +54,12 @@ static EFFECT_C_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.note-e
 static PROBE_ERROR_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-error", c"Fixture Probe Error", &EFFECT);
 static PROBE_CRASH_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-crash", c"Fixture Probe Crash", &INSTRUMENT);
 static PROBE_BLOCK_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-block", c"Fixture Probe Block", &EFFECT);
+static PORT_64_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.port-64", c"Fixture Port 64", &NOTE_EFFECT);
+static PORT_UNREADABLE_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.port-unreadable", c"Fixture Port Unreadable", &NOTE_EFFECT);
+static PORTS_INCOMPLETE_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.ports-incomplete", c"Fixture Ports Incomplete", &NOTE_EFFECT);
+static PORT_FLOOD_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.port-flood", c"Fixture Port Flood", &NOTE_EFFECT);
+static PROBE_HELPER_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-helper", c"Fixture Probe Helper", &EFFECT);
+static PROBE_ESCAPE_DESC: clap_plugin_descriptor = desc(c"org.soundcraft.test.probe-escape", c"Fixture Probe Escape", &EFFECT);
 
 #[cfg(feature = "notes")]
 pub(crate) static DESCS: [&clap_plugin_descriptor; 2] = [&NOTES_DESC, &NOTES_SILENT_DESC];
@@ -61,6 +67,12 @@ pub(crate) static DESCS: [&clap_plugin_descriptor; 2] = [&NOTES_DESC, &NOTES_SIL
 pub(crate) static DESCS: [&clap_plugin_descriptor; 3] = [&EFFECT_A_DESC, &EFFECT_B_DESC, &EFFECT_C_DESC];
 #[cfg(all(feature = "probe-failures", not(any(feature = "notes", feature = "note-effects"))))]
 pub(crate) static DESCS: [&clap_plugin_descriptor; 5] = [&NOTES_DESC, &PROBE_ERROR_DESC, &PROBE_CRASH_DESC, &PROBE_BLOCK_DESC, &NOTES_SILENT_DESC];
+#[cfg(all(feature = "edges", unix, not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
+pub(crate) static DESCS: [&clap_plugin_descriptor; 7] =
+    [&PORT_64_DESC, &PORT_UNREADABLE_DESC, &PORTS_INCOMPLETE_DESC, &PORT_FLOOD_DESC, &PROBE_HELPER_DESC, &PROBE_ESCAPE_DESC, &NOTES_DESC];
+#[cfg(all(feature = "edges", not(unix), not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
+pub(crate) static DESCS: [&clap_plugin_descriptor; 6] =
+    [&PORT_64_DESC, &PORT_UNREADABLE_DESC, &PORTS_INCOMPLETE_DESC, &PORT_FLOOD_DESC, &PROBE_HELPER_DESC, &NOTES_DESC];
 
 /// The ports a plug-in declares.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -71,6 +83,14 @@ enum Shape {
     Silent,
     /// Note in, note out (CLAP and MIDI); no audio.
     Effect,
+    /// Note in; note outs 0 to 63 MIDI 2 only, note out 64 CLAP and MIDI; no audio.
+    Port64,
+    /// Note in; one note out whose information cannot be read; no audio.
+    PortUnreadable,
+    /// `clap.note-ports` without `get`; no audio.
+    PortsIncomplete,
+    /// 5000 note outputs declared; no audio.
+    PortFlood,
 }
 
 #[repr(C)]
@@ -97,6 +117,20 @@ pub(crate) fn create(id: &CStr) -> Option<*const clap_plugin> {
     } else if id == c"org.soundcraft.test.probe-crash" {
         crash()
     } else if id == c"org.soundcraft.test.probe-block" {
+        block()
+    } else if id == c"org.soundcraft.test.port-64" {
+        (&PORT_64_DESC, Shape::Port64)
+    } else if id == c"org.soundcraft.test.port-unreadable" {
+        (&PORT_UNREADABLE_DESC, Shape::PortUnreadable)
+    } else if id == c"org.soundcraft.test.ports-incomplete" {
+        (&PORTS_INCOMPLETE_DESC, Shape::PortsIncomplete)
+    } else if id == c"org.soundcraft.test.port-flood" {
+        (&PORT_FLOOD_DESC, Shape::PortFlood)
+    } else if id == c"org.soundcraft.test.probe-helper" {
+        spawn_helper("helper", false);
+        block()
+    } else if id == c"org.soundcraft.test.probe-escape" {
+        spawn_helper("escape", true);
         block()
     } else {
         return None;
@@ -141,19 +175,46 @@ fn crash() -> ! {
     std::process::abort()
 }
 
-/// Does not return while its scan parent lives, as a plug-in waiting on a dialog or a license
-/// server does; says so first in `blocking.mark` in the working folder.
+/// Does not return for 300 s, as a plug-in waiting on a dialog or a license server does. First it holds an
+/// exclusive lock on `blocking.lock` (released only when the process ends, so a test can wait for
+/// its end) and says it is blocking in `blocking.mark`, both in the working folder.
 fn block() -> ! {
+    let lock = std::fs::File::create("blocking.lock").and_then(|f| f.lock().map(|()| f));
     let _ = std::fs::write("blocking.mark", b"blocking in create_plugin");
-    // Until its scan parent stops it; if the parent itself is gone (a failed test), the next line
-    // written to the closed pipe fails and the child ends, so no orphan is left behind.
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        use std::io::Write as _;
-        let mut out = std::io::stdout();
-        if writeln!(out, "fixture: still blocking").and_then(|()| out.flush()).is_err() {
-            std::process::exit(1);
+    // Ends by itself after 300 s, saying so in `blocking.done`, so that a test of containment fails
+    // (rather than passes) when nothing killed it, and nothing is left for good.
+    std::thread::sleep(std::time::Duration::from_secs(300));
+    let _ = std::fs::write("blocking.done", b"ended by itself");
+    drop(lock);
+    std::process::exit(0)
+}
+
+/// Starts a helper process that inherits this process's standard output (the scan's pipe), as a
+/// plug-in that starts a license or update helper does: this program again with
+/// `--hold-output <name>`, which locks `<name>.lock` and writes its process id to `<name>.ready`
+/// once it holds the lock. Waits for that file (the helper's own start, not a clock budget: it
+/// gives up after 3000 checks). `escape`: the helper starts in a process group of its own (Linux
+/// and macOS), as a process that leaves its parent's group on purpose does.
+fn spawn_helper(name: &str, escape: bool) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut c = std::process::Command::new(exe);
+    c.arg("--hold-output").arg(name).stdin(std::process::Stdio::null());
+    #[cfg(unix)]
+    if escape {
+        use std::os::unix::process::CommandExt as _;
+        c.process_group(0);
+    }
+    #[cfg(not(unix))]
+    let _ = escape;
+    if c.spawn().is_err() {
+        return;
+    }
+    let ready = format!("{name}.ready");
+    for _ in 0..3000 {
+        if std::fs::metadata(&ready).is_ok_and(|m| m.len() > 0) {
+            return;
         }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
@@ -200,7 +261,7 @@ unsafe extern "C" fn process(_p: *const clap_plugin, pr: *const clap_process) ->
 
 unsafe extern "C" fn audio_count(p: *const clap_plugin, is_input: bool) -> u32 {
     // SAFETY: the host passes a live plug-in of this module.
-    u32::from(!is_input && unsafe { note(p) }.shape != Shape::Effect)
+    u32::from(!is_input && matches!(unsafe { note(p) }.shape, Shape::Generator | Shape::Silent))
 }
 
 unsafe extern "C" fn audio_get(p: *const clap_plugin, index: u32, is_input: bool, info: *mut clap_audio_port_info) -> bool {
@@ -225,6 +286,10 @@ static AUDIO: clap_plugin_audio_ports = clap_plugin_audio_ports { count: Some(au
 fn dialects(shape: Shape, index: u32, is_input: bool) -> Option<u32> {
     let readable = CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
     match (shape, is_input, index) {
+        (Shape::PortFlood, false, i) if i < 5000 => Some(CLAP_NOTE_DIALECT_MIDI2),
+        (Shape::PortUnreadable, false, 0) => Some(0),
+        (Shape::Port64, false, i) if i < 64 => Some(CLAP_NOTE_DIALECT_MIDI2),
+        (Shape::Port64, false, 64) => Some(readable),
         (_, true, 0) => Some(readable),
         (Shape::Effect, false, 0) => Some(readable),
         (Shape::Generator | Shape::Silent, false, 0) => Some(CLAP_NOTE_DIALECT_MIDI2),
@@ -241,7 +306,11 @@ unsafe extern "C" fn note_count(p: *const clap_plugin, is_input: bool) -> u32 {
 
 unsafe extern "C" fn note_get(p: *const clap_plugin, index: u32, is_input: bool, info: *mut clap_note_port_info) -> bool {
     // SAFETY: the host passes a live plug-in of this module.
-    let Some(supported) = dialects(unsafe { note(p) }.shape, index, is_input) else { return false };
+    let shape = unsafe { note(p) }.shape;
+    let Some(supported) = dialects(shape, index, is_input) else { return false };
+    if shape == Shape::PortUnreadable && !is_input {
+        return false;
+    }
     // SAFETY: the host passes a writable clap_note_port_info.
     let info = unsafe { &mut *info };
     info.id = index + if is_input { 0 } else { 10 };
@@ -253,11 +322,15 @@ unsafe extern "C" fn note_get(p: *const clap_plugin, index: u32, is_input: bool,
 
 static NOTE_PORTS: clap_plugin_note_ports = clap_plugin_note_ports { count: Some(note_count), get: Some(note_get) };
 
-unsafe extern "C" fn get_extension(_p: *const clap_plugin, id: *const c_char) -> *const c_void {
+static NOTE_PORTS_WITHOUT_GET: clap_plugin_note_ports = clap_plugin_note_ports { count: Some(note_count), get: None };
+
+unsafe extern "C" fn get_extension(p: *const clap_plugin, id: *const c_char) -> *const c_void {
     // SAFETY: the host passes a NUL-terminated extension id.
     let id = unsafe { CStr::from_ptr(id) };
     if id == CLAP_EXT_AUDIO_PORTS {
         &AUDIO as *const _ as *const c_void
+    } else if id == CLAP_EXT_NOTE_PORTS && unsafe { note(p) }.shape == Shape::PortsIncomplete {
+        &NOTE_PORTS_WITHOUT_GET as *const _ as *const c_void
     } else if id == CLAP_EXT_NOTE_PORTS {
         &NOTE_PORTS as *const _ as *const c_void
     } else {

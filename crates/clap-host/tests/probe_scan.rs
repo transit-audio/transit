@@ -15,6 +15,17 @@ use transit_clap_host as host;
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let [flag, name] = args.as_slice()
+        && flag == "--hold-output"
+    {
+        hold_output(name);
+        return;
+    }
+    if let [flag, dir] = args.as_slice()
+        && flag == "--be-parent"
+    {
+        be_parent(Path::new(dir));
+    }
     if let Some(reply) = child(&args) {
         use std::io::Write as _;
         let _ = writeln!(std::io::stdout(), "{reply}");
@@ -24,6 +35,8 @@ fn main() {
     listing_then_probing();
     probe_failures();
     probing_runs_in_the_background();
+    edge_declarations_and_helpers();
+    scan_children_end_with_their_parent();
     println!("probe_scan: ok");
 }
 
@@ -104,10 +117,19 @@ struct Probes {
     first: Arc<Mutex<Option<Vec<host::ClapDescriptor>>>>,
     /// (`scanning()`, `probing()`) when the first probe child was about to start.
     state_at_first: Arc<Mutex<Option<(bool, bool)>>>,
+    /// When each probe child was about to start: how many classes the cache file on disk held
+    /// with a probe answer (`watch_cache`).
+    durable: Arc<Mutex<Vec<usize>>>,
 }
 
 impl Probes {
     fn watch() -> Self {
+        Probes::watch_cache(None)
+    }
+
+    fn watch_cache(cache: Option<PathBuf>) -> Self {
+        let durable = Arc::new(Mutex::new(Vec::new()));
+        let d = Arc::clone(&durable);
         let started = Arc::new(Mutex::new(Vec::new()));
         let first = Arc::new(Mutex::new(None));
         let state_at_first = Arc::new(Mutex::new(None));
@@ -118,9 +140,13 @@ impl Probes {
                 *f.lock().unwrap() = host::cached();
                 *g.lock().unwrap() = Some((host::scanning(), host::probing()));
             }
+            if let Some(cache) = &cache {
+                let text = std::fs::read_to_string(cache).unwrap_or_default();
+                d.lock().unwrap().push(text.matches("\"note_output\": true").count() + text.matches("\"note_output\": false").count());
+            }
             started.push(id.to_string());
         })));
-        Probes { started, first, state_at_first }
+        Probes { started, first, state_at_first, durable }
     }
 
     fn take(&self) -> Vec<String> {
@@ -165,7 +191,7 @@ fn listing_then_probing() {
         "path": notes, "size": meta.len(), "modified_ns": modified_ns, "plugins": [fake], "error": null, "host": ""
     }] });
     std::fs::write(dir.join("cache.json"), stale.to_string()).unwrap();
-    let probes = Probes::watch();
+    let probes = Probes::watch_cache(Some(dir.join("cache.json")));
 
     let list = reuse_scan();
 
@@ -177,6 +203,13 @@ fn listing_then_probing() {
     }
     // The listing scan was over (what the splash and the menus wait for) and probing had begun.
     assert_eq!(*probes.state_at_first.lock().unwrap(), Some((false, true)), "(scanning, probing) at the first probe child");
+    // Every outcome was on disk before the next child started: quitting during a pass keeps what
+    // it found (the cache file names no answer for a plug-in not probed yet).
+    assert_eq!(
+        std::mem::take(&mut *probes.durable.lock().unwrap()),
+        (0..EXPECTED.len()).collect::<Vec<_>>(),
+        "answers on disk at each child's start"
+    );
     // One probe child per plug-in.
     let started = probes.take();
     assert_eq!(started.len(), EXPECTED.len(), "{started:?}");
@@ -423,4 +456,131 @@ fn probing_runs_in_the_background() {
     assert_eq!(find(&last, "Fixture Notes Silent").probe.note_output, Some(false));
     assert!(find(&last, "Fixture Probe Block").probe.probe_error.is_some());
     tear_down();
+}
+
+/// `--hold-output <name>`: the helper a fixture plug-in starts. Locks `<name>.lock` (in the working
+/// folder) for as long as it lives, writes its process id to `<name>.ready` once it holds the lock,
+/// and sleeps; it ends on its own after 300 s, writing `<name>.done`, so a broken containment fails
+/// a test (instead of passing it late) and cannot leave it for good.
+fn hold_output(name: &str) {
+    let lock = std::fs::File::create(format!("{name}.lock")).and_then(|f| f.lock().map(|()| f)).expect("helper lock");
+    std::fs::write(format!("{name}.ready"), std::process::id().to_string()).expect("helper ready");
+    std::thread::sleep(Duration::from_secs(300));
+    let _ = std::fs::write(format!("{name}.done"), b"ended by itself");
+    drop(lock);
+}
+
+/// `--be-parent <dir>`: a scan host of its own over `<dir>` (the probe failures file). It says
+/// `BLOCKED` on its standard output once its probe child is held inside the blocking plug-in's
+/// creation, and then waits to be killed.
+fn be_parent(dir: &Path) -> ! {
+    set_up(dir);
+    let gate = Gate::install(dir.join("vendor").join("blocking.mark"));
+    let (tx, rx) = std::sync::mpsc::channel();
+    *gate.held.lock().unwrap() = Some(tx);
+    gate.hold.store(true, Ordering::SeqCst);
+    host::rescan_in_background(false);
+    rx.recv().expect("held");
+    use std::io::Write as _;
+    println!("BLOCKED");
+    let _ = std::io::stdout().flush();
+    loop {
+        std::thread::sleep(Duration::from_secs(60));
+    }
+}
+
+/// Waits until no running process holds the lock of `file` (the lock goes with its holder).
+fn wait_until_unlocked(file: &Path) {
+    let f = std::fs::File::open(file).expect("lock file");
+    f.lock().expect("lock");
+}
+
+/// Whether a running process holds the lock of `file`.
+fn locked(file: &Path) -> bool {
+    let f = std::fs::File::open(file).expect("lock file");
+    match f.try_lock() {
+        Ok(()) => false,
+        Err(std::fs::TryLockError::WouldBlock) => true,
+        Err(e) => panic!("{e}"),
+    }
+}
+
+/// The listing scan keeps working past declarations at the edges, and a probe child's helper
+/// processes neither outlive the probe nor hold the pass up (findings 1 to 4 of the review).
+fn edge_declarations_and_helpers() {
+    let dir = transit_test_support::TestDir::created_in(Path::new(env!("CARGO_TARGET_TMPDIR")), "clap-probe-edges");
+    common::install_named(&["--features", "edges"], "clap-edges-fixture-target", &dir, "Edges");
+    let vendor = dir.join("vendor");
+    set_up(&dir);
+    let gate = Gate::install(vendor.join("blocking.mark"));
+    let probes = Probes::watch();
+    let list = reuse_scan();
+    let started = probes.take();
+    assert_eq!(started.len(), list.len(), "one probe per plug-in: {started:?}");
+    let p = |name: &str| find(&list, name).probe.clone();
+    let error = |name: &str| p(name).probe_error.unwrap_or_default();
+    let p64 = p("Fixture Port 64");
+    assert_eq!(
+        (p64.note_output, p64.note_output_index, p64.note_input, p64.audio_outputs),
+        (Some(true), Some(64), Some(true), Some(0)),
+        "port 64 is read"
+    );
+    assert!(error("Fixture Port Unreadable").contains("note output port 0 of 1 could not be read"), "{}", error("Fixture Port Unreadable"));
+    assert!(error("Fixture Ports Incomplete").contains("without count or get"), "{}", error("Fixture Ports Incomplete"));
+    assert!(error("Fixture Port Flood").contains("declares 5000 note output ports"), "{}", error("Fixture Port Flood"));
+    for name in ["Fixture Port Unreadable", "Fixture Ports Incomplete", "Fixture Port Flood"] {
+        assert_eq!(p(name).note_output, None, "{name}: no answer, never a no");
+    }
+    // The helper held the probe child's output pipe: the child's deadline still ended the probe,
+    // the helper ended with its tree, and the pass went on.
+    assert!(vendor.join("helper.ready").exists(), "the helper ran");
+    assert!(error("Fixture Probe Helper").contains("still loading"), "{}", error("Fixture Probe Helper"));
+    wait_until_unlocked(&vendor.join("helper.lock"));
+    assert!(!vendor.join("helper.done").exists(), "the helper was killed with the probe child's tree; it did not end by itself");
+    assert_eq!(p("Fixture Notes").note_output, Some(true), "the plug-in after the helpers was probed");
+    #[cfg(unix)]
+    {
+        // A helper that left the group on purpose is out of reach (a stated limit), but it no
+        // longer holds the pass: collection ended at the deadline.
+        assert!(error("Fixture Probe Escape").contains("still loading"), "{}", error("Fixture Probe Escape"));
+        let escape = vendor.join("escape.lock");
+        let alive = locked(&escape);
+        let pid = std::fs::read_to_string(vendor.join("escape.ready")).unwrap_or_default();
+        let _ = std::process::Command::new("kill").args(["-KILL", pid.trim()]).status();
+        wait_until_unlocked(&escape);
+        assert!(alive, "the helper that left the group outlived its probe (the stated limit)");
+    }
+    assert_eq!(gate.marks.load(Ordering::SeqCst), if cfg!(unix) { 2 } else { 1 });
+    tear_down();
+}
+
+/// A scan child ends with its parent, however the parent ends: here it is killed outright while
+/// its probe child is held inside the blocking plug-in's creation (finding 5). The child holds
+/// `blocking.lock` for as long as it lives.
+fn scan_children_end_with_their_parent() {
+    let dir = transit_test_support::TestDir::created_in(Path::new(env!("CARGO_TARGET_TMPDIR")), "clap-probe-parent");
+    common::install_named(&["--features", "probe-failures"], "clap-probe-failures-fixture-target", &dir, "Probes");
+    let mut parent = std::process::Command::new(std::env::current_exe().unwrap())
+        .arg("--be-parent")
+        .arg(&*dir)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut out = std::io::BufReader::new(parent.stdout.take().unwrap());
+    let mut line = String::new();
+    loop {
+        line.clear();
+        use std::io::BufRead as _;
+        assert!(out.read_line(&mut line).unwrap() > 0, "the parent ended before its child was held");
+        if line.contains("BLOCKED") {
+            break;
+        }
+    }
+    let lock = dir.join("vendor").join("blocking.lock");
+    assert!(locked(&lock), "the probe child holds its lock while it is held");
+    parent.kill().unwrap();
+    parent.wait().unwrap();
+    wait_until_unlocked(&lock);
+    assert!(!dir.join("vendor").join("blocking.done").exists(), "the probe child was ended with its parent; it did not end by itself");
 }
