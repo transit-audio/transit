@@ -508,7 +508,7 @@ No session or track key exists; `KeyScale` is a per-clip editing aid that never 
 - `Session::needs()` lists `midi_chord`, `midi_arpeggiator` and `midi_humanize` when a slot uses the device (ADR 0023): an older build keeps the slot's id and parameters but plays its input through, so it warns that the session sounds different. Chord memory adds its own `midi_chord_memory` (3.7).
 - Alpha: no migration of anything.
 - Factory presets per device, each in its panel's own table (slice K2b wires `presets::factory_for` to them), JSON files under `assets/presets/<device id>/`.
-- The existing commands cover add, remove, move, bypass and parameters; C2 adds the two chord memory commands. Until a device is visible (slice V), its id is in a preview table that `info()` and `Builtin::new` accept and that neither the "+" menu nor `engine.midi_effects` lists, so it can be added through the control channel only.
+- The existing commands cover add, remove, move, bypass and parameters; C2 adds the two chord memory commands. Until a device is visible (slice V), its id is in a preview table that `info()` and `Builtin::new` accept and that neither the "+" menu nor `engine.midi_effects` lists; programmatic callers can use the id, and the gate does not identify or reject callers.
 
 ### 13. Evidence each implementation carries
 

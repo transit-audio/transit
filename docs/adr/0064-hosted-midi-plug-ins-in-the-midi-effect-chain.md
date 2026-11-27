@@ -221,7 +221,7 @@ The same rule governs every barrier, not only lifecycle ones: every barrier star
 
 - `MidiEffectSlot` unchanged (8.1); `Session::needs()` gains `hosted_midi_effects` (7.3). Alpha: no migration of anything; the scan cache's version bump (2.4) is the existing invalidation.
 - Commands: `mix.midi_effect` accepts a hosted id whose descriptor qualifies (2.6), refused on a rack (10.2); `mix.midi_effect_replace` (8.4); the existing remove, move, bypass, param and params commands keep their interfaces and semantics (param addresses a hosted parameter by its id); their implementation changes where it must: `mix.midi_effect_param` and `mix.midi_effect_params` resolve parameter metadata from the built-in MIDI effect registry only today (`crates/engine/src/cmd/midi_effect.rs:129`), and HM3 extends that lookup to a hosted stage's registry table for both commands; `engine.midi_effects` lists hosted qualifying plug-ins only after the visibility slice.
-- Until slice VH, a hosted id is accepted by the add and replace commands only through the control channel (a preview gate, as ADR 0057's preview table, 12), so tests and the maintainer's hands-on check can use it while no menu shows it.
+- Until slice VH, qualifying hosted ids are accepted by the add and replace commands through programmatic entry points, including the control channel and headless CLI/scripts, while menus and `engine.midi_effects` do not list them; this is a visibility gate, as in ADR 0057 decision 12, not caller-based refusal.
 
 ## Slices
 
