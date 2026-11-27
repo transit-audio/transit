@@ -30,9 +30,15 @@
 /// A test-only effect that delays every event (feature `testing`): it proves the carry.
 #[cfg(feature = "testing")]
 pub mod delay;
+/// A test-only gated generator (feature `testing`): a host slices' fixture (ADR 0057, P3a).
+#[cfg(feature = "testing")]
+pub mod gated;
 /// A test-only generator and latch (feature `testing`): the host slices' fixture (ADR 0057, P2).
 #[cfg(feature = "testing")]
 pub mod generator;
+/// A test-only owning pass-through (feature `testing`): a host slices' fixture (ADR 0057, P3a).
+#[cfg(feature = "testing")]
+pub mod owning;
 pub mod random_sequencer;
 pub mod transpose;
 pub mod velocity;
@@ -213,6 +219,10 @@ pub enum Builtin {
     Delay(delay::Delay),
     #[cfg(feature = "testing")]
     Generator(generator::Generator),
+    #[cfg(feature = "testing")]
+    Owning(owning::Owning),
+    #[cfg(feature = "testing")]
+    Gated(gated::Gated),
 }
 
 impl Builtin {
@@ -234,6 +244,14 @@ impl Builtin {
             if id == generator::GENERATOR_INFO.id {
                 return Some(Builtin::Generator(generator::Generator::default()));
             }
+            #[cfg(feature = "testing")]
+            if id == owning::OWNING_INFO.id {
+                return Some(Builtin::Owning(owning::Owning::default()));
+            }
+            #[cfg(feature = "testing")]
+            if id == gated::GATED_INFO.id {
+                return Some(Builtin::Gated(gated::Gated::default()));
+            }
             None
         }
     }
@@ -247,6 +265,10 @@ impl Builtin {
             Builtin::Delay(x) => x,
             #[cfg(feature = "testing")]
             Builtin::Generator(x) => x,
+            #[cfg(feature = "testing")]
+            Builtin::Owning(x) => x,
+            #[cfg(feature = "testing")]
+            Builtin::Gated(x) => x,
         }
     }
 
@@ -260,6 +282,10 @@ impl Builtin {
             Builtin::Delay(x) => x,
             #[cfg(feature = "testing")]
             Builtin::Generator(x) => x,
+            #[cfg(feature = "testing")]
+            Builtin::Owning(x) => x,
+            #[cfg(feature = "testing")]
+            Builtin::Gated(x) => x,
         }
     }
 }
