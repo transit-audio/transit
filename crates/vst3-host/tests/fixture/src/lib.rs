@@ -776,6 +776,7 @@ fn os_thread() -> usize {
 }
 
 fn module_entry() -> bool {
+    notes::note_loaded("module entry");
     // A module entry that hangs (K38): with `VST3_FIXTURE_ENTRY_GATE` set to a folder, the first
     // entry in the process to claim it writes `entered` there and waits while `hold` exists.
     if let Some(gate) = std::env::var_os("VST3_FIXTURE_ENTRY_GATE").map(std::path::PathBuf::from)
@@ -919,6 +920,7 @@ extern "C" fn ModuleExit() -> bool {
 
 #[unsafe(no_mangle)]
 extern "system" fn GetPluginFactory() -> *mut IPluginFactory {
+    notes::note_loaded("factory");
     match ComWrapper::new(Factory { _live: Live::new(&FACTORIES) }).to_com_ptr::<IPluginFactory>() {
         Some(p) => p.into_raw(),
         None => std::ptr::null_mut(),
