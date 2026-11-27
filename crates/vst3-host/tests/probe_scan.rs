@@ -21,6 +21,12 @@ fn main() {
         hold_output(name);
         return;
     }
+    if let [flag, name] = args.as_slice()
+        && flag == "--chatter"
+    {
+        chatter(name);
+        return;
+    }
     if let [flag, dir] = args.as_slice()
         && flag == "--be-parent"
     {
@@ -38,6 +44,7 @@ fn main() {
     probing_runs_in_the_background();
     edge_declarations_and_helpers();
     scan_children_end_with_their_parent();
+    containment_failure_stops_the_child();
     println!("probe_scan: ok");
 }
 
@@ -165,6 +172,8 @@ fn tear_down() {
     host::set_probe_hook(None);
     host::set_probe_answered_hook(None);
     host::set_probe_deadline(None);
+    host::set_contain_fails(None);
+    host::set_watch_fails(None);
     host::set_scanner(None);
     host::set_cache_file(None);
     host::set_extra_dirs(Vec::new());
@@ -536,7 +545,21 @@ fn edge_declarations_and_helpers() {
         wait_until_unlocked(&escape);
         assert!(alive, "the helper that left the group outlived its probe (the stated limit)");
     }
-    assert_eq!(gate.marks.load(Ordering::SeqCst), if cfg!(unix) { 2 } else { 1 });
+    // Review round 2, finding A: a helper of a child that ends by itself is killed with the
+    // child's tree, before the child is reaped (on Linux and macOS a kill after the reap signals
+    // nothing, and the helper would end only by itself, writing `reaped.done`).
+    assert!(error("Fixture Probe Helper Crash").contains("ended the scan process"), "{}", error("Fixture Probe Helper Crash"));
+    wait_until_unlocked(&vendor.join("reaped.lock"));
+    assert!(!vendor.join("reaped.done").exists(), "the crashed child's helper was killed with its tree; it did not end by itself");
+    // Finding C: a helper that keeps writing to the probe child's output pipe (in a group of its
+    // own on Linux and macOS, so only the closing of the pipe can end it there) ends once the
+    // probe is over: nothing in this process reads the pipe or holds it open any more.
+    assert!(error("Fixture Probe Chatter").contains("still loading"), "{}", error("Fixture Probe Chatter"));
+    wait_until_unlocked(&vendor.join("chatter.lock"));
+    assert!(!vendor.join("chatter.done").exists(), "the chattering helper's writes failed once the pipe was closed; it did not end by itself");
+    // A 5 MiB line is an error at the bound, not 5 MiB kept.
+    assert!(error("Fixture Probe Long Line").contains("longer than 4194304 bytes"), "{}", error("Fixture Probe Long Line"));
+    assert_eq!(gate.marks.load(Ordering::SeqCst), if cfg!(unix) { 3 } else { 2 });
     tear_down();
 }
 
@@ -569,4 +592,72 @@ fn scan_children_end_with_their_parent() {
     parent.wait().unwrap();
     wait_until_unlocked(&lock);
     assert!(!dir.join("vendor").join("blocking.done").exists(), "the probe child was ended with its parent; it did not end by itself");
+}
+
+/// `--chatter <name>`: as `--hold-output`, and it writes a line to its standard output every
+/// 10 ms until a write fails, which ends it at once (without `<name>.done`).
+fn chatter(name: &str) {
+    let lock = std::fs::File::create(format!("{name}.lock")).and_then(|f| f.lock().map(|()| f)).expect("chatter lock");
+    std::fs::write(format!("{name}.ready"), std::process::id().to_string()).expect("chatter ready");
+    std::thread::spawn(|| {
+        use std::io::Write as _;
+        loop {
+            let mut out = std::io::stdout();
+            if writeln!(out, "chatter").and_then(|()| out.flush()).is_err() {
+                std::process::exit(0);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    });
+    std::thread::sleep(Duration::from_secs(300));
+    let _ = std::fs::write(format!("{name}.done"), b"ended by itself");
+    drop(lock);
+}
+
+/// Review round 2, finding B: a scan child that cannot be contained, or whose parent watch cannot
+/// start, loads nothing. A listing child's failure is that file's scan error; a probe child's
+/// keeps the listing and records the reason as the probe's outcome. Each class creation is logged
+/// to `created.log` by the fixture: no line means nothing was loaded.
+fn containment_failure_stops_the_child() {
+    let dir = transit_test_support::TestDir::created_in(Path::new(env!("CARGO_TARGET_TMPDIR")), "vst3-probe-uncontained");
+    let bundle = common::install_named(&["--features", "notes"], "vst3-notes-fixture-target", &dir, "Notes");
+    let vendor = dir.join("vendor");
+    let created = vendor.join("created.log");
+    set_up(&dir);
+    let listing_fails = |what: &str, reason: &str| {
+        host::rescan();
+        host::wait_for_scans();
+        let problems = host::problems();
+        assert_eq!(problems.len(), 1, "{what}: {problems:?}");
+        assert!(problems[0].0 == bundle && problems[0].1.contains(reason), "{what}: {problems:?}");
+        assert!(host::cached().unwrap_or_default().is_empty(), "{what}: the file lists nothing");
+    };
+    let probes_fail = |what: &str, reason: &str| {
+        host::rescan();
+        host::wait_for_scans();
+        let list = host::cached().expect("published");
+        assert_eq!(list.len(), 2, "{what}: the listing stands: {list:?}");
+        for d in &list {
+            let p = &d.probe;
+            assert_eq!(p.note_output, None, "{what}: {}", d.name);
+            assert!(p.probe_error.as_deref().is_some_and(|e| e.contains(reason)), "{what}: {}: {p:?}", d.name);
+        }
+    };
+    host::set_contain_fails(Some(host::SCAN_FLAG));
+    listing_fails("a listing child that cannot be contained", "could not be contained");
+    host::set_contain_fails(Some(host::PROBE_FLAG));
+    probes_fail("a probe child that cannot be contained", "could not be contained");
+    host::set_contain_fails(None);
+    host::set_watch_fails(Some(host::SCAN_FLAG));
+    listing_fails("a listing child whose parent watch cannot start", "cannot watch its parent");
+    host::set_watch_fails(Some(host::PROBE_FLAG));
+    probes_fail("a probe child whose parent watch cannot start", "cannot watch its parent");
+    host::set_watch_fails(None);
+    assert!(!created.exists(), "no class was created: {}", std::fs::read_to_string(&created).unwrap_or_default());
+    // And once containment works again, the same scan creates and probes them.
+    host::rescan();
+    host::wait_for_scans();
+    assert_eq!(find(&host::cached().expect("published"), "Fixture Notes").probe.note_output, Some(true));
+    assert!(created.exists(), "the classs were created this time");
+    tear_down();
 }

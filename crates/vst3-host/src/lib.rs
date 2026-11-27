@@ -227,6 +227,22 @@ pub fn set_probe_answered_hook(hook: Option<std::sync::Arc<dyn Fn(&str) + Send +
     registry::set_probe_answered_hook(hook)
 }
 
+/// Makes the containment of every scan child whose first argument is `flag` fail (`None`
+/// stops it). Only for scan tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn set_contain_fails(flag: Option<&str>) {
+    transit_host_common::child::hooks::set_contain_fails(flag)
+}
+
+/// Makes every scan child whose first argument is `flag`, started from now on, find that its
+/// parent watch cannot start (`None` stops it). Only for scan tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn set_watch_fails(flag: Option<&str>) {
+    transit_host_common::child::hooks::set_watch_fails(flag)
+}
+
 /// Whether the scan lock is free right now (a probe pass never holds it). Only for scan tests.
 #[cfg(feature = "test-hooks")]
 #[doc(hidden)]
@@ -267,6 +283,9 @@ pub const SCAN_FLAG: &str = "--scan-vst3";
 /// loader lock, which stalls every thread here that loads a library or starts one (a window stays
 /// black while it lasts), and a plugin that crashes while loading takes only the child down. The
 /// scan's plugins are then loaded here only when first used. `None` (the default) loads in-process.
+/// The program must answer through this crate's [`scan_reply`] and [`probe_reply`] (as the app's
+/// `scan_child` does), which wait for the scan's "go" after containment before loading anything:
+/// one that ignored it would load before it was contained. The app sets only its own executable.
 pub fn set_scanner(program: Option<PathBuf>) {
     api::set_scanner(program)
 }

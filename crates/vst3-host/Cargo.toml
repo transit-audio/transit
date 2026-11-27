@@ -84,7 +84,7 @@ harness = false
 
 # Test-only hook in the scan (see tests/registry_race.rs); off in every normal build.
 [features]
-test-hooks = []
+test-hooks = ["transit-host-common/test-hooks"]
 
 # Turns the hook on for this crate's own tests.
 [dev-dependencies]

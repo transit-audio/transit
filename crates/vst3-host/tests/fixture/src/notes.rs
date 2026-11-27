@@ -31,6 +31,9 @@ pub(crate) const BUSES_17_CID: TUID = uid(0x5C0A1D18, 0x11112222, 0x33334444, 0x
 pub(crate) const BUSES_NEGATIVE_CID: TUID = uid(0x5C0A1D19, 0x11112222, 0x33334444, 0x55556666);
 pub(crate) const PROBE_HELPER_CID: TUID = uid(0x5C0A1D1A, 0x11112222, 0x33334444, 0x55556666);
 pub(crate) const PROBE_ESCAPE_CID: TUID = uid(0x5C0A1D1B, 0x11112222, 0x33334444, 0x55556666);
+pub(crate) const PROBE_HELPER_CRASH_CID: TUID = uid(0x5C0A1D1C, 0x11112222, 0x33334444, 0x55556666);
+pub(crate) const PROBE_CHATTER_CID: TUID = uid(0x5C0A1D1D, 0x11112222, 0x33334444, 0x55556666);
+pub(crate) const PROBE_LONG_LINE_CID: TUID = uid(0x5C0A1D1E, 0x11112222, 0x33334444, 0x55556666);
 
 const MODULE: &str = "Audio Module Class";
 
@@ -55,19 +58,25 @@ pub(crate) const CLASSES: [(TUID, &str, &str, &str); 5] = [
 ];
 
 #[cfg(all(feature = "edges", unix, not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
-pub(crate) const CLASSES: [(TUID, &str, &str, &str); 5] = [
+pub(crate) const CLASSES: [(TUID, &str, &str, &str); 8] = [
     (BUSES_17_CID, MODULE, "Fixture Buses 17", "Instrument|Synth"),
     (BUSES_NEGATIVE_CID, MODULE, "Fixture Buses Negative", "Fx"),
     (PROBE_HELPER_CID, MODULE, "Fixture Probe Helper", "Fx"),
     (PROBE_ESCAPE_CID, MODULE, "Fixture Probe Escape", "Fx"),
+    (PROBE_HELPER_CRASH_CID, MODULE, "Fixture Probe Helper Crash", "Fx"),
+    (PROBE_CHATTER_CID, MODULE, "Fixture Probe Chatter", "Fx"),
+    (PROBE_LONG_LINE_CID, MODULE, "Fixture Probe Long Line", "Fx"),
     (NOTES_CID, MODULE, "Fixture Notes", "Instrument|Synth"),
 ];
 
 #[cfg(all(feature = "edges", not(unix), not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
-pub(crate) const CLASSES: [(TUID, &str, &str, &str); 4] = [
+pub(crate) const CLASSES: [(TUID, &str, &str, &str); 7] = [
     (BUSES_17_CID, MODULE, "Fixture Buses 17", "Instrument|Synth"),
     (BUSES_NEGATIVE_CID, MODULE, "Fixture Buses Negative", "Fx"),
     (PROBE_HELPER_CID, MODULE, "Fixture Probe Helper", "Fx"),
+    (PROBE_HELPER_CRASH_CID, MODULE, "Fixture Probe Helper Crash", "Fx"),
+    (PROBE_CHATTER_CID, MODULE, "Fixture Probe Chatter", "Fx"),
+    (PROBE_LONG_LINE_CID, MODULE, "Fixture Probe Long Line", "Fx"),
     (NOTES_CID, MODULE, "Fixture Notes", "Instrument|Synth"),
 ];
 
@@ -138,10 +147,28 @@ pub(crate) fn create(cid: &TUID) -> Option<vst3::ComPtr<FUnknown>> {
     } else if *cid == PROBE_ESCAPE_CID {
         spawn_helper("escape", true);
         block()
+    } else if *cid == PROBE_HELPER_CRASH_CID {
+        spawn_helper("reaped", false);
+        crash()
+    } else if *cid == PROBE_CHATTER_CID {
+        spawn_chatter("chatter", true);
+        block()
+    } else if *cid == PROBE_LONG_LINE_CID {
+        long_line()
     } else {
         return None;
     };
+    note_created();
     ComWrapper::new(Notes { shape, _live: Live::new(&OBJECTS) }).to_com_ptr::<FUnknown>()
+}
+
+/// Appends a line to `created.log` in the working folder: a test sees that a class was created
+/// (that its child got as far as loading the plug-in).
+fn note_created() {
+    use std::io::Write as _;
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("created.log") {
+        let _ = writeln!(f, "{}", std::process::id());
+    }
 }
 
 /// Ends the process at once, as a plug-in that crashes in its constructor does. Windows: an exit
@@ -177,9 +204,28 @@ fn block() -> ! {
 /// gives up after 3000 checks). `escape`: the helper starts in a process group of its own (Linux
 /// and macOS), as a process that leaves its parent's group on purpose does.
 fn spawn_helper(name: &str, escape: bool) {
+    spawn_role("--hold-output", name, escape);
+}
+
+/// Starts this program with `--chatter <name>`: like a helper from [`spawn_helper`], and it also
+/// writes a line to its standard output (inherited: the scan's pipe) every 10 ms until a write
+/// fails, which ends it. `escape` as for [`spawn_helper`].
+fn spawn_chatter(name: &str, escape: bool) {
+    spawn_role("--chatter", name, escape);
+}
+
+/// Writes 5 MiB without a line end to standard output (the scan's pipe), then blocks.
+fn long_line() -> ! {
+    use std::io::Write as _;
+    let _ = std::io::stdout().write_all(&vec![b'x'; 5 * 1024 * 1024]);
+    let _ = std::io::stdout().flush();
+    block()
+}
+
+fn spawn_role(role: &str, name: &str, escape: bool) {
     let Ok(exe) = std::env::current_exe() else { return };
     let mut c = std::process::Command::new(exe);
-    c.arg("--hold-output").arg(name).stdin(std::process::Stdio::null());
+    c.arg(role).arg(name).stdin(std::process::Stdio::null());
     #[cfg(unix)]
     if escape {
         use std::os::unix::process::CommandExt as _;
