@@ -168,9 +168,32 @@ pub fn rescan_in_background(clear_cache: bool) {
     api::rescan_in_background(clear_cache)
 }
 
-/// Whether a scan thread started by [`scan_in_background`] or [`rescan_in_background`] runs.
+/// Whether a scan started by [`scan_in_background`] or [`rescan_in_background`] is listing files.
+/// It ends when the listing is published; the probing that follows ([`probing`]) is not counted.
 pub fn scanning() -> bool {
     api::scanning()
+}
+
+/// Whether the scan thread is probing the published listing, or a probe pass is wanted (ADR 0064,
+/// decision 2.4): background work, one probe child at a time, that nothing waits for. Shown nowhere
+/// yet.
+pub fn probing() -> bool {
+    api::probing()
+}
+
+/// Runs `hook(id)` after each probe child answered or failed, before its outcome is published.
+/// Only for scan tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn set_probe_answered_hook(hook: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>) {
+    registry::set_probe_answered_hook(hook)
+}
+
+/// Whether the scan lock is free right now (a probe pass never holds it). Only for scan tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn scan_lock_is_free() -> bool {
+    registry::scan_lock_is_free()
 }
 
 /// The folders scans look in: the standard ones for this system (with `CLAP_PATH`), then the
@@ -220,7 +243,8 @@ pub fn scan_reply(file: &Path) -> String {
 /// `<program> --probe-clap <file> <plugin id>`; the program then prints [`probe_reply`] and
 /// exits. After a scan has listed every file and published the list, each listed plug-in that has
 /// no probe outcome yet (or whose probe failed in another app build) is probed in a child of its
-/// own, and each outcome is published as it arrives.
+/// own, one at a time on the scan thread after [`scanning`] has ended, and each outcome is published
+/// as it arrives. Nothing waits for it, and it never holds the lock a scan takes.
 pub const PROBE_FLAG: &str = "--probe-clap";
 
 /// The answer of a probe child process for one plug-in of one CLAP file: a line with its note

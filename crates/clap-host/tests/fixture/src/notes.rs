@@ -141,12 +141,19 @@ fn crash() -> ! {
     std::process::abort()
 }
 
-/// Never returns, as a plug-in waiting on a dialog or a licence server does; says so first in
-/// `blocking.mark` in the working folder.
+/// Does not return while its scan parent lives, as a plug-in waiting on a dialog or a license
+/// server does; says so first in `blocking.mark` in the working folder.
 fn block() -> ! {
     let _ = std::fs::write("blocking.mark", b"blocking in create_plugin");
+    // Until its scan parent stops it; if the parent itself is gone (a failed test), the next line
+    // written to the closed pipe fails and the child ends, so no orphan is left behind.
     loop {
         std::thread::sleep(std::time::Duration::from_secs(1));
+        use std::io::Write as _;
+        let mut out = std::io::stdout();
+        if writeln!(out, "fixture: still blocking").and_then(|()| out.flush()).is_err() {
+            std::process::exit(1);
+        }
     }
 }
 
