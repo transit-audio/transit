@@ -69,6 +69,10 @@ pub use shell::{attach_parent_console, cursor_in_client, set_app_user_model_id, 
 mod process;
 pub use process::terminate_process;
 
+/// Containing a helper child process and everything it starts, tied to the parent's lifetime
+/// (ADR 0064: the plug-in scan's listing and probe children).
+pub mod child_tree;
+
 /// Test support: counts OS promotion attempts and heap allocations ([`testing::CountingAlloc`]).
 /// Not in release builds (feature `testing`).
 #[cfg(any(test, feature = "testing"))]
