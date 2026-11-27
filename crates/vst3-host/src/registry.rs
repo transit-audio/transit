@@ -506,7 +506,7 @@ fn param_info(inst: &Instance, p: &RawParam, units: &std::collections::HashMap<i
 }
 
 /// Builds and leaks the `PluginInfo` for one plugin type. Called once per id (cached), outside the registry lock.
-fn build_info(d: &Vst3Descriptor, inst: &Instance) -> &'static PluginInfo {
+pub(crate) fn build_info(d: &Vst3Descriptor, inst: &Instance) -> &'static PluginInfo {
     let units = inst.unit_paths();
     let params: Vec<ParamInfo> = inst
         .params()

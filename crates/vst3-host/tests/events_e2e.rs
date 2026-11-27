@@ -224,6 +224,7 @@ fn a_saturated_instance_admits_and_delivers_every_owned_release() {
     ons.sort_unstable();
     offs.sort_unstable();
     assert_eq!(offs, ons, "every off with its on's id");
+    assert_eq!(transit_vst3_host::UNTRANSLATED.load(std::sync::atomic::Ordering::Relaxed), 0, "nothing dropped in translation");
 }
 
 /// ADR 0059, Decision 2 at the VST3 boundary: a `process` that returns an error is counted, its

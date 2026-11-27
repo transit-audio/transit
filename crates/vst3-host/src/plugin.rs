@@ -627,6 +627,8 @@ impl Vst3Plugin {
             maps,
             shared,
         };
+        #[cfg(test)]
+        CONSTRUCTED.set([p.delivery.capacity(), p.notes.capacity(), p.timed.capacity(), p.points.capacity(), p.batch.capacity()]);
         let shared = Arc::clone(&p.shared);
         let core = lock(&shared.core);
         let mut values = Vec::with_capacity(p.ids.len());
@@ -1289,6 +1291,14 @@ struct Vst3Editor {
     curves: Arc<ParamCurves>,
     /// The instance's `restartComponent` requests, serviced on each `idle`.
     shared: Weak<Shared>,
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// Test seam (ADR 0059 storage accounting): the capacities the last `Vst3Plugin::new` on this
+    /// thread allocated: delivery items, translated notes, timed points, merged points, host-value
+    /// batch.
+    pub(crate) static CONSTRUCTED: std::cell::Cell<[usize; 5]> = const { std::cell::Cell::new([0; 5]) };
 }
 
 #[cfg(test)]

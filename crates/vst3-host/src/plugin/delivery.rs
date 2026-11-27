@@ -19,6 +19,8 @@ impl Vst3Plugin {
             self.points.push(ParamPoint { time, id, class: 1, seq: self.seq, value, release: false });
         } else {
             self.untranslated = self.untranslated.saturating_add(1);
+            #[cfg(feature = "test-hooks")]
+            crate::UNTRANSLATED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         }
     }
 
@@ -66,6 +68,8 @@ impl Vst3Plugin {
                 self.notes.push(n);
             } else {
                 self.untranslated = self.untranslated.saturating_add(1);
+                #[cfg(feature = "test-hooks")]
+                crate::UNTRANSLATED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         }
     }

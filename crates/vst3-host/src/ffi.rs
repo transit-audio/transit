@@ -107,6 +107,8 @@ mod instance;
 mod module;
 #[cfg(target_os = "linux")]
 mod run_loop;
+#[cfg(test)]
+mod storage_tests;
 mod view;
 
 pub(crate) use events::*;

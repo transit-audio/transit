@@ -209,6 +209,7 @@ impl IComponentTrait for Synth {
         let mut n = 0;
         if unsafe { s.read(bytes.as_mut_ptr().cast(), 64, &mut n) } == kResultOk
             && let Ok(text) = std::str::from_utf8(&bytes[..n.max(0) as usize])
+            && !crate::audio_processor::record_command(std::ptr::from_ref(self) as usize, text)
         {
             self.command(text);
         }
@@ -225,6 +226,8 @@ impl IComponentTrait for Synth {
         }
         let Some(s) = (unsafe { ComRef::from_raw(state) }) else { return kInvalidArgument };
         let mut text = self.report().into_bytes();
+        // ADR 0059 R1: the record channel's log, when the instance records.
+        text.extend(crate::audio_processor::record_take(std::ptr::from_ref(self) as usize));
         let mut n = 0;
         unsafe { s.write(text.as_mut_ptr().cast(), text.len() as i32, &mut n) }
     }

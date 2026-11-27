@@ -34,32 +34,3 @@ fn process_status_follows_the_tail() {
     assert_eq!(status_from_tail(0), ProcessStatus::Tail);
     assert_eq!(status_from_tail(48_000), ProcessStatus::Tail);
 }
-
-/// ADR 0059 storage accounting at the VST3 adapter (review item 4): the shared ledger and queue,
-/// the translated buffers and the native lists one instance preallocates, against the previous
-/// implementation's. The COM header of each parameter queue object is not counted.
-#[test]
-fn storage_is_accounted_per_instance() {
-    use std::mem::size_of;
-    use transit_dsp::plugins::instrument_queue::{delivery, ledger};
-    let shared = ledger::ENTRIES * size_of::<Option<ledger::Entry>>() + ledger::ENTRIES * 2 + delivery::NATIVE_EVENTS * size_of::<delivery::Item>();
-    assert_eq!(shared, 117_504, "the shared ledger, free list and delivery items");
-    assert_eq!((size_of::<NoteEvent>(), size_of::<ParamPoint>(), size_of::<vst3::Steinberg::Vst::Event>()), (16, 24, 48));
-    let queue = |n: usize| n * (size_of::<usize>() + size_of::<crate::ffi::ParamQueue>()) + n * 16;
-    let translated = NATIVE_EVENTS * size_of::<NoteEvent>() + PARAM_POINTS * size_of::<ParamPoint>() + PARAM_QUEUE_CAP * 16;
-    let native = NATIVE_EVENTS * size_of::<vst3::Steinberg::Vst::Event>() + queue(PARAM_QUEUE_CAP);
-    let total = shared + translated + native;
-    // Before ADR 0059: the note queue and the controller points (EVENT_CAP each), the input list
-    // (EVENT_CAP) and parameter storage for MAX_PARAMS + 2 x EVENT_CAP.
-    let old_cap = crate::ffi::MAX_PARAMS as usize + 2 * EVENT_CAP;
-    let before = EVENT_CAP * (size_of::<NoteEvent>() + size_of::<ParamPoint>())
-        + old_cap * size_of::<ParamPoint>()
-        + old_cap * 16
-        + EVENT_CAP * size_of::<vst3::Steinberg::Vst::Event>()
-        + queue(old_cap);
-    assert_eq!(
-        (translated, native, total, before),
-        (343_680, 605_440, 1_066_624, 729_088),
-        "measured: translated {translated}, native {native}, total {total}, before {before}"
-    );
-}

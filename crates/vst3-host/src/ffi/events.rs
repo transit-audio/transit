@@ -114,6 +114,12 @@ impl Class for ParamChanges {
 impl ParamChanges {
     /// `cap` queues sharing a slab of `points` points (0 for output changes, which keep one
     /// inline point per queue).
+    /// Test seam (ADR 0059 storage accounting): the point slab's length as constructed.
+    #[cfg(test)]
+    pub(super) fn slab_len(&self) -> usize {
+        self.slab.len()
+    }
+
     pub(super) fn new(cap: usize, points: usize) -> ParamChanges {
         let slab: Slab = (0..points).map(|_| (AtomicI32::new(0), AtomicU64::new(0))).collect::<Vec<_>>().into();
         ParamChanges {

@@ -212,7 +212,24 @@ impl IAudioProcessorTrait for Synth {
             let out = unsafe { std::slice::from_raw_parts_mut(first, frames) };
             out.fill(0.0);
             let mut w = 0;
+            // ADR 0059 R1: an instance in record mode also logs every record (any block size),
+            // after a call marker; in stop mode it applies (records) only its first k and fails.
+            let key = std::ptr::from_ref(self) as usize;
+            let mut recordings = RECORDINGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let slot = recordings.iter().position(|r| r.key == key);
+            let stop = slot.and_then(|i| recordings.get_mut(i).and_then(|r| r.stop.take()));
+            if let Some(r) = slot.and_then(|i| recordings.get_mut(i)) {
+                r.records.push([9.0, frames as f32, 0.0, 0.0]);
+            }
+            let mut applied = 0u32;
             let mut put = |r: [f32; 4]| {
+                if stop.is_some_and(|k| applied >= k) {
+                    return;
+                }
+                applied += 1;
+                if let Some(log) = slot.and_then(|i| recordings.get_mut(i)) {
+                    log.records.push(r);
+                }
                 for x in r {
                     if let Some(o) = out.get_mut(w) {
                         *o = x;
@@ -282,6 +299,7 @@ impl IAudioProcessorTrait for Synth {
                 // SAFETY: The first SDK output channel remains live and has frames initialized samples.
                 o.copy_from_slice(unsafe { std::slice::from_raw_parts(first, frames) });
             }
+            fail |= stop.is_some();
             return if fail { kResultFalse } else { kResultOk };
         }
         let mut events = Vec::new();
@@ -332,4 +350,55 @@ impl IAudioProcessorTrait for Synth {
     unsafe fn getTailSamples(&self) -> u32 {
         0
     }
+}
+
+/// ADR 0059 R1 test channel of the events synth: one instance's record log, kept apart from its
+/// audio output so blocks of any size can be inspected, and a one-shot "apply the first k events,
+/// then fail" mode. Commands arrive as component states (`REC`, `STOP:<k>`); the log leaves with
+/// the component state after the marker `REC1` (a little-endian count, then `[f32; 4]` records; a
+/// record `[9, frames, 0, 0]` opens each call).
+pub(crate) struct Recording {
+    key: usize,
+    records: Vec<[f32; 4]>,
+    stop: Option<u32>,
+}
+
+pub(crate) static RECORDINGS: std::sync::Mutex<Vec<Recording>> = std::sync::Mutex::new(Vec::new());
+
+/// Handles a record-channel command for the instance at `key`; false for any other text.
+pub(crate) fn record_command(key: usize, text: &str) -> bool {
+    let mut all = RECORDINGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let i = match all.iter().position(|r| r.key == key) {
+        Some(i) => i,
+        None if text == "REC" || text.starts_with("STOP:") => {
+            all.push(Recording { key, records: Vec::new(), stop: None });
+            all.len() - 1
+        }
+        None => return false,
+    };
+    if text == "REC" {
+        true
+    } else if let Some(k) = text.strip_prefix("STOP:").and_then(|k| k.parse().ok()) {
+        if let Some(r) = all.get_mut(i) {
+            r.stop = Some(k);
+        }
+        true
+    } else {
+        false
+    }
+}
+
+/// The instance's log since the last call, as the bytes appended to its component state.
+pub(crate) fn record_take(key: usize) -> Vec<u8> {
+    let mut all = RECORDINGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let Some(r) = all.iter_mut().find(|r| r.key == key) else { return Vec::new() };
+    let records = std::mem::take(&mut r.records);
+    let mut out = b"REC1".to_vec();
+    out.extend_from_slice(&(records.len() as u32).to_le_bytes());
+    for rec in records {
+        for x in rec {
+            out.extend_from_slice(&x.to_le_bytes());
+        }
+    }
+    out
 }
