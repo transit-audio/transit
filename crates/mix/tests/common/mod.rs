@@ -3,7 +3,7 @@
 //! instrument writes down every event it receives with its absolute render frame.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use transit_dsp::Plugin;
 use transit_mix::{
@@ -48,6 +48,12 @@ struct Recorder {
     errors: u64,
     /// Every event the instrument admitted: (frames rendered so far, event).
     admitted: Admitted,
+    /// With ADR 0059 admission (the shared ledger): a contract-conforming instrument that refuses
+    /// starts at a full ledger and settles each call's events. Refusals are counted.
+    owned: Option<transit_dsp::plugins::instrument_queue::delivery::Delivery>,
+    refused: Arc<AtomicU64>,
+    /// With `owned` and `err`: how many of the failing call's events it applied.
+    apply: Arc<AtomicUsize>,
 }
 
 /// What a recording instrument admitted through `event`: (frames it had rendered, event).
@@ -63,6 +69,9 @@ impl Plugin for Recorder {
     /// As real hosts do: pending non-releases are dropped, releases (and `all_notes_off`) are
     /// kept for the next block, so a mix that relies on a reset to drop a release is caught.
     fn reset(&mut self) {
+        if let Some(d) = self.owned.as_mut() {
+            d.reset();
+        }
         self.pending.retain(|(_, e)| e.is_none_or(|e| e.message.survives_reset()));
     }
     fn set_param(&mut self, id: &str, v: f32) -> bool {
@@ -72,14 +81,28 @@ impl Plugin for Recorder {
         self.inner.param(id)
     }
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        let erring = self.err.load(Ordering::Relaxed);
         let mut heard = self.heard.lock().unwrap();
+        if let Some(d) = self.owned.as_mut() {
+            // What the call delivers, in order: all of it, or with a processing error only the
+            // first `apply` events (a plug-in that applied part of its call before failing).
+            let n = u32::try_from(frames).unwrap_or(u32::MAX);
+            d.prepare(n);
+            let applied = if erring { self.apply.load(Ordering::Relaxed) } else { usize::MAX };
+            for it in d.batch(n).iter().take(applied) {
+                heard.push((self.instance, self.rendered + u64::from(it.offset), Some(it.event)));
+            }
+            d.finish(!erring);
+            d.carry();
+            self.pending.clear();
+        }
         // Stable by offset, as hosts sort.
         self.pending.sort_by_key(|(o, _)| *o);
         for (o, e) in self.pending.drain(..) {
             heard.push((self.instance, self.rendered + u64::from(o), e));
         }
+        drop(heard);
         self.rendered += frames as u64;
-        let erring = self.err.load(Ordering::Relaxed);
         if erring {
             self.errors += 1;
         }
@@ -100,6 +123,12 @@ impl Plugin for Recorder {
         {
             return false;
         }
+        if let Some(d) = self.owned.as_mut()
+            && !d.admit(offset, ev)
+        {
+            self.refused.fetch_add(1, Ordering::Relaxed);
+            return false;
+        }
         self.pending.push((offset, Some(*ev)));
         self.admitted.lock().unwrap().push((self.rendered, *ev));
         true
@@ -108,6 +137,9 @@ impl Plugin for Recorder {
         self.errors
     }
     fn all_notes_off(&mut self) {
+        if let Some(d) = self.owned.as_mut() {
+            d.all_notes_off();
+        }
         self.pending.push((0, None));
     }
 }
@@ -128,6 +160,10 @@ pub(super) struct Rig {
     pub(super) refuse_downs: Arc<AtomicBool>,
     pub(super) err: Arc<AtomicBool>,
     pub(super) admitted: Admitted,
+    /// Instances made after this is set admit through the shared ledger (ADR 0059).
+    pub(super) owned: Arc<AtomicBool>,
+    pub(super) refused: Arc<AtomicU64>,
+    pub(super) apply: Arc<AtomicUsize>,
 }
 
 pub(super) fn instrument_session(id: &str) -> (Session, TrackId) {
@@ -161,6 +197,9 @@ impl Rig {
             err: Arc::default(),
             // Reserved, so the instrument's log never allocates on the audio thread.
             admitted: Arc::new(Mutex::new(Vec::with_capacity(1 << 16))),
+            owned: Arc::default(),
+            refused: Arc::default(),
+            apply: Arc::default(),
         };
         let s = rig.session.clone();
         rig.publish(&s);
@@ -179,6 +218,7 @@ impl Rig {
         let (heard, made, fail) = (Arc::clone(&self.heard), Arc::clone(&self.made), Arc::clone(&self.fail));
         let (refuse_releases, refuse_downs) = (Arc::clone(&self.refuse_releases), Arc::clone(&self.refuse_downs));
         let (err, admitted) = (Arc::clone(&self.err), Arc::clone(&self.admitted));
+        let (owned, refused, apply) = (Arc::clone(&self.owned), Arc::clone(&self.refused), Arc::clone(&self.apply));
         let mut make = move |spec: &InstanceSpec, _: SlotGen| -> Option<NewInstance> {
             let mut inner = transit_dsp::create("gain")?;
             inner.prepare(SR as f32, BLOCK, spec.ch);
@@ -196,6 +236,9 @@ impl Rig {
                 err: Arc::clone(&err),
                 errors: 0,
                 admitted: Arc::clone(&admitted),
+                owned: owned.load(Ordering::Relaxed).then(|| transit_dsp::plugins::instrument_queue::delivery::Delivery::new(false)),
+                refused: Arc::clone(&refused),
+                apply: Arc::clone(&apply),
             });
             Some(NewInstance { plugin, refused_state: false })
         };
