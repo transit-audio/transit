@@ -43,6 +43,13 @@ pub fn prepare(command: &mut Command) {
 
 /// A contained child's process tree. Dropping it kills what is left of the tree (on Linux and
 /// macOS only while its child is unreaped, as [`Tree::kill`]).
+///
+/// On Linux and macOS the guarantee that a kill reaches this tree and nothing else holds only
+/// while the caller has not reaped the child that leads it and nothing else in the process waits
+/// for children (no other `wait`, no reaping `SIGCHLD` disposition): the group id is the child's,
+/// and only an unreaped child keeps it reserved. [`Tree::kill`] checks that the child is still an
+/// unreaped child of this process; it cannot tell the original child from a later child that was
+/// given the same id after a reap by someone else.
 pub struct Tree {
     #[cfg(windows)]
     job: windows_sys::Win32::Foundation::HANDLE,
@@ -200,8 +207,9 @@ mod imp {
 
     pub fn close(tree: &mut Tree) {
         // SAFETY: the handle is owned by this `Tree` and closed exactly once, here, from `Drop`.
-        // A `Tree` exists only once its job's kill-on-close limit is set (`contain` returns the
-        // error otherwise), so closing it ends whatever is left in the job.
+        // When the kill-on-close limit was set, closing it ends whatever is left in the job; on
+        // `contain`'s error paths (the limit or the assignment failed) no child was assigned to
+        // the job yet, so closing it leaves nothing behind either.
         unsafe { CloseHandle(tree.job) };
     }
 
@@ -270,8 +278,9 @@ mod imp {
         if r != 0 {
             return None;
         }
-        // SAFETY: `waitid` succeeded and filled `info` (zeroed when the child has not ended), so
-        // its pid field is initialized.
+        // SAFETY: the pid field is initialized: by `waitid` when it reports an ended child, and
+        // otherwise by the zeroing above (on a "nothing has ended" return some systems leave
+        // `info` untouched).
         Some(unsafe { info.si_pid() } != 0)
     }
 
