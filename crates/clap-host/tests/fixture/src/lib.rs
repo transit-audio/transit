@@ -527,7 +527,7 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
             assert!(h.time >= last_time, "events not sorted");
             assert!((h.time as usize) < n, "event time outside the block");
             last_time = h.time;
-            if h.space_id != CLAP_CORE_EVENT_SPACE_ID || stop_after::skip(p as usize, k, h, &mut error_once) {
+            if h.space_id != CLAP_CORE_EVENT_SPACE_ID || stop_after::skip(p as usize, k, h, &mut error_once, &mut f.param_log) {
                 continue;
             }
             let (code, a, b) = match h.type_ {

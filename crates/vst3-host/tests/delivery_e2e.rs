@@ -299,6 +299,16 @@ fn capacity_cases_refuse_nothing_at_every_size() {
         }
         let (recs, refused) = play(&mut p, &script, size, 512);
         assert_eq!(refused, 0, "200/200 at size {size}");
+        // The native sequences: the 200 first ons, each off at its frame with its on's id and
+        // key, then each replacement on at its frame (notes only: nothing is separated).
+        let ons: Vec<&Rec> = recs.iter().filter(|r| r.code == 1 && r.frame == 0).collect();
+        let offs: Vec<&Rec> = recs.iter().filter(|r| r.code == 2).collect();
+        let later: Vec<&Rec> = recs.iter().filter(|r| r.code == 1 && r.frame > 0).collect();
+        assert_eq!((ons.len(), offs.len(), later.len()), (200, 200, 200), "size {size}");
+        for k in 0..200usize {
+            assert_eq!((offs[k].frame, offs[k].a, offs[k].b), (1 + k as u64, ons[k].a, ons[k].b), "off {k} at size {size}");
+            assert_eq!((later[k].frame, later[k].a), (201 + k as u64, 20 + (k / 16) as u32), "replacement on {k} at size {size}");
+        }
         let v = read(&recs, true);
         assert_eq!(v.sounding(), 200);
         // 256 notes and 64 pedals held, then 96 x CC 121 on channel 0 with presses of its four pedals.
@@ -323,6 +333,16 @@ fn capacity_cases_refuse_nothing_at_every_size() {
         }
         let (recs, refused) = play(&mut p, &script, size, 1024);
         assert_eq!(refused, 0, "96 x CC 121 at size {size}");
+        // Channel 0's pedal and reset points by frame, after its four first presses: per cycle the
+        // four implied releases (oldest first), the reset, then the four presses, each on its own
+        // frame (3b), in that order.
+        let mut ch0: Vec<(u64, u32, i64)> =
+            recs.iter().filter(|r| r.code == 4 && [100, 200, 300, 400, 600].contains(&r.a)).map(|r| (r.frame, r.a, r.b)).collect();
+        ch0.sort_unstable();
+        let cycles: Vec<(u32, i64)> = ch0.iter().skip(4).map(|x| (x.1, x.2)).collect();
+        let one = [(100, 0), (200, 0), (300, 0), (400, 0), (600, 0), (100, 1_000_000), (200, 1_000_000), (300, 1_000_000), (400, 1_000_000)];
+        assert_eq!(cycles, one.repeat(96), "channel 0's releases, resets and presses at size {size}");
+        assert!(ch0.windows(2).all(|w| w[0].0 < w[1].0), "each on its own frame at size {size}");
         let v = read(&recs, true);
         assert!([64, 66, 67, 69].iter().all(|c| v.down(*c)), "channel 0's pedals end pressed at size {size}");
     }
@@ -379,7 +399,21 @@ fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() 
         }
         p.process(&mut io, 64); // applies its first k records, then fails
         assert_eq!(p.process_errors(), 1, "k = {k}");
-        recs.extend(log(&mut p, &mut base));
+        // The fixture reads a call's note events before its parameter points, so the failed call's
+        // native order is [off A, on B, pedal up, pedal down] (not the arrival order): k = 1 cuts
+        // inside the notes, k = 3 inside the points. Its record channel shows exactly that prefix.
+        let failed = log(&mut p, &mut base);
+        let id_a = recs.iter().find(|r| r.code == 1 && r.a == 60).unwrap().b;
+        let got: Vec<(u32, u32)> = failed.iter().map(|r| (r.code, r.a)).collect();
+        let want: Vec<(u32, u32)> = [(2, 60), (1, 62), (4, 100), (4, 100)].into_iter().take(k as usize).collect();
+        assert_eq!(got, want, "k = {k}: the applied prefix: {failed:?}");
+        let values: Vec<i64> = failed.iter().filter(|r| r.code == 4).map(|r| r.b).collect();
+        assert_eq!(values, [0, 1_000_000][..values.len()], "the up, then the down");
+        if let Some(r) = failed.iter().find(|r| r.code == 2) {
+            assert_eq!(r.b, id_a, "the applied off carries A's note id");
+        }
+        let id_b = failed.iter().find(|r| r.code == 1).map(|r| r.b);
+        recs.extend(failed);
         // Before Stop, the next call already carries the owed releases: the pedal's up (the
         // handed press and the handed release are both owed again) and the notes' offs.
         p.process(&mut io, 64);
@@ -387,6 +421,9 @@ fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() 
         assert!(owed.iter().any(|r| r.code == 4 && r.a == 100 && r.b == 0), "k = {k}: the owed pedal release reached the plug-in: {owed:?}");
         let offs: BTreeSet<u32> = owed.iter().filter(|r| r.code == 2).map(|r| r.a).collect();
         assert_eq!(offs, BTreeSet::from([60, 62]), "k = {k}: the owed note-offs");
+        if let Some(b) = id_b {
+            assert!(owed.iter().any(|r| r.code == 2 && r.a == 62 && r.b == b), "k = {k}: the recovery releases B's identity");
+        }
         recs.extend(owed);
         p.all_notes_off();
         p.reset();

@@ -415,11 +415,15 @@ fn a_saturated_call_delivers_every_admitted_event() {
 fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() {
     for k in 0..=4u32 {
         let mut p = plugin(64);
+        assert!(p.load_state(b"CMD:log-start"), "the record channel");
+        let _ = p.save_state();
         let n = NoteId::NONE;
         let mut all = Vec::new();
         assert!(p.event(0, &ev(0, -1, Message::Control { cc: 64, value: 127 })));
         assert!(p.event(0, &ev(0, -1, Message::NoteOn { key: 60, velocity: 100, id: n })));
         all.extend(records(&mut p, 64));
+        let _ = applied(&mut p);
+        let id_a = all.iter().find(|r| r.0 == 1 && r.2 == 60).unwrap().3;
         for e in [
             ev(0, -1, Message::Control { cc: 64, value: 0 }),
             ev(0, -1, Message::Control { cc: 64, value: 127 }),
@@ -433,10 +437,21 @@ fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() 
         p.process(&mut io, 64);
         assert_eq!(p.process_errors(), 1, "k = {k}");
         assert!(io.iter().flatten().all(|v| *v == 0.0), "the failed call is silent");
-        // The plug-in applied the first k events of its list (we cannot read the failed call's
-        // output, the host silenced it), so model all prefixes: the owed releases must end every
-        // one of them.
+        // What the failed call applied, through the record channel: exactly the first k of its
+        // native list, in arrival order (CLAP: one time-sorted list), with the entries' note ids.
+        let prefix = applied(&mut p);
+        let want: Vec<(u32, i64)> = [(5, 0xB0_40_00), (5, 0xB0_40_7F), (2, 60), (1, 62)].into_iter().take(k as usize).collect();
+        assert_eq!(prefix.iter().map(|r| (r.0, r.2)).collect::<Vec<_>>(), want, "k = {k}: the applied prefix");
+        if let Some(off_a) = prefix.iter().find(|r| r.0 == 2) {
+            assert_eq!(off_a.3, id_a, "the applied off carries A's note id");
+        }
+        let id_b = prefix.iter().find(|r| r.0 == 1).map(|r| r.3);
+        all.extend(prefix);
         let owed = records(&mut p, 64);
+        let _ = applied(&mut p);
+        if let Some(b) = id_b {
+            assert!(owed.iter().any(|r| r.0 == 2 && r.2 == 62 && r.3 == b), "k = {k}: the recovery releases B's identity: {owed:?}");
+        }
         assert!(owed.contains(&(5, 0, 0xB0_40_00, 0)), "k = {k}: the owed pedal release before Stop: {owed:?}");
         let mut offs: Vec<i64> = owed.iter().filter(|x| x.0 == 2).map(|x| x.2).collect();
         offs.sort_unstable();
@@ -445,6 +460,7 @@ fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() 
         p.all_notes_off();
         p.reset();
         all.extend(records(&mut p, 64));
+        let _ = applied(&mut p);
         // Held notes (by note id) and the sustain pedal, from what reached the plug-in, with every
         // possible applied prefix of the failed call (on B may or may not have sounded).
         let mut held = std::collections::BTreeSet::new();
@@ -472,4 +488,18 @@ fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() 
         assert!(held.is_empty() && sustained.is_empty() && !pedal, "k = {k}: held {held:?}, sustained {sustained:?}, pedal {pedal}");
         assert_eq!(transit_clap_host::UNTRANSLATED.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
+}
+
+/// What the plug-in applied since the last read, through its record channel: (code, time, a, b),
+/// as `records` decodes the output.
+fn applied(p: &mut Box<dyn Plugin>) -> Vec<(u32, u32, i64, i64)> {
+    let state = p.save_state().unwrap();
+    String::from_utf8_lossy(state.get(16..).unwrap_or(&[]))
+        .lines()
+        .filter_map(|l| l.strip_prefix("REC "))
+        .map(|l| {
+            let f: Vec<i64> = l.split(' ').map(|x| x.parse().unwrap()).collect();
+            (f[1] as u32, f[0] as u32, f[2], f[3])
+        })
+        .collect()
 }
