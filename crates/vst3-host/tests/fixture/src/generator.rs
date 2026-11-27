@@ -22,7 +22,8 @@
 //! - `REFUSE`: `setActive(true)` fails from now on.
 //!
 //! Its component state is the log since the last read, one line per record:
-//! `setActive <s> -> <0|1>`, `setProcessing <s> -> <result>`,
+//! `activateBus <media> <direction> <index> <state>`, `setActive <s> -> <0|1>`,
+//! `setProcessing <s> -> <result>`,
 //! `process <call> n=<frames> in=<numInputs> out=<numOutputs> inptr=<0|1> outptr=<0|1>
 //! pts=<projectTimeSamples> ptm=<projectTimeMusic>`, `in <on|off|pp> <offset> <channel> <pitch>
 //! <id>`, `point <param> <offset> <value x 1e6>`, `wrote <what> <offset> -> <result>`,
@@ -210,7 +211,8 @@ impl IComponentTrait for Gen {
     unsafe fn getRoutingInfo(&self, _i: *mut RoutingInfo, _o: *mut RoutingInfo) -> tresult {
         kNotImplemented
     }
-    unsafe fn activateBus(&self, _m: MediaType, _d: BusDirection, _i: i32, _s: TBool) -> tresult {
+    unsafe fn activateBus(&self, m: MediaType, d: BusDirection, i: i32, state: TBool) -> tresult {
+        self.st().log.push(format!("activateBus {m} {d} {i} {state}"));
         kResultOk
     }
     unsafe fn setActive(&self, state: TBool) -> tresult {

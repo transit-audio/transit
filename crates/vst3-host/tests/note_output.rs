@@ -113,6 +113,9 @@ fn every_scripted_event_comes_out_with_its_signed_addresses_at_its_call_start_in
 fn the_first_event_bus_is_read_and_another_bus_is_dropped_and_counted() {
     let _serial = serial();
     let mut p = generator();
+    // Configured with event output bus 0 activated beside the input bus (media 1: events; direction
+    // 1: output).
+    assert!(log(&mut p).iter().any(|l| l == "activateBus 1 1 0 1"), "event output bus 0 activated");
     assert_eq!(p.note_output(), Some(NoteOutputInfo { read: 0, declared: 1 }));
     let silent = make(common::notes_fixture_dir(), "Fixture Notes Silent");
     assert_eq!(silent.note_output(), None, "no event output bus: no readable note output");
