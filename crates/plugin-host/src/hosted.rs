@@ -164,6 +164,12 @@ impl Drop for Hosted {
     }
 }
 
+/// With no plug-in loaded (ADR 0059, Decision 2): a release is accepted as nothing (there is no
+/// voice it could leave sounding), a start or any other event is refused.
+fn without_plugin(ev: &PluginEvent) -> bool {
+    ev.message.survives_reset()
+}
+
 impl Plugin for Hosted {
     fn service_idle_state(&mut self) {
         if let Some(p) = &mut self.inner {
@@ -254,7 +260,10 @@ impl Plugin for Hosted {
         }
     }
     fn event(&mut self, offset: u32, ev: &PluginEvent) -> bool {
-        self.inner.as_mut().is_some_and(|p| p.event(offset, ev))
+        match self.inner.as_mut() {
+            Some(p) => p.event(offset, ev),
+            None => without_plugin(ev),
+        }
     }
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
         self.inner.as_mut().is_some_and(|p| p.set_param_at(offset, id, value))
@@ -538,5 +547,28 @@ impl PluginStateReader for RemoteState {
             JobPoll::Waiting => JobPoll::Waiting,
             JobPoll::Failed(e) => JobPoll::Failed(e),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::without_plugin;
+    use transit_dsp::event::{Message, NoteId, PluginEvent};
+
+    #[test]
+    fn with_no_plug_in_releases_are_accepted_and_starts_refused() {
+        let ev = |message| PluginEvent { channel: 3, note_id: 7, message };
+        let id = NoteId::NONE;
+        assert!(without_plugin(&ev(Message::NoteOff { key: 60, velocity: 0, id })), "an owned note-off");
+        assert!(without_plugin(&ev(Message::NoteOn { key: 60, velocity: 0, id })), "a velocity-0 note-on");
+        for cc in [64, 66, 67, 69] {
+            assert!(without_plugin(&ev(Message::Control { cc, value: 0 })), "pedal {cc} up");
+            assert!(!without_plugin(&ev(Message::Control { cc, value: 127 })), "pedal {cc} down is a start");
+        }
+        for cc in [120, 121, 123] {
+            assert!(without_plugin(&ev(Message::Control { cc, value: 0 })), "safety controller {cc}");
+        }
+        assert!(!without_plugin(&ev(Message::NoteOn { key: 60, velocity: 100, id })), "a note-on is refused");
+        assert!(!without_plugin(&ev(Message::Control { cc: 1, value: 3 })), "an ordinary controller is refused");
     }
 }
