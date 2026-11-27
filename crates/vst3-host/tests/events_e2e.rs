@@ -166,7 +166,9 @@ fn a_reset_keeps_the_pedal_up_and_the_note_off() {
     assert!(p.event(0, &ev(0, 5, Message::NoteOn { key: 60, velocity: 100, id: n })));
     let r = records(&mut p, 256);
     let id = r.iter().find(|x| x.0 == 1).map(|x| x.3).unwrap();
-    assert!(r.contains(&(4, 0, 100, 1_000_000)) && r.contains(&(1, 0, 60, id)), "down and on reached: {r:?}");
+    // ADR 0059, 3b: a pedal edge and a note event of one channel at one frame go on successive
+    // frames at VST3, in arrival order.
+    assert!(r.contains(&(4, 0, 100, 1_000_000)) && r.contains(&(1, 1, 60, id)), "down at 0 and on at 1 reached: {r:?}");
     assert!(p.event(0, &ev(0, -1, Message::Control { cc: 64, value: 0 })));
     assert!(p.event(0, &ev(0, 5, Message::NoteOff { key: 60, velocity: 0, id: n })));
     assert!(p.event(0, &ev(1, -1, Message::Control { cc: 64, value: 127 })), "a non-release, dropped by the reset");
@@ -174,6 +176,6 @@ fn a_reset_keeps_the_pedal_up_and_the_note_off() {
     p.reset();
     let r = records(&mut p, 256);
     assert!(r.contains(&(4, 0, 100, 0)), "the pedal-up survives the reset: {r:?}");
-    assert!(r.contains(&(2, 0, 60, id)), "the note-off survives the reset: {r:?}");
+    assert!(r.contains(&(2, 1, 60, id)), "the note-off survives the reset, one frame after the pedal-up: {r:?}");
     assert!(!r.iter().any(|x| x.0 == 4 && x.2 == 101), "non-releases do not: {r:?}");
 }

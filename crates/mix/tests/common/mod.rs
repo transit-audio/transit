@@ -159,7 +159,8 @@ impl Rig {
             refuse_releases: Arc::default(),
             refuse_downs: Arc::default(),
             err: Arc::default(),
-            admitted: Arc::default(),
+            // Reserved, so the instrument's log never allocates on the audio thread.
+            admitted: Arc::new(Mutex::new(Vec::with_capacity(1 << 16))),
         };
         let s = rig.session.clone();
         rig.publish(&s);
