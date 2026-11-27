@@ -286,6 +286,9 @@ fn aux_chains_folders_inactive_tracks_and_two_masters_match_the_golden() {
 /// Filter follows the transposed notes) and with the Filter's mode and slope changed.
 /// Re-captured for #280: cutoff 250 Hz and resonance 55 are initial state. Full renders differ
 /// only at frames 84..=12312 (max 0.26759103685617447), then match through frame 18431.
+/// Re-captured for ADR 0057 slice P3a (decision 2.13): adding the track's first MIDI effect ends
+/// the clip note the mix gave the instrument directly (48, sounding at the add, frame 6144), which
+/// before kept sounding past the add.
 #[test]
 fn a_filter_reading_the_tracks_notes_matches_the_golden() {
     let mut s = Session::default();

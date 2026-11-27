@@ -279,3 +279,20 @@ fn a_release_the_instrument_refuses_is_given_again_next_block() {
     assert_eq!((host.counts.refused, host.counts.retry_overflow), (1, 0));
     assert!(!host.pending());
 }
+
+#[test]
+fn with_no_effects_the_host_stays_active_while_it_holds_a_note_it_started() {
+    // ADR 0057, slice P3a: the host stays active with no stages while `given`, `out` or the retry
+    // buffer holds anything, so the release of a note it started still reaches its table (and a
+    // later edit does not end the note a second time).
+    let t = track(&[]);
+    let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
+    host.out[0] = Note { used: true, channel: 0, key: 60, voice: 7, epoch: 0 };
+    assert_eq!((host.len, host.given_len, host.retry_len), (0, 0, 0));
+    assert!(host.active(), "a note it started keeps it active");
+    host.begin(&mut rec, &t, None, 0, &Transport::default(), 48_000.0, 0, FRAMES);
+    assert!(host.take(&mut rec, 3, &off(7, 60)));
+    host.flush(&mut rec);
+    assert_eq!(notes(&rec), vec![(0, 3, "off", 60, 0)]);
+    assert!(!host.active(), "its release cleared the entry");
+}

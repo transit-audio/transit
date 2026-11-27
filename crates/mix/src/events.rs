@@ -435,6 +435,10 @@ struct NoteEntry {
     release_queued: bool,
     /// A refused off, retained until the host accepts it (including its release velocity).
     retry_release: Option<u8>,
+    /// Its voice was given to the instrument directly (no MIDI effect host was active) and a chain
+    /// was installed since (ADR 0057 slice P3a): its retried off goes to the instrument directly,
+    /// never through the chain.
+    direct: bool,
     /// Due frame of its latest queued note-on: its release is never ordered before it.
     last_on: u64,
 }
@@ -449,6 +453,7 @@ const NO_NOTE: NoteEntry = NoteEntry {
     open: 0,
     release_queued: false,
     retry_release: None,
+    direct: false,
     last_on: 0,
 };
 
@@ -474,11 +479,25 @@ struct PedalEntry {
     release_queued: bool,
     /// A refused up: the holder stays down until this exact value is accepted.
     retry_release: Option<u8>,
+    /// A holder from before a chain edit (ADR 0057, 2.13): the edit released the instrument's
+    /// pedal and presses nothing again, so it no longer counts toward the maximum, its values
+    /// while it stays down change nothing and its release sends nothing.
+    stale: bool,
     last_down: u64,
 }
 
-const NO_PEDAL: PedalEntry =
-    PedalEntry { used: false, source: CLIP_SOURCE, cc: 0, down: false, value: 0, downs: 0, release_queued: false, retry_release: None, last_down: 0 };
+const NO_PEDAL: PedalEntry = PedalEntry {
+    used: false,
+    source: CLIP_SOURCE,
+    cc: 0,
+    down: false,
+    value: 0,
+    downs: 0,
+    release_queued: false,
+    retry_release: None,
+    stale: false,
+    last_down: 0,
+};
 
 /// Index of a pedal kind in the holder counts.
 fn pedal_kind(cc: u8) -> usize {
@@ -809,8 +828,14 @@ impl InstrumentEvents {
 
     /// Hands one event to the plug-in, counting a refusal.
     fn send(&mut self, plugin: &mut dyn Plugin, offset: u32, channel: u8, note_id: i32, message: Message) -> bool {
+        self.send_via(plugin, offset, channel, note_id, message, false)
+    }
+
+    /// [`Self::send`]; `direct`: to the instrument even while the MIDI effect host is active (a
+    /// voice the mix gave it directly, ended or retried after a chain was installed, ADR 0057 P3a).
+    fn send_via(&mut self, plugin: &mut dyn Plugin, offset: u32, channel: u8, note_id: i32, message: Message, direct: bool) -> bool {
         let ev = PluginEvent { channel, note_id, message };
-        let ok = if self.fx.active() { self.fx.take(plugin, offset, &ev) } else { self.fx.give(plugin, offset, &ev) };
+        let ok = if self.fx.active() && !direct { self.fx.take(plugin, offset, &ev) } else { self.fx.give(plugin, offset, &ev) };
         if !ok {
             let i = usize::from(ev.is_release());
             if let Some(n) = self.status.host_refused.get_mut(i) {
@@ -847,7 +872,9 @@ impl InstrumentEvents {
     /// Frees entry `n` only once its voice's off is accepted; otherwise retries next block.
     fn deliver_off(&mut self, plugin: &mut dyn Plugin, offset: u32, n: usize, velocity: u8) {
         let Some(e) = self.notes.get(n).copied() else { return };
-        if e.voice >= 0 && !self.send(plugin, offset, e.source.channel, e.voice, Message::NoteOff { key: e.key, velocity, id: e.sender }) {
+        if e.voice >= 0
+            && !self.send_via(plugin, offset, e.source.channel, e.voice, Message::NoteOff { key: e.key, velocity, id: e.sender }, e.direct)
+        {
             if let Some(e) = self.notes.get_mut(n) {
                 e.retry_release = Some(velocity);
                 e.release_queued = true;
@@ -863,6 +890,7 @@ impl InstrumentEvents {
                 e.voice = -1;
                 e.open = e.ons;
                 e.retry_release = None;
+                e.direct = false;
                 e.release_queued = release_queued;
             }
         }
@@ -874,6 +902,16 @@ impl InstrumentEvents {
     /// in between. One holder's continuous values pass through. Unchanged output is absorbed (counted).
     fn pedal_set(&mut self, plugin: &mut dyn Plugin, offset: u32, n: usize, value: u8) {
         let Some(p) = self.pedals.get(n).copied() else { return };
+        // A holder from before a chain edit: the instrument's pedal is already up and nothing is
+        // pressed again; its release only frees the entry (ADR 0057, 2.13).
+        if p.stale {
+            if value < 64
+                && let Some(p) = self.pedals.get_mut(n)
+            {
+                *p = NO_PEDAL;
+            }
+            return;
+        }
         let ch = p.source.channel & 0x0F;
         let kind = pedal_kind(p.cc);
         // A refused down never became a holder and must not spend a host release slot.
@@ -888,7 +926,7 @@ impl InstrumentEvents {
             .pedals
             .iter()
             .enumerate()
-            .filter(|(i, q)| *i != n && q.used && q.down && q.cc == p.cc && q.source.channel & 0x0F == ch)
+            .filter(|(i, q)| *i != n && q.used && q.down && !q.stale && q.cc == p.cc && q.source.channel & 0x0F == ch)
             .map(|(_, q)| q.value)
             .max();
         let out = if value >= 64 { other.map_or(value, |v| v.max(value)) } else { other.unwrap_or(value) };
@@ -1172,6 +1210,7 @@ impl InstrumentEvents {
                         open: 0,
                         release_queued: false,
                         retry_release: None,
+                        direct: false,
                         last_on: 0,
                     };
                 }
@@ -1322,6 +1361,7 @@ pub(crate) fn message_from_midi1(msg: [u8; 3]) -> Option<Message> {
     })
 }
 
+mod chain_edit;
 mod engine;
 pub(crate) use engine::EngineEvents;
 #[cfg(feature = "testing")]

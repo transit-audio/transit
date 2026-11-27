@@ -19,12 +19,18 @@
 //! event. A chain whose every effect is bypassed gives the instrument exactly the events, offsets
 //! and order it would get with no chain.
 //!
-//! **Edits end the chain's notes.** Adding, removing, moving or bypassing an effect changes what
-//! a note's release would go through, so at the first block after such an edit the host sends a
-//! note-off for every note it started on the instrument (it tracks them), forgets carried events,
-//! and swallows the later releases of notes that started before the edit. A parameter change is
-//! not an edit: each effect pairs its own notes (Transpose remembers each note's shift). Stop and
-//! panic do the same before the mix releases its sources.
+//! **Edits end the track's voices (ADR 0057, decision 2.13, slice P3a).** Adding, removing,
+//! moving or bypassing an effect changes what a note's release would go through, so in the block
+//! where the new chain is installed, before any of that block's events and all at offset 0: the
+//! host sends a note-off for every note it started on the instrument (it tracks them), forgets
+//! carried events, resets every effect and swallows the later releases of notes that started
+//! before the edit; at the first insertion (the host was inactive, so the mix gave its notes to
+//! the instrument directly) the mix ends those voices through its own note table; then the host
+//! gives a pedal-up for every pedal the instrument holds down (`edit`), and the mix presses
+//! none again (its holders are marked stale). Expression is kept: nothing else is sent. A
+//! parameter change is not an edit: each effect pairs its own notes (Transpose remembers each
+//! note's shift). Stop and panic end the chain's notes the same way before the mix releases its
+//! sources, without the edit's pedal-ups.
 //!
 //! **Capacity.** A block takes at most [`MIDI_FX_BLOCK`] events into the chain and each effect
 //! writes at most as many; each effect carries at most [`MIDI_FX_CARRY`] events to later blocks;
@@ -50,6 +56,7 @@ use transit_time::Samples;
 
 use crate::note_view::NoteView;
 
+mod edit;
 mod output;
 use output::Output;
 
@@ -194,6 +201,16 @@ pub(crate) struct MidiFxHost {
     /// because every event to the instrument leaves through this host or past it
     /// ([`MidiFxHost::give`]).
     pub(crate) notes: NoteView,
+    /// The instrument's pedal values as it accepted them, for a chain edit's pedal-ups (`edit`).
+    pedals: edit::PedalTable,
+}
+
+/// What [`MidiFxHost::begin`] found: the chain changed. `first`: the host was inactive before
+/// (the first insertion, ADR 0057 slice P3a), so the mix gave its notes to the instrument
+/// directly and ends them through its own table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChainEdit {
+    pub(crate) first: bool,
 }
 
 fn fnv(s: &str) -> u64 {
@@ -255,12 +272,14 @@ impl MidiFxHost {
             epoch: 0,
             counts: MidiFxCounts::default(),
             notes: NoteView::new(),
+            pedals: edit::PedalTable::new(),
         })
     }
 
-    /// Events go through the host: it has effects, carried events, or releases to swallow.
+    /// Events go through the host: it has effects, carried events, releases to swallow, or notes
+    /// it started on the instrument (with no effects, too: their releases must reach the table).
     pub(crate) fn active(&self) -> bool {
-        self.len > 0 || self.given_len > 0 || self.pending()
+        self.len > 0 || self.given_len > 0 || self.pending() || self.out.iter().any(|n| n.used)
     }
 
     /// Carried events wait for a later block.
@@ -271,7 +290,8 @@ impl MidiFxHost {
     /// Start of a block of `frames` at render frame `frame`: the chain follows `t.midi_effects` (an
     /// edit ends the chain's notes on `plugin`, see the module documentation), each effect gets its
     /// parameter values at `pos`, the transport and the sample rate, and events are collected until
-    /// [`MidiFxHost::flush`].
+    /// [`MidiFxHost::flush`]. Returns the edit when the chain changed: the caller completes its
+    /// steps (ADR 0057, 2.13; [`crate::events`]), before any of the block's events.
     pub(crate) fn begin(
         &mut self,
         plugin: &mut dyn Plugin,
@@ -282,7 +302,7 @@ impl MidiFxHost {
         sample_rate: f64,
         frame: u64,
         frames: usize,
-    ) {
+    ) -> Option<ChainEdit> {
         // A member of a rack runs the rack's chain first, then its own (ADR 0036, racks): the
         // rack's effects feed every member the same way. Both run in full: the rack's up to
         // `MAX_MIDI_EFFECTS`, then the member's up to as many.
@@ -297,6 +317,7 @@ impl MidiFxHost {
                 entry(i)
                     .is_some_and(|(_, _, w)| s.as_ref().is_some_and(|s| s.uid == w.uid.get() && s.bypass == w.bypass && s.plugin == fnv(&w.plugin)))
             });
+        let edit = (!same).then(|| ChainEdit { first: !self.active() });
         if !same {
             self.end_notes(plugin);
             for (i, slot) in self.stages.iter_mut().enumerate() {
@@ -346,6 +367,7 @@ impl MidiFxHost {
         // they land at offset 0.
         self.clock = frame;
         self.capturing = true;
+        edit
     }
 
     /// Takes one event from the mix: collected within a block, else run through the chain now
@@ -565,6 +587,7 @@ impl MidiFxHost {
     pub(crate) fn give(&mut self, plugin: &mut dyn Plugin, offset: u32, ev: &PluginEvent) -> bool {
         let ok = plugin.event(offset, ev);
         if ok {
+            self.pedals.accepted(ev);
             let lost = self.notes.record(offset, ev);
             self.note_view_lost(lost);
         }
@@ -687,6 +710,7 @@ impl MidiFxHost {
             epoch,
             counts: _,
             notes,
+            pedals,
         } = self;
         assert!(!*capturing && *a_len == 0, "a MIDI effect host captured or held events at a block boundary (section 14 scope)");
         w.usize(stages.len());
@@ -729,6 +753,7 @@ impl MidiFxHost {
         }
         w.u32(*epoch);
         notes.record_state(w);
+        pedals.record(w);
     }
 
     /// Test seam (feature `testing`, #742's omission controls): one field of the host (the

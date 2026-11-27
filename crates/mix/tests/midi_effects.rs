@@ -135,6 +135,25 @@ fn an_edit_while_a_note_sounds_leaves_nothing_hanging() {
 }
 
 #[test]
+fn the_first_effect_added_ends_a_note_sounding_without_a_chain() {
+    // ADR 0057, slice P3a, through the engine's block: the note the mix gave directly ends at the
+    // add, and its release, now that a chain is there, sends nothing (through Transpose it would
+    // have written an off of 72 and left 60 sounding).
+    let mut rig = Rig::new();
+    let now = rig.mix.next_frame().0;
+    let src = port(1, 0);
+    assert_eq!(rig.send(src, now + 10, on(60)), EventOutcome::Queued);
+    rig.render(1);
+    with_chain(&mut rig, &[("midi_transpose", &[("semitones", 12.0)], false)]);
+    let later = rig.mix.next_frame().0;
+    assert_eq!(rig.send(src, later + 10, off(60)), EventOutcome::Queued);
+    rig.render(2);
+    let heard = summary(&rig.heard_by(1));
+    assert_eq!(heard.iter().map(|(f, k, key, _)| (f - now, *k, *key)).collect::<Vec<_>>(), [(10, "on", 60), (256, "off", 60)]);
+    assert!(!rig.mix.has_pending_events());
+}
+
+#[test]
 fn a_chain_with_events_flowing_allocates_nothing() {
     MixEngine::force_serial(true);
     mark_audio_thread();

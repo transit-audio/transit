@@ -149,7 +149,7 @@ impl InstrumentEvents {
         // entry holds nothing else observable: it is matched only while `used`, and
         // `free_note`/`free_pedal` hand it out to be overwritten whole.
         for e in notes {
-            let NoteEntry { used, source, key, sender, voice, ons, open, release_queued, retry_release, last_on } = e;
+            let NoteEntry { used, source, key, sender, voice, ons, open, release_queued, retry_release, direct, last_on } = e;
             w.bool(*used);
             if *used {
                 source_record(w, source);
@@ -160,11 +160,12 @@ impl InstrumentEvents {
                 w.u16(*open);
                 w.bool(*release_queued);
                 w.present(*retry_release, |w, v| w.u8(v));
+                w.bool(*direct);
                 w.u64(rel(*last_on, start));
             }
         }
         for p in pedals {
-            let PedalEntry { used, source, cc, down, value, downs, release_queued, retry_release, last_down } = p;
+            let PedalEntry { used, source, cc, down, value, downs, release_queued, retry_release, stale, last_down } = p;
             w.bool(*used);
             if *used {
                 source_record(w, source);
@@ -174,6 +175,7 @@ impl InstrumentEvents {
                 w.u16(*downs);
                 w.bool(*release_queued);
                 w.present(*retry_release, |w, v| w.u8(v));
+                w.bool(*stale);
                 w.u64(rel(*last_down, start));
             }
         }
