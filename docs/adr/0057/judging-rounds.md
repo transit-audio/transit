@@ -106,3 +106,5 @@ Latency and Learn were resolved. One correction remained in Capture's contract: 
 ## Revision of 2026-11-26, judging round 4
 
 Settled with no further changes; ADR 0059 settled as well. Both records accepted on 2026-11-26.
+
+Amendment of 2026-11-27, hosting-first prerequisites for ADR 0064: the amendment's text was written and accepted by the second judge on 2026-11-27, in the fifth judging round of ADR 0064, and appended to the record unchanged.
