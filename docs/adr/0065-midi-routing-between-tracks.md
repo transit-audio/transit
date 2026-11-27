@@ -162,12 +162,12 @@ Each slice lands alone: it builds and passes the workspace tests on its own comm
 
 | Slice | What | Needs | Visible |
 |---|---|---|---|
-| MR0 | Model and commands: `midi_from` with `listen`, `midi.input`'s `from` and `listen`, eligibility and loop refusals (external-output tracks refused as destinations), `EdgeKind::Midi` and the extended loop cut, disconnected destinations, freeze refusal of a source, `needs`, the preview gate | nothing | control channel only |
-| MR1 | The mix: the tap with epoch, sequence and damaged blocks, the silent sink, MIDI edges in layering and the task graph, delivery under `Source::ROUTE`, the route barrier and its detection and propagation, the arm, Listen and mute gates, the channel filter, counters | MR0; ADR 0059 R1; ADR 0057 P2, P3a, P3b | control channel only |
-| MR2 | Offline: export renders routes with Listen on; freeze of a destination renders its sources | MR1 | control channel only |
-| MR3 | Input recording of a route | MR1 | control channel only |
+| MR0 | Model and commands: `midi_from` with `listen`, `midi.input`'s `from` and `listen`, eligibility and loop refusals (external-output tracks refused as destinations), `EdgeKind::Midi` and the extended loop cut, disconnected destinations, freeze refusal of a source, `needs`, the preview gate | nothing | programmatic entry points only |
+| MR1 | The mix: the tap with epoch, sequence and damaged blocks, the silent sink, MIDI edges in layering and the task graph, delivery under `Source::ROUTE`, the route barrier and its detection and propagation, the arm, Listen and mute gates, the channel filter, counters | MR0; ADR 0059 R1; ADR 0057 P2, P3a, P3b | programmatic entry points only |
+| MR2 | Offline: export renders routes with Listen on; freeze of a destination renders its sources | MR1 | programmatic entry points only |
+| MR3 | Input recording of a route | MR1 | programmatic entry points only |
 | MR4 | Latency: requested and provisioned `L_in`, the alignment stage, compensation, the latency barrier | MR1; ADR 0057 P4 | invisible |
-| MRU | Studio: the chooser's Tracks section and Listen toggle, labels, chips, the source marker, states, help | MR0 to MR3; ADR 0057 K2a; after ADR 0064 HM4 in the studio crate's order | control channel only (maintainer-owned images) |
+| MRU | Studio: the chooser's Tracks section and Listen toggle, labels, chips, the source marker, states, help | MR0 to MR3; ADR 0057 K2a; after ADR 0064 HM4 in the studio crate's order | programmatic entry points only (maintainer-owned images) |
 | MRV | Visibility: the preview gate lifted | MR0 to MR4, MRU; ADR 0059 R1; ADR 0057 P2, P3a, P3b, P4; the maintainer's hands-on check | **user-visible** (maintainer-owned) |
 
 **Where routing joins ADR 0064's hosting-first order** (R1-h and its applicable acceptance evidence, HM0, P2, P3a, P3b, HM1, HM2, HM3, K2a, K2b-h, HM4, HM5, P4, HM6, VH, the mix-crate slices serial). Full R1 remains required before MR1 and VH. Routing needs no hosting slice: MR1 is built and tested with built-in effects and fakes. Its true needs are R1, P2, P3a and P3b, so the earliest sound point for MR1 is right after P3b. Proposed placement, hosting first:
