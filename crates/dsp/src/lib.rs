@@ -18,6 +18,7 @@ pub mod editor_header;
 pub mod editor_scale;
 pub mod event;
 pub mod host_call;
+pub mod hosted_out;
 pub mod loudness;
 pub mod meter;
 pub mod midi_fx;
@@ -690,6 +691,27 @@ pub trait Plugin: Send {
     fn state_reader(&mut self) -> Option<Box<dyn PluginStateReader>> {
         None
     }
+    /// Hosted plug-ins with a note output (ADR 0064, decision 3): the configured instance's first
+    /// readable note output and how many it declares. The default: none.
+    fn note_output(&self) -> Option<hosted_out::NoteOutputInfo> {
+        None
+    }
+    /// Hands the last block's note output events to `out` in write order (until it returns
+    /// false), clears them, and returns the report of that block's native calls (ADR 0064,
+    /// decisions 3 and 6). Audio thread, after `process`; no allocation. The default: nothing.
+    fn take_note_output(&mut self, _out: &mut dyn FnMut(hosted_out::HostedOut) -> bool) -> hosted_out::CallReport {
+        hosted_out::CallReport::default()
+    }
+    /// The instance's lifecycle generation and whether it is active (ADR 0064, decision 6): one
+    /// atomic read. The default: generation 0, inactive.
+    fn lifecycle(&self) -> hosted_out::Lifecycle {
+        hosted_out::Lifecycle::default()
+    }
+    /// A hosted MIDI effect stage's reset before its next actual processing call (ADR 0064,
+    /// decision 6). The default calls [`Plugin::reset`].
+    fn restart_processing(&mut self) {
+        self.reset();
+    }
 }
 
 /// A plugin's editor (GUI), driven from the main (UI) thread. Obtained from
@@ -963,6 +985,43 @@ mod trait_default_tests {
             p.close_editor();
             assert!(p.editor().is_none(), "{}", info.id);
         }
+    }
+
+    /// ADR 0064, decision 3: the note output seam changes nothing for a plug-in that does not
+    /// override it, and the stage's reset defaults to `reset`.
+    #[test]
+    fn the_note_output_defaults_hand_nothing_and_the_stage_reset_is_reset() {
+        for info in plugins() {
+            let mut p = create(info.id).unwrap();
+            assert_eq!(p.note_output(), None, "{}", info.id);
+            let mut handed = 0;
+            let r = p.take_note_output(&mut |_| {
+                handed += 1;
+                true
+            });
+            assert_eq!((handed, r), (0, hosted_out::CallReport::default()), "{}", info.id);
+            assert_eq!(p.lifecycle(), hosted_out::Lifecycle { generation: 0, active: false }, "{}", info.id);
+        }
+        struct Counting(u32);
+        impl Plugin for Counting {
+            fn info(&self) -> &'static PluginInfo {
+                plugins()[0]
+            }
+            fn prepare(&mut self, _: f32, _: usize, _: usize) {}
+            fn reset(&mut self) {
+                self.0 += 1;
+            }
+            fn set_param(&mut self, _: &str, _: f32) -> bool {
+                false
+            }
+            fn param(&self, _: &str) -> Option<f32> {
+                None
+            }
+            fn process(&mut self, _: &mut [Vec<f32>], _: usize) {}
+        }
+        let mut c = Counting(0);
+        c.restart_processing();
+        assert_eq!(c.0, 1, "the default stage reset is one `reset`");
     }
 
     #[test]

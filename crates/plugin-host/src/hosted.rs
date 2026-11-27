@@ -293,6 +293,22 @@ impl Plugin for Hosted {
     fn state_reader(&mut self) -> Option<Box<dyn PluginStateReader>> {
         self.has_state.then(|| Box::new(RemoteState { token: Arc::clone(&self.token) }) as Box<dyn PluginStateReader>)
     }
+    /// ADR 0064, decisions 3 and 6: the wrapped instance's; with no plug-in loaded, no output and
+    /// an inactive lifecycle.
+    fn note_output(&self) -> Option<transit_dsp::hosted_out::NoteOutputInfo> {
+        self.inner.as_ref().and_then(|p| p.note_output())
+    }
+    fn take_note_output(&mut self, out: &mut dyn FnMut(transit_dsp::hosted_out::HostedOut) -> bool) -> transit_dsp::hosted_out::CallReport {
+        self.inner.as_mut().map_or_else(transit_dsp::hosted_out::CallReport::default, |p| p.take_note_output(out))
+    }
+    fn lifecycle(&self) -> transit_dsp::hosted_out::Lifecycle {
+        self.inner.as_ref().map_or_else(transit_dsp::hosted_out::Lifecycle::default, |p| p.lifecycle())
+    }
+    fn restart_processing(&mut self) {
+        if let Some(p) = &mut self.inner {
+            p.restart_processing();
+        }
+    }
 }
 
 /// The UI's handle to an editor on the host thread. Open, close and parameter echoes are sent and
