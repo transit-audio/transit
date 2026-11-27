@@ -38,26 +38,45 @@ fn four_hundred_eighty_one_clip_note_cycles_in_one_block_are_all_admitted() {
     assert_eq!((ons, offs), (481, 481), "every cycle delivered in the one block");
 }
 
-/// Replays what the instrument applied: the voices still held (by the mix's voice id) and whether
-/// the channel's sustain pedal is down.
-fn replay(heard: &[(u64, transit_mix::PluginEvent)]) -> (Vec<i32>, bool) {
-    let mut voices = Vec::new();
-    let mut pedal = false;
+/// Replays what the instrument applied, with the sustain pedal: the voices whose key is held and
+/// the voices released under the pedal that still sound (by the mix's voice id), and whether the
+/// pedal is down.
+#[derive(Debug, PartialEq, Default)]
+struct State {
+    held: Vec<i32>,
+    sustained: Vec<i32>,
+    pedal: bool,
+}
+
+fn replay(heard: &[(u64, transit_mix::PluginEvent)]) -> State {
+    let mut st = State::default();
     for (_, e) in heard {
         match e.message {
-            Message::NoteOn { velocity, .. } if velocity > 0 => voices.push(e.note_id),
-            Message::NoteOn { .. } | Message::NoteOff { .. } => voices.retain(|v| *v != e.note_id),
-            Message::Control { cc: 64, value } => pedal = value >= 64,
+            Message::NoteOn { velocity, .. } if velocity > 0 => st.held.push(e.note_id),
+            Message::NoteOn { .. } | Message::NoteOff { .. } => {
+                if st.held.contains(&e.note_id) {
+                    st.held.retain(|v| *v != e.note_id);
+                    if st.pedal {
+                        st.sustained.push(e.note_id);
+                    }
+                }
+            }
+            Message::Control { cc: 64, value } => {
+                st.pedal = value >= 64;
+                if !st.pedal {
+                    st.sustained.clear();
+                }
+            }
             _ => {}
         }
     }
-    (voices, pedal)
+    st
 }
 
 /// ADR 0059, Decision 2 through the mix: a call carrying [pedal up, pedal down, off A, on B] is
 /// applied up to its k-th event and then reports an error, for every k. The mix contains the
-/// instrument (nothing more reaches it), and after Stop the owed releases leave no voice sounding,
-/// no pedal held and nothing owed.
+/// instrument (nothing more reaches it), and after Stop the owed releases leave no held or
+/// sustained voice, no pedal down and an empty ledger.
 #[test]
 fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() {
     for k in 0..=4usize {
@@ -73,7 +92,7 @@ fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() 
         rig.send(src, now, cc(64, 127));
         rig.send(src, now, on(60));
         rig.render(1);
-        assert_eq!(replay(&rig.heard_by(2)), (vec![voice(&rig, 60)], true), "A held under the pedal");
+        assert_eq!(replay(&rig.heard_by(2)), State { held: vec![voice(&rig, 60)], sustained: vec![], pedal: true }, "A held, the pedal down");
         let now = rig.mix.next_frame().0;
         rig.send(src, now, cc(64, 0));
         rig.send(src, now, cc(64, 127));
@@ -88,8 +107,8 @@ fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() 
         assert_eq!(rig.heard_by(2).len(), contained, "nothing reaches the contained instrument (k = {k})");
         rig.mix.reset();
         rig.render(2);
-        let (voices, pedal) = replay(&rig.heard_by(2));
-        assert!(voices.is_empty() && !pedal, "k = {k}: voices {voices:?}, pedal {pedal}");
+        assert_eq!(replay(&rig.heard_by(2)), State::default(), "k = {k}: no held or sustained voice, no pedal down");
+        assert_eq!(rig.outstanding.load(Ordering::Relaxed), 0, "k = {k}: the ledger is empty");
         assert_eq!(rig.refused.load(Ordering::Relaxed), 0);
     }
 }

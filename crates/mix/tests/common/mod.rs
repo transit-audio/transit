@@ -54,6 +54,8 @@ struct Recorder {
     refused: Arc<AtomicU64>,
     /// With `owned` and `err`: how many of the failing call's events it applied.
     apply: Arc<AtomicUsize>,
+    /// With `owned`: the ledger's entries outstanding after the last call.
+    outstanding: Arc<AtomicUsize>,
 }
 
 /// What a recording instrument admitted through `event`: (frames it had rendered, event).
@@ -94,6 +96,7 @@ impl Plugin for Recorder {
             }
             d.finish(!erring);
             d.carry();
+            self.outstanding.store(d.ledger().outstanding(), Ordering::Relaxed);
             self.pending.clear();
         }
         // Stable by offset, as hosts sort.
@@ -164,6 +167,7 @@ pub(super) struct Rig {
     pub(super) owned: Arc<AtomicBool>,
     pub(super) refused: Arc<AtomicU64>,
     pub(super) apply: Arc<AtomicUsize>,
+    pub(super) outstanding: Arc<AtomicUsize>,
 }
 
 pub(super) fn instrument_session(id: &str) -> (Session, TrackId) {
@@ -200,6 +204,7 @@ impl Rig {
             owned: Arc::default(),
             refused: Arc::default(),
             apply: Arc::default(),
+            outstanding: Arc::default(),
         };
         let s = rig.session.clone();
         rig.publish(&s);
@@ -219,6 +224,7 @@ impl Rig {
         let (refuse_releases, refuse_downs) = (Arc::clone(&self.refuse_releases), Arc::clone(&self.refuse_downs));
         let (err, admitted) = (Arc::clone(&self.err), Arc::clone(&self.admitted));
         let (owned, refused, apply) = (Arc::clone(&self.owned), Arc::clone(&self.refused), Arc::clone(&self.apply));
+        let outstanding = Arc::clone(&self.outstanding);
         let mut make = move |spec: &InstanceSpec, _: SlotGen| -> Option<NewInstance> {
             let mut inner = transit_dsp::create("gain")?;
             inner.prepare(SR as f32, BLOCK, spec.ch);
@@ -239,6 +245,7 @@ impl Rig {
                 owned: owned.load(Ordering::Relaxed).then(|| transit_dsp::plugins::instrument_queue::delivery::Delivery::new(false)),
                 refused: Arc::clone(&refused),
                 apply: Arc::clone(&apply),
+                outstanding: Arc::clone(&outstanding),
             });
             Some(NewInstance { plugin, refused_state: false })
         };

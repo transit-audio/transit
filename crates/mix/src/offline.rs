@@ -383,6 +383,10 @@ fn key_feeders(s: &Session, track: TrackId) -> (Vec<bool>, Vec<bool>) {
 mod prime_tests;
 
 #[cfg(test)]
+#[path = "offline_delivery_tests.rs"]
+mod delivery_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use transit_audio_io::AudioBuffer;
