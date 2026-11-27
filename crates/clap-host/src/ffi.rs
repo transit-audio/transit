@@ -95,6 +95,7 @@ mod gui_probe;
 mod host;
 mod instance;
 mod module;
+mod probe;
 #[cfg(target_os = "linux")]
 mod run_loop;
 mod state;

@@ -38,6 +38,20 @@ pub fn sidechain_fixture_dir() -> &'static Path {
 
 fn install(features: &[&str], target_dir: &str, install_dir: &str, name: &str, plugins: usize) -> PathBuf {
     transit_clap_host::set_scan_extra_dirs_only(true);
+    let dir = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp")))
+        .join(format!("{install_dir}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    install_named(features, target_dir, &dir, name);
+    if plugins > 0 {
+        assert_eq!(transit_clap_host::add_search_dir(&dir), plugins);
+    }
+    dir
+}
+
+/// Builds the fixture with `features` in its own target folder `target_dir` and installs it as
+/// `<dir>/vendor/<name>.clap` (a bundle on macOS), which it returns.
+#[allow(dead_code)]
+pub fn install_named(features: &[&str], target_dir: &str, dir: &Path, name: &str) -> PathBuf {
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture/Cargo.toml");
     let target = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp"))).join(target_dir);
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
@@ -59,22 +73,17 @@ fn install(features: &[&str], target_dir: &str, install_dir: &str, name: &str, p
         "libclap_fixture.so"
     };
     let built = target.join("debug").join(lib);
-    let dir = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp")))
-        .join(format!("{install_dir}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
+    let bundle = dir.join(format!("vendor/{name}.clap"));
     if cfg!(target_os = "macos") {
         // Install as a real macOS bundle to exercise bundle resolution.
-        let exe = dir.join(format!("vendor/{name}.clap/Contents/MacOS"));
+        let exe = bundle.join("Contents/MacOS");
         std::fs::create_dir_all(&exe).unwrap();
         std::fs::copy(&built, exe.join(name)).unwrap();
     } else {
         std::fs::create_dir_all(dir.join("vendor")).unwrap();
-        std::fs::copy(&built, dir.join(format!("vendor/{name}.clap"))).unwrap();
+        std::fs::copy(&built, &bundle).unwrap();
     }
-    if plugins > 0 {
-        assert_eq!(transit_clap_host::add_search_dir(&dir), plugins);
-    }
-    dir
+    bundle
 }
 
 /// Private-FFI unit tests load through their own crate instance, avoiding a second module entry.

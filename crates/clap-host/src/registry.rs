@@ -4,13 +4,15 @@ use crate::ffi::{Bundle, Instance, RawParam};
 use crate::plugin::ClapPlugin;
 use crate::scan as paths;
 use crate::scan_cache;
-use crate::{ClapDescriptor, ClapError, parse_id};
+use crate::{Capability, ClapDescriptor, ClapError, ProbeOutcome, ProbeProblem, parse_id};
+use clap_sys::ext::note_ports::{CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI, CLAP_NOTE_DIALECT_MIDI_MPE};
 use clap_sys::ext::params::{CLAP_PARAM_IS_ENUM, CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use transit_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
+use transit_host_common::probe;
 
 /// Most labels read for an enum parameter.
 const MAX_CHOICES: f64 = 128.0;
@@ -98,8 +100,104 @@ pub fn load_bundle(path: &Path) -> Result<Vec<ClapDescriptor>, ClapError> {
             description: d.description,
             features: d.features,
             path: path.to_path_buf(),
+            probe: ProbeOutcome::default(),
         })
         .collect())
+}
+
+/// A note port transit can read or feed: one whose dialects include CLAP, MIDI or MIDI MPE (a
+/// port that speaks MIDI 2 alone does not count; ADR 0064, decision 2.1).
+fn readable(dialects: u32) -> bool {
+    dialects & (CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI | CLAP_NOTE_DIALECT_MIDI_MPE) != 0
+}
+
+/// Probes one plug-in of a `.clap` (ADR 0064, decision 2.4): created and initialized, its note
+/// ports in both directions with their dialects and its audio output port count; destroyed again.
+/// The first readable output is the lowest-indexed readable output note port.
+pub fn probe_class(path: &Path, plugin_id: &str) -> Result<Capability, ClapError> {
+    let inst = Bundle::load(path)?.instantiate(plugin_id)?;
+    let first_note_output = inst.note_port_dialects(false).into_iter().position(readable).and_then(|i| u32::try_from(i).ok());
+    let note_input = inst.note_port_dialects(true).into_iter().any(readable);
+    let audio_outputs = inst.audio_port_count(false);
+    drop(inst);
+    Ok(Capability { note_output: first_note_output.is_some(), note_input, audio_outputs, first_note_output })
+}
+
+pub fn probe_reply(file: &Path, plugin_id: &str) -> String {
+    probe::reply(probe_class(file, plugin_id))
+}
+
+/// The argument that makes the scan program probe one plug-in: `<program> --probe-clap <file> <id>`.
+const PROBE_FLAG: &str = crate::PROBE_FLAG;
+
+pub fn probe_problems() -> Vec<ProbeProblem> {
+    probe::problems(lock().scanned.iter().flatten(), |d| (d.path.clone(), d.id.clone(), d.name.clone()))
+}
+
+/// Writes a probe outcome into the published list as it arrives.
+fn publish_probe(path: &Path, d: &ClapDescriptor) {
+    let mut r = lock();
+    if let Some(found) = r.scanned.iter_mut().flatten().find(|x| x.id == d.id && x.path == path) {
+        found.probe = d.probe.clone();
+    }
+}
+
+/// Phase two of a scan (ADR 0064, decision 2.4), after the listing is published: each listed
+/// plug-in that needs it is probed in a child process of its own (`program`), and each outcome is
+/// published as it arrives. A skip stops it; the plug-ins left are probed by the next scan.
+/// Without a scan program nothing is probed: a plug-in is never created in this process to read
+/// its ports. Returns how many probes ran.
+fn probe_listed(files: &mut [scan_cache::Entry<ClapDescriptor>], scanner: Option<&Path>, host: &str) -> usize {
+    let Some(program) = scanner else { return 0 };
+    probe::probe_files(
+        files,
+        host,
+        |path, d| {
+            if SKIP.load(Ordering::Acquire) {
+                return None;
+            }
+            #[cfg(feature = "test-hooks")]
+            run_probe_hook(&d.plugin_id);
+            let mut deadline = probe_deadline(&d.plugin_id);
+            scan_cache::probe_in_child(program, PROBE_FLAG, path, &d.plugin_id, || SKIP.load(Ordering::Acquire), &mut *deadline)
+        },
+        publish_probe,
+    )
+}
+
+/// A probe child's deadline: [`scan_cache::CHILD_TIMEOUT`] from its start.
+fn probe_deadline(_plugin_id: &str) -> Box<dyn scan_cache::Deadline> {
+    #[cfg(feature = "test-hooks")]
+    if let Some(make) = PROBE_DEADLINE.lock().unwrap_or_else(PoisonError::into_inner).clone() {
+        return make(_plugin_id);
+    }
+    Box::new(scan_cache::Timeout::child())
+}
+
+/// Test hook: the probe children's deadline.
+#[cfg(feature = "test-hooks")]
+static PROBE_DEADLINE: Mutex<Option<std::sync::Arc<dyn Fn(&str) -> Box<dyn scan_cache::Deadline> + Send + Sync>>> = Mutex::new(None);
+
+#[cfg(feature = "test-hooks")]
+pub fn set_probe_deadline(make: Option<std::sync::Arc<dyn Fn(&str) -> Box<dyn scan_cache::Deadline> + Send + Sync>>) {
+    *PROBE_DEADLINE.lock().unwrap_or_else(PoisonError::into_inner) = make;
+}
+
+/// Test hook: runs before each probe child starts.
+#[cfg(feature = "test-hooks")]
+static PROBE_HOOK: Mutex<Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>> = Mutex::new(None);
+
+#[cfg(feature = "test-hooks")]
+pub fn set_probe_hook(hook: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>) {
+    *PROBE_HOOK.lock().unwrap_or_else(PoisonError::into_inner) = hook;
+}
+
+#[cfg(feature = "test-hooks")]
+fn run_probe_hook(plugin_id: &str) {
+    let hook = PROBE_HOOK.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    if let Some(h) = hook {
+        h(plugin_id);
+    }
 }
 
 /// Scans `dirs` (uncached). Unloadable files are logged and skipped; the first plugin with a
@@ -195,7 +293,14 @@ fn scan_now(reuse: bool) -> Vec<ClapDescriptor> {
             if let Some(f) = &cache_file {
                 scan_cache::write(f, &files);
             }
-            return list;
+            // The listing is out; now each plug-in is probed on its own (ADR 0064, decision 2.4).
+            if probe_listed(&mut files, scanner.as_deref(), &host) == 0 {
+                return list;
+            }
+            if let Some(f) = &cache_file {
+                scan_cache::write(f, &files);
+            }
+            return merge(files);
         }
         for dir in &late {
             r.refresh_dirs.remove(dir);

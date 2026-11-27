@@ -53,6 +53,7 @@ use clap_sys::version::CLAP_VERSION;
 use std::ffi::{CStr, c_char, c_void};
 
 mod editor_modes;
+mod notes;
 mod stop_after;
 #[cfg(target_os = "linux")]
 mod xembed_plug;
@@ -1136,7 +1137,8 @@ unsafe extern "C" fn on_main_thread(p: *const clap_plugin) {
 /// The plug-ins this binary lists: the gain and the synth, or (feature `requests`) only the
 /// requests plug-in, built as a binary of its own so that tests counting the default fixture's
 /// plug-ins (here and in other crates) are unaffected.
-#[cfg(not(any(feature = "requests", feature = "events", feature = "sidechain")))]
+/// Features `notes`, `note-effects` and `probe-failures` list the scan-probe sets of `notes.rs`.
+#[cfg(not(any(feature = "requests", feature = "events", feature = "sidechain", feature = "notes", feature = "note-effects", feature = "probe-failures")))]
 static DESCS: [&clap_plugin_descriptor; 2] = [&GAIN_DESC, &SYNTH_DESC];
 #[cfg(all(feature = "sidechain", not(any(feature = "requests", feature = "events"))))]
 static DESCS: [&clap_plugin_descriptor; 1] = [&SIDECHAIN_DESC];
@@ -1144,6 +1146,8 @@ static DESCS: [&clap_plugin_descriptor; 1] = [&SIDECHAIN_DESC];
 static DESCS: [&clap_plugin_descriptor; 1] = [&REQUESTS_DESC];
 #[cfg(all(feature = "events", not(feature = "requests")))]
 static DESCS: [&clap_plugin_descriptor; 2] = [&EVENTS_DESC, &EVENTS_MIDI_DESC];
+#[cfg(all(any(feature = "notes", feature = "note-effects", feature = "probe-failures"), not(any(feature = "requests", feature = "events", feature = "sidechain"))))]
+use notes::DESCS;
 
 unsafe extern "C" fn factory_count(_f: *const clap_plugin_factory) -> u32 {
     DESCS.len() as u32
@@ -1155,6 +1159,9 @@ unsafe extern "C" fn factory_desc(_f: *const clap_plugin_factory, i: u32) -> *co
 
 unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const clap_host, id: *const c_char) -> *const clap_plugin {
     let id = unsafe { CStr::from_ptr(id) };
+    if let Some(p) = notes::create(id) {
+        return p;
+    }
     let (desc, synth, requests, events, keyed) = if id == c"org.soundcraft.test.gain" {
         (&GAIN_DESC as *const _, false, false, false, false)
     } else if id == c"org.soundcraft.test.synth" {

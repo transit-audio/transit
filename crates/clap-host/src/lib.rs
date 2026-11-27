@@ -40,7 +40,8 @@ use transit_host_common::scan_cache;
 mod trace;
 
 pub use plugin::ClapPlugin;
-pub use scan_cache::ScanSummary;
+pub use scan_cache::{Deadline, ScanSummary};
+pub use transit_host_common::probe::{Capability, ProbeOutcome, ProbeProblem};
 
 use std::path::{Path, PathBuf};
 use transit_dsp::{Category, Plugin, PluginInfo};
@@ -69,6 +70,20 @@ pub struct ClapDescriptor {
     pub is_instrument: bool,
     /// The `.clap` file or bundle it lives in.
     pub path: PathBuf,
+    /// What the scan's probe of this plug-in found (ADR 0064, decision 2.4): `note_output` (with
+    /// the first readable output port's index), `note_input` and `audio_outputs` once a probe
+    /// answered; the reason and build when it failed. The probe never changes the fields above.
+    #[serde(flatten)]
+    pub probe: ProbeOutcome,
+}
+
+impl transit_host_common::probe::Probed for ClapDescriptor {
+    fn outcome(&self) -> &ProbeOutcome {
+        &self.probe
+    }
+    fn outcome_mut(&mut self) -> &mut ProbeOutcome {
+        &mut self.probe
+    }
 }
 
 /// Why a CLAP operation failed.
@@ -199,6 +214,42 @@ pub fn set_scanner(program: Option<PathBuf>) {
 /// plugins or the reason it failed, to print to standard output.
 pub fn scan_reply(file: &Path) -> String {
     api::scan_reply(file)
+}
+
+/// The arguments that make the scan program probe one plug-in (ADR 0064, decision 2.4):
+/// `<program> --probe-clap <file> <plugin id>`; the program then prints [`probe_reply`] and
+/// exits. After a scan has listed every file and published the list, each listed plug-in that has
+/// no probe outcome yet (or whose probe failed in another app build) is probed in a child of its
+/// own, and each outcome is published as it arrives.
+pub const PROBE_FLAG: &str = "--probe-clap";
+
+/// The answer of a probe child process for one plug-in of one CLAP file: a line with its note
+/// ports in both directions (the first readable output port's index) and its audio output port
+/// count, or why they could not be read. The plug-in is created, initialized and destroyed;
+/// nothing else runs.
+pub fn probe_reply(file: &Path, plugin_id: &str) -> String {
+    api::probe_reply(file, plugin_id)
+}
+
+/// The plug-ins of the last scan whose probe failed, with the reason and the build that tried it,
+/// for the diagnostics report. Such a plug-in keeps its listing and its category-based placement.
+pub fn probe_problems() -> Vec<ProbeProblem> {
+    api::probe_problems()
+}
+
+/// Replaces the probe children's timeout (one per probe, made when it starts) with `make(plugin
+/// id)`. Only for scan tests, which decide the moment themselves. `None` restores the timeout.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn set_probe_deadline(make: Option<std::sync::Arc<dyn Fn(&str) -> Box<dyn Deadline> + Send + Sync>>) {
+    registry::set_probe_deadline(make)
+}
+
+/// Runs `hook(plugin id)` before each probe child starts. Only for scan tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn set_probe_hook(hook: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>) {
+    registry::set_probe_hook(hook)
 }
 
 /// The plugin file a scan is loading now: its index among the files found, their number and its

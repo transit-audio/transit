@@ -27,6 +27,11 @@ windows-sys = { workspace = true, features = ["Win32_Foundation", "Win32_Graphic
 name = "editor_main_thread"
 harness = false
 
+# The test program is also the scan program its scans start (ADR 0064 slice HM0).
+[[test]]
+name = "probe_scan"
+harness = false
+
 # The isolated unsafe helper crate (craftrules never-crash): this crate opts out of the workspace
 # `unsafe_code = "forbid"` for itself only. It denies unsafe everywhere and allows it solely on the
 # FFI module (`src/ffi.rs`). The rest mirrors `[workspace.lints]`.
