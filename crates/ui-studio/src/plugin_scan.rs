@@ -18,6 +18,10 @@ pub struct PluginDirs {
 pub fn start(dirs: &PluginDirs, settings_dir: Option<&Path>, scanner: Option<PathBuf>) {
     transit_vst3_host::set_extra_dirs(dirs.vst3.iter().map(PathBuf::from).collect());
     transit_clap_host::set_extra_dirs(dirs.clap.iter().map(PathBuf::from).collect());
+    // The scan program is always this app's own executable (`main` passes `current_exe`; no
+    // setting or file names another). That matters: its scan children wait for the "go" that
+    // follows their containment before loading anything (`scan_child`, through the hosts'
+    // replies); a program that ignored the handshake would load before it was contained.
     transit_vst3_host::set_scanner(scanner.clone());
     transit_clap_host::set_scanner(scanner);
     if let Some(dir) = settings_dir {
