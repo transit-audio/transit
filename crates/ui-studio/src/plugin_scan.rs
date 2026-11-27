@@ -30,16 +30,15 @@ pub fn start(dirs: &PluginDirs, settings_dir: Option<&Path>, scanner: Option<Pat
 }
 
 /// The scan child process's work: with `<flag> <file>` arguments (see [`start`]), loads that one
-/// plugin file and returns the line to print; `None` for any other arguments.
+/// plugin file and returns the line to print; with `<probe flag> <file> <class id>`, probes that
+/// one class of the file (ADR 0064, decision 2.4); `None` for any other arguments.
 pub fn scan_child(args: &[String]) -> Option<String> {
-    let [flag, file] = args else { return None };
-    let file = Path::new(file);
-    if flag == transit_vst3_host::SCAN_FLAG {
-        Some(transit_vst3_host::scan_reply(file))
-    } else if flag == transit_clap_host::SCAN_FLAG {
-        Some(transit_clap_host::scan_reply(file))
-    } else {
-        None
+    match args {
+        [flag, file] if flag == transit_vst3_host::SCAN_FLAG => Some(transit_vst3_host::scan_reply(Path::new(file))),
+        [flag, file] if flag == transit_clap_host::SCAN_FLAG => Some(transit_clap_host::scan_reply(Path::new(file))),
+        [flag, file, id] if flag == transit_vst3_host::PROBE_FLAG => Some(transit_vst3_host::probe_reply(Path::new(file), id)),
+        [flag, file, id] if flag == transit_clap_host::PROBE_FLAG => Some(transit_clap_host::probe_reply(Path::new(file), id)),
+        _ => None,
     }
 }
 
@@ -80,6 +79,21 @@ mod rescan_tests {
         super::rescan_using(|clear| record(&VST3, clear), |clear| record(&CLAP, clear));
         assert_eq!((VST3.load(Ordering::SeqCst), CLAP.load(Ordering::SeqCst)), (1, 1), "1 = every file loaded again, 2 = cache reused");
     }
+
+    /// ADR 0064, decision 2.4: the app answers a probe child's three arguments (a probe line, not a
+    /// whole app), and nothing else with three arguments.
+    #[test]
+    fn the_scan_child_answers_probe_arguments() {
+        let args = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect::<Vec<_>>();
+        for flag in [transit_vst3_host::PROBE_FLAG, transit_clap_host::PROBE_FLAG] {
+            let reply = super::scan_child(&args(&[flag, "missing.plug", "0123"])).unwrap_or_default();
+            assert!(reply.starts_with("SOUNDCRAFT-SCAN ") && reply.contains("\"error\""), "{flag}: {reply}");
+        }
+        for flag in [transit_vst3_host::SCAN_FLAG, transit_clap_host::SCAN_FLAG] {
+            assert_eq!(super::scan_child(&args(&[flag, "missing.plug", "0123"])), None, "{flag} takes one file");
+        }
+        assert_eq!(super::scan_child(&args(&["--demo", "a", "b"])), None);
+    }
 }
 
 /// Where the scan is: `"idle"` (none started), `"running"`, `"done"`, or `"failed: <why>"`
@@ -101,7 +115,8 @@ pub fn state() -> String {
 
 /// "Scanning…" for menus that list scanned plug-ins, with the file the scan is on when it says
 /// (`progress`); `None` when no scan runs. The host crates expose no count of plug-ins found so far
-/// (`cached()` is empty until a format's scan ends), so that is all a menu can show.
+/// (`cached()` is empty until a format's files are listed; the scan then still probes each class),
+/// so that is all a menu can show.
 pub fn scanning_label() -> Option<String> {
     if state() != "running" {
         return None;
