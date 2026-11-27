@@ -404,6 +404,7 @@ impl Transport {
             return ActionResult::RecordingClock(reason);
         }
         self.end_count_in();
+        let was_playing = self.playing;
         if let Err(error) = self.change(Some(from), false, None) {
             self.record_start.fail(ticket, StartFailure::of(ActionResult::Timeline(error)));
             self.timeline_fault = Some(error);
@@ -420,6 +421,11 @@ impl Transport {
         // keeps Cancelled and the count-in runs as before, its start then refused at the end.
         self.record_start.counting_in(ticket);
         live.set_transport_epoch(transit_mix::TransportEpoch(self.epoch));
+        if was_playing {
+            // Entered while playing it ends playback: Stop's mix reset, before the parked blocks
+            // (ADR 0057, 5.11). Entered while stopped it changes nothing.
+            live.reset();
+        }
         ActionResult::Applied
     }
 

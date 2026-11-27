@@ -60,6 +60,8 @@ transit-math = { path = "../math" }
 transit-midi.workspace = true
 transit-plugin-host = { workspace = true, features = ["testing"] }
 transit-rt = { workspace = true, features = ["testing"] }
+# The test-only MIDI effect fixtures (`midi_test_generator`, ADR 0057 slice P2).
+transit-dsp = { workspace = true, features = ["testing"] }
 serde_json.workspace = true
 transit-midi-io = { workspace = true, features = ["fake"] }
 

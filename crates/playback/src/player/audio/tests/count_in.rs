@@ -294,6 +294,143 @@ fn a_loop_set_during_the_count_in_is_the_one_the_recording_starts_with() {
     control.retire(audio.plans, audio.actions);
 }
 
+/// Note messages an instrument was given, and how often it was reset.
+#[derive(Default)]
+struct Given {
+    notes: Vec<(bool, u8)>,
+    resets: usize,
+}
+
+struct Witness {
+    inner: Box<dyn transit_dsp::Plugin>,
+    given: Arc<Mutex<Given>>,
+}
+
+impl transit_dsp::Plugin for Witness {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        self.inner.info()
+    }
+    fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
+        self.inner.prepare(sr, mb, ch);
+    }
+    fn reset(&mut self) {
+        self.given.lock().unwrap().resets += 1;
+        self.inner.reset();
+    }
+    fn set_param(&mut self, id: &str, v: f32) -> bool {
+        self.inner.set_param(id, v)
+    }
+    fn param(&self, id: &str) -> Option<f32> {
+        self.inner.param(id)
+    }
+    fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        self.inner.process(io, frames);
+    }
+    fn event(&mut self, _offset: u32, ev: &transit_dsp::event::PluginEvent) -> bool {
+        match ev.message {
+            transit_dsp::event::Message::NoteOn { key, .. } => self.given.lock().unwrap().notes.push((true, key)),
+            transit_dsp::event::Message::NoteOff { key, .. } => self.given.lock().unwrap().notes.push((false, key)),
+            _ => {}
+        }
+        true
+    }
+}
+
+/// A count-in rig whose instrument track holds two notes while playing (ADR 0057, 5.11): its
+/// MIDI effect is the test generator (one note, key 60, from the first playing frame, held while
+/// playing and while stopped) with Latch on, which holds the note of the clip (key 64, ticks 0 to
+/// 60) after the clip releases it, as a latched chord.
+fn held_notes_rig() -> (Control<Command, ActionResult>, Audio, Arc<Mutex<Given>>, start::Control, start::Reader) {
+    use transit_midi::{Note, Sequence};
+    use transit_model::{ChannelFormat, Clip, ClipId, Insert, MidiEffectSlot, TrackKind};
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+    let track = s.track_mut(t).unwrap();
+    track.instrument = Some(Insert::new("clap:test.witness"));
+    let mut fx = MidiEffectSlot::new("midi_test_generator");
+    fx.params.insert("latch".into(), 1.0);
+    track.midi_effects.push(fx);
+    let mut seq = Sequence::default();
+    seq.notes.push(Note { pitch: 64, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 60 });
+    track.playlist_mut().unwrap().clips.push(Clip::midi(ClipId(1), "held", 0, 4 * 24_000, seq));
+    let given = Arc::new(Mutex::new(Given::default()));
+    let (mut control, mut audio, _shared) = fixture(48_000);
+    control.request(Arc::new(s), None).unwrap();
+    let mut factory = |spec: &InstanceSpec, generation: SlotGen| {
+        if spec.id == "clap:test.witness" {
+            let inner = transit_dsp::create("gain")?;
+            Some(NewInstance { plugin: Box::new(Witness { inner, given: Arc::clone(&given) }), refused_state: false })
+        } else {
+            make(spec, generation)
+        }
+    };
+    control.service(&mut factory);
+    fill(&mut audio, &mut [0.0; 960]);
+    control.service(&mut factory);
+    let (mut start, publisher) = start::pair(transit_mix::EngineEpoch(1));
+    audio.transport.record_start = publisher;
+    recording_clock(&mut audio, 48_000);
+    let reader = start.prepare().unwrap();
+    reader.mark_audio();
+    (control, audio, given, start, reader)
+}
+
+/// ADR 0057, 5.11 (slice P2): a record count-in entered while the transport plays ends playback,
+/// so it takes Stop's mix reset before its parked blocks: every note a MIDI effect generated or
+/// latched ends and nothing sounds again while it counts in. One entered while stopped changes
+/// nothing: no reset, nothing given.
+#[test]
+fn a_count_in_entered_while_playing_takes_stops_reset_and_one_entered_while_stopped_changes_nothing() {
+    let count_in = |reader: &start::Reader| Command::Record {
+        ticket: reader.ticket(),
+        from: Some(48_000),
+        end: None,
+        looped: None,
+        count_in: Some(CountIn { frames: 96_000, beat: 24_000, per_bar: 4 }),
+    };
+    let mut out = vec![0.0f32; 480 * 2];
+
+    let (mut control, mut audio, given, _start, reader) = held_notes_rig();
+    control.send_action(Command::Play { from: 0, end: None, looped: None }, true).unwrap();
+    for _ in 0..20 {
+        fill(&mut audio, &mut out);
+    }
+    let (resets, seen) = {
+        let mut g = given.lock().unwrap();
+        g.notes.sort_unstable();
+        assert_eq!(g.notes, [(true, 60), (true, 64)], "playing: the generated note and the latched clip note sound");
+        (g.resets, g.notes.len())
+    };
+    control.send_action(count_in(&reader), true).unwrap();
+    fill(&mut audio, &mut out);
+    assert_eq!(reader.status(), start::Status::CountingIn);
+    assert!(!audio.transport.playing);
+    {
+        let mut g = given.lock().unwrap();
+        assert_eq!(g.resets - resets, 1, "Stop's reset reaches the instrument once");
+        g.notes[seen..].sort_unstable();
+        assert_eq!(g.notes[seen..], [(false, 60), (false, 64)], "both held notes end before the parked blocks");
+    }
+    for _ in 0..40 {
+        fill(&mut audio, &mut out);
+    }
+    assert_eq!(reader.status(), start::Status::CountingIn);
+    assert_eq!(given.lock().unwrap().notes.len(), seen + 2, "nothing sounds again while it counts in");
+    control.retire(audio.plans, audio.actions);
+
+    let (mut control, mut audio, given, _start, reader) = held_notes_rig();
+    let resets = given.lock().unwrap().resets;
+    control.send_action(count_in(&reader), true).unwrap();
+    for _ in 0..40 {
+        fill(&mut audio, &mut out);
+    }
+    assert_eq!(reader.status(), start::Status::CountingIn);
+    let g = given.lock().unwrap();
+    assert_eq!((g.resets, g.notes.len()), (resets, 0), "entered while stopped: no reset, nothing given");
+    drop(g);
+    control.retire(audio.plans, audio.actions);
+}
+
 #[test]
 fn metronome_gain_scales_the_click_and_changing_it_allocates_nothing() {
     let peak_of_beat_two = |gain: f32| {
