@@ -406,3 +406,70 @@ fn a_saturated_call_delivers_every_admitted_event() {
         assert!(p.event(0, &ev((k % 16) as u8, -1, Message::NoteOn { key: (k / 16) as u8, velocity: 90, id: n })));
     }
 }
+
+/// ADR 0059, Decision 2 at the CLAP boundary, for every k: a call carrying [pedal up, pedal down,
+/// off A, on B] applies its first k events and fails (the fixture's stop-after-k mode). The next
+/// call already carries the owed releases (the pedal's up and both notes' offs), and after All MIDI
+/// Notes Off and Stop nothing is held, sustained or pedalled.
+#[test]
+fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() {
+    for k in 0..=4u32 {
+        let mut p = plugin(64);
+        let n = NoteId::NONE;
+        let mut all = Vec::new();
+        assert!(p.event(0, &ev(0, -1, Message::Control { cc: 64, value: 127 })));
+        assert!(p.event(0, &ev(0, -1, Message::NoteOn { key: 60, velocity: 100, id: n })));
+        all.extend(records(&mut p, 64));
+        for e in [
+            ev(0, -1, Message::Control { cc: 64, value: 0 }),
+            ev(0, -1, Message::Control { cc: 64, value: 127 }),
+            ev(0, -1, Message::NoteOff { key: 60, velocity: 0, id: n }),
+            ev(0, -1, Message::NoteOn { key: 62, velocity: 100, id: n }),
+        ] {
+            assert!(p.event(0, &e));
+        }
+        assert!(p.set_param("5", 0.9 + k as f32 / 1000.0)); // the fixture applies k events, then fails
+        let mut io = vec![vec![0.0f32; 64]; 2];
+        p.process(&mut io, 64);
+        assert_eq!(p.process_errors(), 1, "k = {k}");
+        assert!(io.iter().flatten().all(|v| *v == 0.0), "the failed call is silent");
+        // The plug-in applied the first k events of its list (we cannot read the failed call's
+        // output, the host silenced it), so model all prefixes: the owed releases must end every
+        // one of them.
+        let owed = records(&mut p, 64);
+        assert!(owed.contains(&(5, 0, 0xB0_40_00, 0)), "k = {k}: the owed pedal release before Stop: {owed:?}");
+        let mut offs: Vec<i64> = owed.iter().filter(|x| x.0 == 2).map(|x| x.2).collect();
+        offs.sort_unstable();
+        assert_eq!(offs, [60, 62], "k = {k}: the owed note-offs: {owed:?}");
+        all.extend(owed);
+        p.all_notes_off();
+        p.reset();
+        all.extend(records(&mut p, 64));
+        // Held notes (by note id) and the sustain pedal, from what reached the plug-in, with every
+        // possible applied prefix of the failed call (on B may or may not have sounded).
+        let mut held = std::collections::BTreeSet::new();
+        let mut pedal = false;
+        let mut sustained = std::collections::BTreeSet::new();
+        for (code, _, a, b) in &all {
+            match code {
+                1 => {
+                    held.insert(*b);
+                }
+                2 => {
+                    if held.remove(b) && pedal {
+                        sustained.insert(*b);
+                    }
+                }
+                5 if (*a >> 8) & 0x7F == 64 => {
+                    pedal = (*a & 0x7F) >= 64;
+                    if !pedal {
+                        sustained.clear();
+                    }
+                }
+                _ => {}
+            }
+        }
+        assert!(held.is_empty() && sustained.is_empty() && !pedal, "k = {k}: held {held:?}, sustained {sustained:?}, pedal {pedal}");
+        assert_eq!(transit_clap_host::UNTRANSLATED.load(std::sync::atomic::Ordering::Relaxed), 0);
+    }
+}

@@ -53,6 +53,7 @@ use clap_sys::version::CLAP_VERSION;
 use std::ffi::{CStr, c_char, c_void};
 
 mod editor_modes;
+mod stop_after;
 #[cfg(target_os = "linux")]
 mod xembed_plug;
 use editor_modes::{Mode, NEXT_NO_GUI};
@@ -526,7 +527,7 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
             assert!(h.time >= last_time, "events not sorted");
             assert!((h.time as usize) < n, "event time outside the block");
             last_time = h.time;
-            if h.space_id != CLAP_CORE_EVENT_SPACE_ID {
+            if h.space_id != CLAP_CORE_EVENT_SPACE_ID || stop_after::skip(p as usize, k, h, &mut error_once) {
                 continue;
             }
             let (code, a, b) = match h.type_ {

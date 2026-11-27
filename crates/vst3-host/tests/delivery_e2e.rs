@@ -380,6 +380,14 @@ fn a_call_that_applies_its_first_k_events_and_fails_leaves_nothing_after_stop() 
         p.process(&mut io, 64); // applies its first k records, then fails
         assert_eq!(p.process_errors(), 1, "k = {k}");
         recs.extend(log(&mut p, &mut base));
+        // Before Stop, the next call already carries the owed releases: the pedal's up (the
+        // handed press and the handed release are both owed again) and the notes' offs.
+        p.process(&mut io, 64);
+        let owed = log(&mut p, &mut base);
+        assert!(owed.iter().any(|r| r.code == 4 && r.a == 100 && r.b == 0), "k = {k}: the owed pedal release reached the plug-in: {owed:?}");
+        let offs: BTreeSet<u32> = owed.iter().filter(|r| r.code == 2).map(|r| r.a).collect();
+        assert_eq!(offs, BTreeSet::from([60, 62]), "k = {k}: the owed note-offs");
+        recs.extend(owed);
         p.all_notes_off();
         p.reset();
         p.process(&mut io, 64);
