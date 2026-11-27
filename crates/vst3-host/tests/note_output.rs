@@ -405,13 +405,13 @@ fn a_forgetting_plug_in_writes_no_stale_release_after_the_cycle_and_a_retaining_
         block(&mut p);
         let (got, _) = take(&mut p);
         let rec = log(&mut p);
-        assert!(rec.iter().any(|l| l == "setProcessing 0 -> 0"), "{rec:?}");
         let offs: Vec<(OutKind, u32, i32)> = got.iter().map(|e| (e.kind, e.offset, e.note_id)).collect();
         if retain {
             assert_eq!(offs, [(OutKind::NoteOff, 36, 9)], "the retaining fixture writes its release afterwards");
         } else {
             assert!(offs.is_empty(), "the forgetting fixture writes no stale release: {offs:?}");
         }
+        assert!(rec.iter().any(|l| l == "setProcessing 0 -> 0"), "{rec:?}");
     }
 }
 
