@@ -107,11 +107,16 @@ pub(crate) fn input_channel(t: &Track, route: Option<&[Option<u16>]>, k: usize, 
 /// it is.
 fn audio_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>) {
     let StripRender { s, live, pos, frames, .. } = *block;
-    let transport = crate::monitor_gate::Transport { stopped: live.monitor_only, recording: live.recording };
-    let gate = strip.monitor.begin(hears_input(t, live), transport, switch_samples(s.sample_rate.hz()), frames);
+    if t.freeze.is_some() {
+        // A frozen track never hears its input, not even through a ramp in progress.
+        strip.monitor.exclude_input();
+    }
+    let gate = strip.monitor.begin(hears_input(t, live), live.monitor_only, switch_samples(s.sample_rate.hz()), frames);
     let steady = gate.steady();
-    if steady != Some(true) && !live.monitor_only {
-        render_audio_clips(s, t, strip, pos, frames);
+    // The clips (and their clip effects) run for exactly the samples their weight is not zero.
+    let clip_frames = gate.clip_frames(frames);
+    if clip_frames > 0 && !live.monitor_only {
+        render_audio_clips(s, t, strip, pos, clip_frames);
     }
     if steady == Some(false) {
         return;

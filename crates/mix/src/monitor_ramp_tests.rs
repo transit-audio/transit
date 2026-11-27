@@ -1,12 +1,16 @@
 //! The monitoring switch ramps (#730): toggling Audio > Monitor Armed Tracks or a track's Input
 //! Monitoring button while audio sounds crossfades the strip between its input and its clips (or
-//! silence while stopped) over the 5 ms switch ramp, instead of a one-sample switch. A switch that
-//! comes with the transport (play, record, stop) is not ramped.
+//! silence while stopped) over the 5 ms switch ramp, instead of a one-sample switch. Transport
+//! switches ramp too, except a clip at playback start. A track frozen while it monitors stops
+//! reading its input at once, and clip effects run for the samples their clip is heard, whatever
+//! the block size.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use super::tests::{PlanRig, session_with_dc};
 use super::*;
 use crate::monitor_gate::switch_samples;
+use transit_audio_io::AudioBuffer;
+use transit_model::{SourceAudio, SourceId};
 
 /// The switch ramp at the rigs' 48 kHz: 5 ms.
 const N: usize = 240;
@@ -91,22 +95,39 @@ fn a_switch_published_with_new_tables_ramps_from_the_moved_gate() {
     assert_ramp(&rig.render(512)[0], 0.5, 0.25, "Input Monitoring on with a new track");
 }
 
-/// A switch that comes with the transport is not ramped: starting playback on an armed track
-/// monitored while stopped plays its clip from the first sample, starting and stopping a recording
-/// switch on the first sample, and stopping goes back to the input at once.
+/// Switches that come with the transport ramp like any other (ADR 0058 decision 15 keeps the
+/// gate across Stop), except one: playback starting on a track that rested on its input plays its
+/// clip at full level from the first sample.
 #[test]
-fn a_switch_with_the_transport_is_not_ramped() {
+fn transport_switches_ramp_except_the_clip_at_playback_start() {
     let (mut rig, _, _) = rig(512, false);
     rig.eng.monitor_only = true;
     let _ = rig.render(0);
     rig.eng.monitor_only = false;
     assert!(rig.render(0)[0].iter().all(|x| (x - 0.5 * PAN).abs() < 1e-6), "playback starts: the clip from its first sample");
     rig.eng.recording = true;
-    assert!(rig.render(512)[0].iter().all(|x| (x - 0.25 * PAN).abs() < 1e-6), "recording starts: the input from the first sample");
+    assert_ramp(&rig.render(512)[0], 0.5, 0.25, "recording starts: clip to input");
     rig.eng.recording = false;
-    assert!(rig.render(1024)[0].iter().all(|x| (x - 0.5 * PAN).abs() < 1e-6), "recording stops, still playing: the clip at once");
+    assert_ramp(&rig.render(1024)[0], 0.25, 0.5, "recording stops, still playing: input to clip");
     rig.eng.monitor_only = true;
-    assert!(rig.render(1536)[0].iter().all(|x| (x - 0.25 * PAN).abs() < 1e-6), "stopped: the input at once");
+    assert_ramp(&rig.render(1536)[0], 0.0, 0.25, "stopped: the input fades in (the clip stops with the transport)");
+}
+
+/// A ramp in progress when the transport stops continues from where it is.
+#[test]
+fn a_ramp_in_progress_continues_across_stop() {
+    let (mut rig, _, _) = rig(64, false);
+    rig.eng.recording = true;
+    rig.eng.monitor_armed = false;
+    let _ = rig.render(0);
+    rig.eng.monitor_armed = true;
+    let _ = rig.render(64);
+    rig.eng.recording = false;
+    rig.eng.monitor_only = true;
+    for (i, x) in rig.render(128)[0].iter().enumerate() {
+        let want = 0.25 * PAN * (64 + i + 1) as f32 / N as f32;
+        assert!((x - want).abs() < 1e-6, "sample {i}: {x}, want {want}");
+    }
 }
 
 /// A switch reversed mid-ramp turns back from where the gate is, at the same slope.
@@ -147,4 +168,58 @@ fn the_ramp_does_not_depend_on_the_block_size() {
     let reference = render(512);
     assert_eq!(render(64), reference, "64-sample blocks");
     assert_eq!(render(256), reference, "256-sample blocks");
+}
+
+/// A track frozen while it monitors its input (armed, stopped, Monitor Armed Tracks on) stops
+/// reading the input on the first sample the freeze reaches it: the retained gate does not fade the
+/// input out through a frozen track.
+#[test]
+fn a_track_frozen_while_monitoring_drops_its_input_at_once() {
+    let (mut rig, mut s, t) = rig(512, false);
+    rig.eng.monitor_only = true;
+    let first = rig.render(0);
+    assert!(first[0].iter().all(|x| (x - 0.25 * PAN).abs() < 1e-6), "monitoring before the freeze");
+    let tr = s.track_mut(t).unwrap();
+    tr.freeze = Some(transit_model::Frozen { source: SourceId(900), start: 0, length: 4800, hash: tr.freeze_hash(), revision: 0, latency: 0 });
+    rig.publish(&s);
+    let out = rig.render(0);
+    assert!(out[0].iter().all(|x| *x == 0.0), "frozen, stopped: silence from the first sample, got {}", out[0][0]);
+}
+
+/// The armed track of the review's counterexample: a clip silent but for one impulse at sample
+/// 1023, through a ringing clip EQ, and a live input of 0.25, rendered recording in blocks of
+/// `block` with Monitor Armed Tracks off before 512, on from 512 and off again from 1536.
+fn clip_fx_render(block: usize) -> Vec<u32> {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+    let mut sig = vec![0.0f32; 4096];
+    sig[1023] = 1.0;
+    s.pool.insert(SourceId(950), Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels: vec![sig] })));
+    let id = s.new_clip_id();
+    let tr = s.track_mut(t).unwrap();
+    tr.mixer.record_arm = true;
+    tr.playlist_mut().unwrap().clips.push(Clip::audio(id, "impulse", SourceId(950), 0, 0, 4096));
+    for (k, v) in [("mid_freq", 100.0), ("mid_gain", 24.0), ("mid_q", 10.0)] {
+        s.edit.values.insert(format!("clip_fx.{}.eq.{k}", id.0), v);
+    }
+    let mut rig = PlanRig::new(block);
+    rig.publish(&s);
+    rig.eng.recording = true;
+    rig.eng.input = vec![vec![0.25; block]];
+    let mut out = Vec::new();
+    for b in 0..(3072 / block) {
+        let start = b * block;
+        rig.eng.monitor_armed = (512..1536).contains(&start);
+        out.extend(rig.render(start as i64)[0].iter().map(|x| x.to_bits()));
+    }
+    out
+}
+
+/// Clip effects run for exactly the samples their clip is heard: a block that starts a ramp toward
+/// the input stops the clip render on the sample its weight reaches zero, so the impulse at 1023
+/// never enters the clip EQ at any block size, and the output after the ramp back is the same.
+#[test]
+fn clip_effects_run_for_the_samples_their_clip_is_heard_at_any_block_size() {
+    let reference = clip_fx_render(512);
+    assert_eq!(clip_fx_render(64), reference, "64-sample blocks");
 }

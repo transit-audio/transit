@@ -1,23 +1,45 @@
 //! The monitoring switch's ramp (#730): when an audio track starts or stops hearing its live input
-//! because Audio > Monitor Armed Tracks, the track's Input Monitoring button or its arm changed,
-//! the strip crossfades between its input and what it plays otherwise (its clips, or silence while
-//! stopped) instead of switching in one sample. A switch that comes with the transport moving
-//! between stopped, playing and recording is not ramped: it switches on the block's first sample
-//! as it always has, so a clip still starts on its first sample when playback starts.
+//! (Audio > Monitor Armed Tracks, the track's Input Monitoring button or its arm changed, or the
+//! transport moved between stopped, playing and recording) the strip crossfades between its input
+//! and what it plays otherwise (its clips, or silence while stopped) instead of switching in one
+//! sample.
 //!
 //! The gate is the hand gate of ADR 0058 decision 6, applied to the source switch: an integer
 //! counter kept in the strip, stepping by one per rendered sample toward its target (`N_s` when
 //! the track hears its input, 0 when it does not), over the switch ramp length `N_s` of decision 9
 //! (5 ms, `(rate · 5 + 500) div 1000` samples). The input's weight at a sample is `c / N_s`, the
-//! other source's `1 − c / N_s`, each computed in `f64` and rounded once. A switch seen at a
-//! block's start gives `(N_s − 1) / N_s` (or `1 / N_s`) on that block's first sample and reaches
-//! its target on the `N_s`-th; a switch reversed mid-ramp turns back from where it is at the same
-//! slope. The weight at a sample depends only on the counter at the block's start and the offset,
-//! so for the same switches at the same samples the output does not depend on the block size.
-//! A strip that has not rendered yet, and a block whose transport state (stopped, recording)
-//! differs from the last block's, start at the target with no ramp. At rest (the counter at either
-//! end) the source is written exactly as before the ramp existed.
+//! other source's `1 − c / N_s`, each computed in `f64` and rounded once to `f32`. A switch seen
+//! at a block's start gives `(N_s − 1) / N_s` (or `1 / N_s`) on that block's first sample and
+//! reaches its target on the `N_s`-th; a switch reversed mid-ramp turns back from where it is at
+//! the same slope. The weight at a sample depends only on the counter at the block's start and the
+//! offset, so for the same switches at the same samples the output does not depend on the block
+//! size. These rounded `f32` weights are the monitor source crossfade only: they must not be
+//! reused as factors in the mixer-wide `f64` gain expression of ADR 0058 (decisions 1 and 6),
+//! whose gate stays `f64` until the stage's one rounding.
 //!
+//! **What survives what** (ADR 0058 decision 15's table for the hand gate): the counter lives
+//! with the strip and moves with it into a new plan (`move_strip`); Stop, a recording's start and
+//! end, seeks and loop wraps keep it, so a ramp in progress continues and a switch they cause
+//! ramps like any other. A strip that has not rendered yet, or whose rate changed, starts at its
+//! target with no ramp.
+//!
+//! **Playback start** (ADR 0058 is silent: its gates do not change target when the transport
+//! starts). When the transport leaves stopped while the gate rests fully on the input and the
+//! track no longer hears it (an armed track monitored while stopped, Monitor Armed Tracks on, and
+//! Play), the gate goes to its target at once, so the track's clip sounds at full level from its
+//! first sample, as it always has. Any other moment of playback start (a ramp already moving, a
+//! track that keeps hearing its input) is not touched.
+//!
+//! **A frozen track** never hears its input ([`MonitorGate::exclude_input`]): the gate drops to 0
+//! at once, so a track frozen while it was monitoring stops reading the input on the first sample
+//! the freeze reaches it.
+//!
+//! **Clips during a ramp** (and their stateful clip effects) are processed for exactly the samples
+//! where the clip's weight is not zero ([`GateBlock::clip_frames`]): a ramp toward the input ends
+//! the clip render on the sample the weight reaches zero, whatever block that sample falls in, so
+//! the clip effects' state does not depend on the block size.
+//!
+//! At rest (the counter at either end) the source is written exactly as before the ramp existed.
 //! Audio thread: plain integers, no allocation, no lock.
 
 /// The switch ramp length in samples at `rate` Hz: 5 ms rounded half up, in integers (ADR 0058
@@ -36,21 +58,8 @@ pub(crate) struct MonitorGate {
     len: u32,
     /// The strip has rendered a block, so the counter holds a real position.
     primed: bool,
-    /// The last block's transport state: [`Transport::bits`].
-    transport: u8,
-}
-
-/// The transport state a switch is ramped within: stopped (`monitor_only`) and recording.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct Transport {
-    pub(crate) stopped: bool,
-    pub(crate) recording: bool,
-}
-
-impl Transport {
-    fn bits(self) -> u8 {
-        u8::from(self.stopped) | (u8::from(self.recording) << 1)
-    }
+    /// The last block was rendered with the transport stopped (`monitor_only`).
+    was_stopped: bool,
 }
 
 /// The gate for one block: where the counter starts and where it heads.
@@ -62,19 +71,21 @@ pub(crate) struct GateBlock {
 }
 
 impl MonitorGate {
-    /// Starts a block of `frames` samples under `transport` in which the track hears its input
-    /// (`on`) or not, with the switch ramp `len` samples long, and advances the counter past it.
-    pub(crate) fn begin(&mut self, on: bool, transport: Transport, len: u32, frames: usize) -> GateBlock {
+    /// Starts a block of `frames` samples in which the track hears its input (`on`) or not, with
+    /// the transport `stopped` or not and the switch ramp `len` samples long, and advances the
+    /// counter past it.
+    pub(crate) fn begin(&mut self, on: bool, stopped: bool, len: u32, frames: usize) -> GateBlock {
         let len = len.max(1);
-        let bits = transport.bits();
-        if !self.primed || self.len != len || self.transport != bits {
-            // A new strip (or a new rate) starts at its target: nothing to ramp from. A transport
-            // change switches at once, as it always has (see the module docs).
+        if !self.primed || self.len != len {
+            // A new strip (or a new rate) starts at its target: nothing to ramp from.
             self.count = if on { len } else { 0 };
             self.len = len;
             self.primed = true;
-            self.transport = bits;
+        } else if self.was_stopped && !stopped && !on && self.count >= len {
+            // Playback starts on a track that rested on its input: its clip from the first sample.
+            self.count = 0;
         }
+        self.was_stopped = stopped;
         let block = GateBlock { from: self.count.min(len), on, len };
         if frames > 0 {
             self.count = block.count(frames - 1);
@@ -82,15 +93,21 @@ impl MonitorGate {
         block
     }
 
+    /// A frozen track never hears its input: the gate goes to 0 at once, before the block's
+    /// [`MonitorGate::begin`] (which then rests at 0).
+    pub(crate) fn exclude_input(&mut self) {
+        self.count = 0;
+    }
+
     /// Test seam (feature `testing`, #742 section 14): the counter, the ramp length, whether the
-    /// strip has rendered and the last block's transport state.
+    /// strip has rendered and whether the last block was stopped.
     #[cfg(feature = "testing")]
     pub(crate) fn record(&self, w: &mut transit_state_record::Writer<'_>) {
-        let MonitorGate { count, len, primed, transport } = self;
+        let MonitorGate { count, len, primed, was_stopped } = self;
         w.u32(*count);
         w.u32(*len);
         w.bool(*primed);
-        w.u8(*transport);
+        w.bool(*was_stopped);
     }
 
     /// Test seam (feature `testing`): moves the counter one sample (toward the input, or back
@@ -116,6 +133,18 @@ impl GateBlock {
             (false, 0) => Some(false),
             _ => None,
         }
+    }
+
+    /// How many of the block's first `frames` samples give the clips a weight above zero: the
+    /// clips (and their effects) are rendered for exactly these. All of them unless the gate
+    /// heads for the input; then the samples before the counter reaches it.
+    pub(crate) fn clip_frames(&self, frames: usize) -> usize {
+        if !self.on {
+            return frames;
+        }
+        // The counter reaches `len` at offset `len − from − 1`; the clip weight is zero from there.
+        let left = self.len.saturating_sub(self.from).saturating_sub(1);
+        frames.min(usize::try_from(left).unwrap_or(usize::MAX))
     }
 
     /// The input's weight at `offset` samples into the block (the other source's is `1 − w`,
