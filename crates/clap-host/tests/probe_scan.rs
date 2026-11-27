@@ -50,7 +50,16 @@ fn main() {
 /// The scan program's part, as the app's `scan_child`.
 fn child(args: &[String]) -> Option<String> {
     match args {
-        [flag, file] if flag == host::SCAN_FLAG => Some(host::scan_reply(Path::new(file))),
+        [flag, file] if flag == host::SCAN_FLAG => {
+            // As a probe child: its process id logged beside the file, run in the file's folder.
+            let file = Path::new(file);
+            let folder = file.parent().unwrap_or(Path::new("."));
+            use std::io::Write as _;
+            let mut log = std::fs::OpenOptions::new().create(true).append(true).open(folder.join("listing-children.log")).expect("child log");
+            log.write_all(format!("{}\n", std::process::id()).as_bytes()).expect("child log");
+            std::env::set_current_dir(folder).expect("the file's folder");
+            Some(host::scan_reply(file))
+        }
         [flag, file, id] if flag == host::PROBE_FLAG => {
             let file = Path::new(file);
             let folder = file.parent().unwrap_or(Path::new("."));
@@ -628,25 +637,53 @@ fn chatter(name: &str) {
     drop(lock);
 }
 
-/// Review round 2, finding B: a scan child that cannot be contained, or whose parent watch cannot
-/// start, loads nothing. A listing child's failure is that file's scan error; a probe child's
-/// keeps the listing and records the reason as the probe's outcome. Each plug-in creation is logged
-/// to `created.log` by the fixture: no line means nothing was loaded.
+/// The process ids in the first column of `file` (a log in the probed file's folder).
+fn pids(file: &Path) -> std::collections::BTreeSet<String> {
+    std::fs::read_to_string(file)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| l.split(' ').next())
+        .filter(|p| !p.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// Review round 2, finding B, and round 3's evidence for it: a scan child that cannot be
+/// contained, or whose parent watch cannot start, loads nothing. The fixture logs every process
+/// that enters the plug-in file's module or fetches its factory (`loaded.log`, armed by
+/// `record-loads` in the folder), and this program logs each listing and probe child's process id
+/// (`listing-children.log`, `probe-children.log`), so the test sees which kind of child loaded
+/// the file: a listing child's legitimate load cannot hide a probe child's. A listing child's
+/// failure is that file's scan error; a probe child's keeps the listing and records the reason as
+/// the probe's outcome.
 fn containment_failure_stops_the_child() {
     let dir = transit_test_support::TestDir::created_in(Path::new(env!("CARGO_TARGET_TMPDIR")), "clap-probe-uncontained");
     let bundle = common::install_named(&["--features", "notes"], "clap-notes-fixture-target", &dir, "Notes");
     let vendor = dir.join("vendor");
-    let created = vendor.join("created.log");
+    std::fs::write(vendor.join("record-loads"), b"").unwrap();
+    let (loaded, listing, probing, created) =
+        (vendor.join("loaded.log"), vendor.join("listing-children.log"), vendor.join("probe-children.log"), vendor.join("created.log"));
     set_up(&dir);
+    let fresh = || {
+        for f in [&loaded, &listing, &probing, &created] {
+            let _ = std::fs::remove_file(f);
+        }
+    };
+    // Which children of `kind` loaded the file: none may have, in each failure case below.
+    let loaders = |kind: &Path| -> Vec<String> { pids(kind).intersection(&pids(&loaded)).cloned().collect() };
     let listing_fails = |what: &str, reason: &str| {
+        fresh();
         host::rescan();
         host::wait_for_scans();
         let problems = host::problems();
         assert_eq!(problems.len(), 1, "{what}: {problems:?}");
         assert!(problems[0].0 == bundle && problems[0].1.contains(reason), "{what}: {problems:?}");
         assert!(host::cached().unwrap_or_default().is_empty(), "{what}: the file lists nothing");
+        assert_eq!(loaders(&listing), Vec::<String>::new(), "{what}: no listing child loaded the file");
+        assert!(!created.exists(), "{what}: nothing was created");
     };
     let probes_fail = |what: &str, reason: &str| {
+        fresh();
         host::rescan();
         host::wait_for_scans();
         let list = host::cached().expect("published");
@@ -656,6 +693,8 @@ fn containment_failure_stops_the_child() {
             assert_eq!(p.note_output, None, "{what}: {}", d.name);
             assert!(p.probe_error.as_deref().is_some_and(|e| e.contains(reason)), "{what}: {}: {p:?}", d.name);
         }
+        assert_eq!(loaders(&probing), Vec::<String>::new(), "{what}: no probe child loaded the file");
+        assert!(!created.exists(), "{what}: nothing was created");
     };
     host::set_contain_fails(Some(host::SCAN_FLAG));
     listing_fails("a listing child that cannot be contained", "could not be contained");
@@ -667,11 +706,13 @@ fn containment_failure_stops_the_child() {
     host::set_watch_fails(Some(host::PROBE_FLAG));
     probes_fail("a probe child whose parent watch cannot start", "cannot watch its parent");
     host::set_watch_fails(None);
-    assert!(!created.exists(), "no plug-in was created: {}", std::fs::read_to_string(&created).unwrap_or_default());
-    // And once containment works again, the same scan creates and probes them.
+    // The evidence works: with containment working, listing and probe children load the file.
+    fresh();
     host::rescan();
     host::wait_for_scans();
     assert_eq!(find(&host::cached().expect("published"), "Fixture Notes").probe.note_output, Some(true));
+    assert!(!loaders(&listing).is_empty(), "a listing child's load is recorded");
+    assert_eq!(loaders(&probing).len(), 2, "each probe child's load is recorded");
     assert!(created.exists(), "the plug-ins were created this time");
     tear_down();
 }

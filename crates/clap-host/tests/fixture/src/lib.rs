@@ -1242,10 +1242,12 @@ static FACTORY: clap_plugin_factory =
     clap_plugin_factory { get_plugin_count: Some(factory_count), get_plugin_descriptor: Some(factory_desc), create_plugin: Some(factory_create) };
 
 unsafe extern "C" fn entry_init(_path: *const c_char) -> bool {
+    notes::note_loaded("entry init");
     true
 }
 unsafe extern "C" fn entry_deinit() {}
 unsafe extern "C" fn entry_get_factory(id: *const c_char) -> *const c_void {
+    notes::note_loaded("factory");
     if unsafe { CStr::from_ptr(id) } == CLAP_PLUGIN_FACTORY_ID { &FACTORY as *const _ as *const c_void } else { std::ptr::null() }
 }
 

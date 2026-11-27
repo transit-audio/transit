@@ -397,3 +397,17 @@ unsafe extern "C" fn get_extension(p: *const clap_plugin, id: *const c_char) -> 
         std::ptr::null()
     }
 }
+
+/// When the working folder holds `record-loads` (only the containment test creates it), appends
+/// "<process id> <what>" to `loaded.log` there: the module was entered or its factory fetched, so
+/// that process loaded the plug-in file. Elsewhere it does nothing (no stray files from the many
+/// in-process loads of other tests).
+pub(crate) fn note_loaded(what: &str) {
+    use std::io::Write as _;
+    if !std::path::Path::new("record-loads").exists() {
+        return;
+    }
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open("loaded.log") {
+        let _ = writeln!(f, "{} {what}", std::process::id());
+    }
+}
