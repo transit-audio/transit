@@ -208,3 +208,33 @@ fn pitch_bend_and_the_mod_wheel_set_before_an_edit_are_kept() {
         }
     }
 }
+
+#[test]
+fn a_cc_121_with_only_stale_holders_reaches_the_instrument_and_a_fresh_holder_still_suppresses_it() {
+    // Zeroing the holders at an edit lets a later CC 121 through when only stale holders remain: it
+    // resets the instrument's controllers (bend and mod wheel too), as the player asked. A holder
+    // that pressed after the edit still suppresses it, as before (`deliver_reset`).
+    for at in ATS {
+        for fresh in [false, true] {
+            let ctx = format!("{at:?} fresh holder: {fresh}");
+            let (before, after) = chains(at, &[(OWN, &[], false)]);
+            let mut r = Rig::new(Mode::Plain);
+            r.live(5, A, cc(64, 127));
+            r.live(6, A, Message::PitchBend { value: 10_000 });
+            r.live(7, A, cc(1, 90));
+            if fresh {
+                r.live(80, B, cc(64, 127));
+            }
+            r.live(100, A, cc(121, 0));
+            r.run_until(&before, 64, 64);
+            r.run_until(&after, 192, 64);
+            if fresh {
+                assert_eq!(r.given_from(64), [(64, "cc", 64, 0), (80, "cc", 64, 127)], "{ctx}: the reset is suppressed");
+                assert_eq!((r.m.bend[0], r.m.ctl[0][1], r.m.ctl[0][64]), (10_000, 90, 127), "{ctx}");
+            } else {
+                assert_eq!(r.given_from(64), [(64, "cc", 64, 0), (100, "cc", 121, 0)], "{ctx}: the reset reaches the instrument");
+                assert_eq!((r.m.bend[0], r.m.ctl[0][1]), (8192, 0), "{ctx}: bend and mod wheel reset");
+            }
+        }
+    }
+}

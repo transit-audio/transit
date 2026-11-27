@@ -3,11 +3,13 @@
 //! gated generator) and Transpose.
 //!
 //! Each case runs at the first insertion (no chain before: the mix gave its notes to the instrument
-//! directly) and at a later edit (the owning pass-through already in the chain), and at three
-//! instruments that accept every event unless a case says otherwise: a plain one, which applies
-//! every event in order, and two models of the VST3 adapter's one point per controller and offset
-//! (`crates/vst3-host/src/ffi/events.rs`, `fill`): at each offset the last value of each
-//! controller, applied before, or after, the note events of that offset.
+//! directly) and at a later edit (the owning pass-through already in the chain), at a model
+//! instrument that applies every event in arrival order (as the CLAP adapter and the built-in
+//! instruments express it) and accepts every event unless a case says otherwise. This model is
+//! supplementary evidence: it is not the VST3 adapter. The VST3 cases run through the real adapter
+//! (its admission, native translation and processing boundary) in
+//! `crates/mix/tests/chain_edit_adapters.rs`, where ADR 0059 3b's separations move a pedal edge that
+//! shares a frame with a note event to the next frame.
 //!
 //! Expected results are written by hand from 2.13's rules. The block runner calls what the strip
 //! calls, in its order (`strip.rs`): the host's begin with the edit steps, the mix's retries, clip
@@ -23,18 +25,15 @@ mod edits;
 mod limits;
 mod pedals;
 
-/// How the instrument applies the events of one offset.
+/// How the model instrument applies the events of one offset: only in the order given (the VST3
+/// adapter is tested for real, see the module documentation).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Mode {
     /// In the order given.
     Plain,
-    /// The VST3 adapter's one point per controller and offset, applied before the note events.
-    Vst3Before,
-    /// The same, applied after the note events.
-    Vst3After,
 }
 
-pub(super) const MODES: [Mode; 3] = [Mode::Plain, Mode::Vst3Before, Mode::Vst3After];
+pub(super) const MODES: [Mode; 1] = [Mode::Plain];
 
 /// Where the edit falls.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -68,7 +67,7 @@ pub(super) struct Voice {
 /// An instrument that keeps voices the way a MIDI synthesizer does: a voice sounds while its key
 /// is down, or while the sustain pedal (CC 64) or hold 2 (CC 69) is at 64 or above, or while the
 /// sostenuto pedal (CC 66) that captured it (its key was down at the press) stays down. CC 120 ends
-/// a channel's voices, CC 123 releases its keys, CC 121 lifts its pedals. Its `reset` is a built-in
+/// a channel's voices, CC 123 releases its keys, CC 121 lifts its pedals and resets its mod wheel and bend. Its `reset` is a built-in
 /// instrument's: every voice ends. It writes down every event it accepts at its absolute frame.
 pub(super) struct Model {
     mode: Mode,
@@ -147,9 +146,11 @@ impl Model {
                         }
                     }
                     121 => {
-                        for p in [64, 66, 67, 69] {
+                        // Reset All Controllers: the pedals, the mod wheel and the bend.
+                        for p in [1, 64, 66, 67, 69] {
                             self.ctl[usize::from(ch)][p] = 0;
                         }
+                        self.bend[usize::from(ch)] = 8192;
                     }
                     123 => {
                         for v in self.voices.iter_mut().filter(|v| v.channel == ch) {
@@ -174,13 +175,6 @@ impl Model {
     pub(super) fn spans(&self, key: u8) -> Vec<(u64, Option<u64>)> {
         self.voices.iter().filter(|v| v.key == key).map(|v| (v.on, v.end)).collect()
     }
-}
-
-fn is_controller(m: &Message) -> bool {
-    matches!(
-        m,
-        Message::Control { .. } | Message::Control14 { .. } | Message::PitchBend { .. } | Message::ChannelPressure { .. } | Message::Program { .. }
-    )
 }
 
 impl Plugin for Model {
@@ -226,31 +220,9 @@ impl Plugin for Model {
             let j = pending[i..].iter().position(|(x, _)| *x != o).map_or(pending.len(), |k| i + k);
             let group = &pending[i..j];
             let f = self.frame + u64::from(o);
-            if self.mode == Mode::Plain {
-                for (_, e) in group {
-                    self.apply(f, e);
-                }
-            } else {
-                // One point per controller and offset: the last value of each.
-                let mut points: Vec<PluginEvent> = Vec::new();
-                for (_, e) in group.iter().filter(|(_, e)| is_controller(&e.message)) {
-                    let same = |p: &PluginEvent| {
-                        p.channel == e.channel
-                            && match (p.message, e.message) {
-                                (Message::Control { cc: a, .. }, Message::Control { cc: b, .. }) => a == b,
-                                (a, b) => std::mem::discriminant(&a) == std::mem::discriminant(&b),
-                            }
-                    };
-                    match points.iter_mut().find(|p| same(p)) {
-                        Some(p) => *p = *e,
-                        None => points.push(*e),
-                    }
-                }
-                let notes: Vec<PluginEvent> = group.iter().filter(|(_, e)| !is_controller(&e.message)).map(|(_, e)| *e).collect();
-                let (first, then) = if self.mode == Mode::Vst3Before { (&points, &notes) } else { (&notes, &points) };
-                for e in first.iter().chain(then.iter()) {
-                    self.apply(f, e);
-                }
+            let Mode::Plain = self.mode;
+            for (_, e) in group {
+                self.apply(f, e);
             }
             i = j;
         }

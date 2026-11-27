@@ -16,6 +16,11 @@
 //! - **Between blocks** the same, at offset 0. It has no clock and schedules nothing, so its
 //!   schedule of 512 reserved entries (zero delays) is never used and is not modeled.
 //! - **Reset** forgets every entry (the host has ended the notes); later releases find nothing.
+//!
+//! **A restricted P3a fixture.** It has no 512-entry schedule and keeps no rejection records, so it
+//! is not decision 13's full owning pass-through: before P3b or a device ledger's conformance tests
+//! reuse it, reconcile it with that specification (the schedule's reservations, decision 11's
+//! anonymous rejection records).
 
 use super::{MidiEffect, MidiOut, TimedEvent};
 use crate::event::{Message, PluginEvent};
