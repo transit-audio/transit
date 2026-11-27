@@ -12,22 +12,61 @@
 
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
 /// Bumped when the layout changes; a file of another version is ignored (everything is loaded).
-const VERSION: u32 = 1;
+/// 2: every class carries its probe outcome (ADR 0064, decision 2.4; [`crate::probe`]).
+const VERSION: u32 = 2;
 
 /// Largest cache file read (a plugin takes a few hundred bytes).
 const MAX_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Starts the line a child process answers with (plugins may print to standard output too).
-const REPLY: &str = "SOUNDCRAFT-SCAN ";
+pub(crate) const REPLY: &str = "SOUNDCRAFT-SCAN ";
 
 /// Longest wait for a child process; a plugin that takes longer (or waits on a dialog) is killed.
-const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
+/// Each probe child has the same budget (ADR 0064, decision 2.4).
+pub const CHILD_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// When a child process has run out of time: checked between polls while it runs. The scan uses
+/// [`Timeout`]; a test can decide the moment itself instead of waiting on the clock.
+pub trait Deadline: Send {
+    /// Whether the child has run out of time.
+    fn passed(&mut self) -> bool;
+    /// The budget, for the reason a stopped child gives.
+    fn limit(&self) -> Duration;
+}
+
+/// A wall-clock budget from the moment it is made.
+pub struct Timeout {
+    started: Instant,
+    limit: Duration,
+}
+
+impl Timeout {
+    /// A budget of `limit` from now.
+    pub fn new(limit: Duration) -> Self {
+        Timeout { started: Instant::now(), limit }
+    }
+
+    /// The budget of every scan and probe child, [`CHILD_TIMEOUT`].
+    pub fn child() -> Self {
+        Timeout::new(CHILD_TIMEOUT)
+    }
+}
+
+impl Deadline for Timeout {
+    fn passed(&mut self) -> bool {
+        self.started.elapsed() >= self.limit
+    }
+    fn limit(&self) -> Duration {
+        self.limit
+    }
+}
 
 /// One plugin file: the plugins it holds, or why it did not load.
 #[derive(Clone, Serialize, Deserialize)]
@@ -208,19 +247,51 @@ struct Reply<D> {
 /// Loads `file` in a child process: `program flag file`, which answers with [`reply`]. `None`
 /// when `stop` turned true meanwhile: the child was killed.
 pub fn load_in_child<D: DeserializeOwned>(program: &Path, flag: &str, file: &Path, stop: impl Fn() -> bool) -> Option<Result<Vec<D>, String>> {
+    let fail = |m: String| format!("{}: {m}", file.display());
+    in_child(program, &[flag.as_ref(), file.as_os_str()], file, stop, &mut Timeout::child()).map(|answer| {
+        let json = answer?;
+        let r: Reply<D> = serde_json::from_str(&json).map_err(|e| fail(format!("unreadable scan reply: {e}")))?;
+        match (r.plugins, r.error) {
+            (Some(plugins), _) => Ok(plugins),
+            (None, e) => Err(e.unwrap_or_else(|| fail("the scan process found nothing".into()))),
+        }
+    })
+}
+
+/// Probes one class of `file` in a child process of its own: `program flag file id`, which answers
+/// with [`crate::probe::reply`] (ADR 0064, decision 2.4). The child is stopped when `deadline`
+/// passes or `stop` turns true; `None` for the latter (the scan was told to stop: the class stays
+/// unprobed). An error the child answers, a child that ends without an answer and one stopped by
+/// its deadline are each `Err` with the reason.
+pub fn probe_in_child(
+    program: &Path,
+    flag: &str,
+    file: &Path,
+    id: &str,
+    stop: impl Fn() -> bool,
+    deadline: &mut dyn Deadline,
+) -> Option<Result<crate::probe::Capability, String>> {
+    let fail = |m: String| format!("{} ({id}): {m}", file.display());
+    in_child(program, &[flag.as_ref(), file.as_os_str(), id.as_ref()], file, stop, deadline)
+        .map(|answer| answer.map_err(|e| format!("{e} ({id})")).and_then(|json| crate::probe::parse_reply(&json, fail)))
+}
+
+/// Runs `program args` and returns the JSON of its answer line; `None` when `stop` turned true
+/// meanwhile (the child was killed).
+fn in_child(program: &Path, args: &[&OsStr], file: &Path, stop: impl Fn() -> bool, deadline: &mut dyn Deadline) -> Option<Result<String, String>> {
     let mut stopped = false;
-    let r = run_child(program, flag, file, || {
+    let r = run_child(program, args, file, deadline, || {
         stopped = stop();
         stopped
     });
     (!stopped).then_some(r)
 }
 
-fn run_child<D: DeserializeOwned>(program: &Path, flag: &str, file: &Path, mut stop: impl FnMut() -> bool) -> Result<Vec<D>, String> {
+fn run_child(program: &Path, args: &[&OsStr], file: &Path, deadline: &mut dyn Deadline, mut stop: impl FnMut() -> bool) -> Result<String, String> {
     use std::process::{Command, Stdio};
     let fail = |m: String| format!("{}: {m}", file.display());
     let mut command = Command::new(program);
-    command.arg(flag).arg(file).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;
@@ -257,7 +328,6 @@ fn run_child<D: DeserializeOwned>(program: &Path, flag: &str, file: &Path, mut s
             text
         })
     };
-    let started = Instant::now();
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
@@ -267,7 +337,7 @@ fn run_child<D: DeserializeOwned>(program: &Path, flag: &str, file: &Path, mut s
                 let _ = child.wait();
                 break None;
             }
-            Ok(None) if started.elapsed() < CHILD_TIMEOUT && !stop() => std::thread::sleep(Duration::from_millis(10)),
+            Ok(None) if !deadline.passed() && !stop() => std::thread::sleep(Duration::from_millis(10)),
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -278,16 +348,16 @@ fn run_child<D: DeserializeOwned>(program: &Path, flag: &str, file: &Path, mut s
     let text = reader.join().unwrap_or_default();
     let answer = text.lines().rev().find_map(|l| l.strip_prefix(REPLY));
     match (answer, status) {
-        (Some(json), _) => {
-            let r: Reply<D> = serde_json::from_str(json).map_err(|e| fail(format!("unreadable scan reply: {e}")))?;
-            match (r.plugins, r.error) {
-                (Some(plugins), _) => Ok(plugins),
-                (None, e) => Err(e.unwrap_or_else(|| fail("the scan process found nothing".into()))),
-            }
-        }
-        (None, None) => Err(fail(format!("still loading after {} s; stopped", CHILD_TIMEOUT.as_secs()))),
+        (Some(json), _) => Ok(json.to_string()),
+        (None, None) => Err(fail(format!("still loading after {} s; stopped", deadline.limit().as_secs()))),
         (None, Some(status)) => Err(fail(format!("the plugin ended the scan process ({status})"))),
     }
+}
+
+/// An entry for `path` holding `plugins` (tests of the probe phase).
+#[cfg(test)]
+pub(crate) fn entry_for_test<D>(path: PathBuf, plugins: Vec<D>, error: Option<String>) -> Entry<D> {
+    Entry { path, size: 0, modified_ns: 0, plugins, error, host: String::new() }
 }
 
 #[cfg(test)]
@@ -422,6 +492,42 @@ mod tests {
         assert!(read::<String>(&file).is_empty());
         std::fs::write(&file, r#"{"version":999,"files":[]}"#).ok();
         assert!(read::<String>(&file).is_empty());
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// ADR 0064, decision 2.4: the layout with probe outcomes is version 2, so a version 1 file
+    /// (no probe fields) is ignored: every file is listed again, and the file is rewritten as 2.
+    #[test]
+    fn a_version_1_cache_file_is_ignored_and_rewritten_as_version_2() {
+        let d = dir("version-1");
+        let a = d.join("a.plug");
+        std::fs::write(&a, "a").ok();
+        let file = d.join("cache.json");
+        let (size, modified_ns) = stamp(&a).unwrap_or_default();
+        let old = serde_json::json!({ "version": 1, "files": [{
+            "path": a, "size": size, "modified_ns": modified_ns, "plugins": ["Stale"], "error": null, "host": "build 1"
+        }] });
+        std::fs::write(&file, old.to_string()).ok();
+        let known: Vec<Entry<String>> = read(&file);
+        assert!(known.is_empty(), "a version 1 file is not read");
+        let loads = Cell::new(0);
+        let listed = scan(
+            vec![a.clone()],
+            &known,
+            |_| None,
+            |_| {
+                loads.set(loads.get() + 1);
+                Some(Ok(vec!["Fresh".to_string()]))
+            },
+            |_, _, _| true,
+            "build 1",
+        );
+        assert_eq!((loads.get(), listed[0].plugins.clone()), (1, vec!["Fresh".to_string()]), "the file is listed again");
+        write(&file, &listed);
+        let text = std::fs::read_to_string(&file).unwrap_or_default();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+        assert_eq!(v["version"], 2, "{text}");
+        assert_eq!(read::<String>(&file).len(), 1, "the rewritten file is read back");
         let _ = std::fs::remove_dir_all(&d);
     }
 
