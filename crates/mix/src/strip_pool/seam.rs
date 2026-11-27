@@ -6,8 +6,9 @@
 //! the strips a test holds this block, possibly none), no clock ends a block: the pool's deadline
 //! is [`never`], so every published strip outside `gate` is waited for (rendered by a worker or
 //! inline, whatever the host's speed), and once only held strips are unresolved and, with
-//! workers, each of them is claimed by one (inside the test's hold), the deadline is now. A held
-//! strip is then `Late` (a worker holds it) or, with no worker, `Unstarted` (the test seeds a
+//! workers, each of them is claimed by one (a claim only: the worker may not yet have entered the
+//! strip's render, let alone a test's hold inside it), the deadline is now. A held strip is then
+//! `Late` (a worker has claimed it) or, with no worker, `Unstarted` (the test seeds a
 //! cost longer than any deadline, [`never`] included, so the callback refuses it inline), and nothing else is decided by the clock: which
 //! strips miss the block is the test's input (E49), not a scheduling outcome. Before E72 the real
 //! deadline still applied while a strip outside `gate` was unresolved (a test's far deadline, 60

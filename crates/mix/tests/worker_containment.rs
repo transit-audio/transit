@@ -142,7 +142,8 @@ fn a_worker_held_instrument_is_contained_and_readmitted_with_nothing_owed() {
         let verdict = std::panic::catch_unwind(scenario);
         let _ = tx.send(verdict.map_err(|e| e.downcast_ref::<String>().cloned().or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))));
     });
-    match rx.recv_timeout(common::stall::HANG) {
+    // Twice the ceiling: the scenario's own watchdogs (each `HANG`) report their cause first.
+    match rx.recv_timeout(common::stall::HANG * 2) {
         Ok(Ok(())) => {}
         Ok(Err(why)) => panic!("{}", why.unwrap_or_default()),
         Err(_) => panic!("the scenario made no verdict within the hang ceiling: a held block never ended"),
@@ -216,7 +217,18 @@ fn scenario() {
         rig.mix.render_workers(),
         rig.mix.strip_phases()
     );
-    assert!(sh.holding.load(Ordering::Acquire), "its worker holds it");
+    // The deadline seam ends the block once the held strip is claimed by a worker, which can be
+    // before that worker has entered the instrument's `process` and begun the fixture's hold: wait
+    // for the hold itself (`hold` and `err` stay set), with the hang ceiling as the only watchdog.
+    let waited = Instant::now();
+    while !sh.holding.load(Ordering::Acquire) {
+        let expired = waited.elapsed() >= common::stall::HANG;
+        assert!(
+            !expired || sh.holding.load(Ordering::Acquire),
+            "its worker never began the held render within the hang ceiling: the strip was claimed, the fixture's hold never started"
+        );
+        std::thread::yield_now();
+    }
     // While it is away: a note is queued (parked with the strip), then another block passes.
     let given_before = sh.given.lock().unwrap().len();
     assert_eq!(send(&mut rig, 0, on(62)), EventOutcome::Queued, "an away strip parks the event");
