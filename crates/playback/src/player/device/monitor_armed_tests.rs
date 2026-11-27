@@ -44,6 +44,10 @@ fn an_armed_track_is_silent_with_the_option_off_its_take_still_holds_the_input_a
     assert!(pump(&fake, &player, 24) > 0.1, "option on (the default), stopped: the armed track is heard");
     player.set_monitor_armed(false).unwrap();
     assert!(!player.requested_monitor_armed());
+    // The switch fades the input out over 5 ms (240 samples, #730): the first block after it holds
+    // the ramp, every block after it is silent.
+    let ramp = pump(&fake, &player, 1);
+    assert!(ramp > 0.0, "option off: the first block fades the input out, not a cut to silence");
     assert_eq!(pump(&fake, &player, 24), 0.0, "option off, stopped: the armed track is not heard");
     let (takes, _) = recorder.finish();
     let bytes = std::fs::read(&takes[0].1).unwrap();

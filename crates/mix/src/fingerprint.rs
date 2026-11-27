@@ -24,7 +24,7 @@
 //!   child (the identity of the adopted plan: generations, track, layout, routes, mode bypass,
 //!   each slot's layout, channels, suspendability and id, the hardware inserts' and the External
 //!   Instrument's specs), then a state child (latency and delay compensation position, chase and
-//!   edit flags, mute, touch ramps, clip effects, per slot the parameter values last pushed, the
+//!   edit flags, mute, touch ramps, the monitoring gate, clip effects, per slot the parameter values last pushed, the
 //!   reported latency, failure, suspension and parameter pass flags and a reading insert's note
 //!   delay, and each hardware insert's `live` flag with its send while live).
 //!
@@ -329,6 +329,7 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
         // render (property 1 and the conflict count cover it).
         rendered: _,
         touch,
+        monitor,
     } = st;
     // The clip-effect chains, sorted by clip id: the table holds nothing else.
     let ClipFxTable(chains) = clip_fx;
@@ -391,6 +392,7 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
             w.bool(*edited);
             w.bool(*muted);
             touch.record(w);
+            monitor.record(w);
             for (_, fx) in chains {
                 let ClipFx { eq: _, comp: _, eq_on, comp_on, gain_db, lazy, sr: _, ch: _ } = fx;
                 w.bool(*eq_on);

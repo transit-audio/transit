@@ -25,6 +25,8 @@ pub enum Nudge {
     RackExit,
     /// A touch ramp mid-flight in the strip's first touch slot.
     TouchRamp,
+    /// The strip's monitoring gate (#730): its counter one sample further.
+    MonitorGate,
     /// The strip's retained `latency`.
     Latency,
     /// A key keyed at the strip with early-key frames pending (`pending > 0`).
@@ -67,6 +69,10 @@ impl MixEngine {
             Nudge::NoteDelayStandIn => st.plugins.iter_mut().flatten().find_map(|s| s.note_delay.as_mut()).is_some_and(|d| d.nudge_stand_in()),
             Nudge::TouchRamp => {
                 st.touch.nudge_ramp();
+                true
+            }
+            Nudge::MonitorGate => {
+                st.monitor.nudge();
                 true
             }
             Nudge::Latency => {

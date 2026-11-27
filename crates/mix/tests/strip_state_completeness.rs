@@ -199,6 +199,7 @@ fn a_strip_differing_in_one_inventoried_field_prints_differently() {
         (Nudge::AppliedSentinel, g.kick, "strip"),
         (Nudge::NoteDelayStandIn, g.synth, "strip"),
         (Nudge::TouchRamp, g.kick, "strip"),
+        (Nudge::MonitorGate, g.kick, "strip"),
         (Nudge::Latency, g.kick, "strip"),
         (Nudge::ClipFxToggle, g.kick, "strip"),
         (Nudge::KeyPending, g.pad, "lines"),

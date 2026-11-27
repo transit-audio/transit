@@ -449,18 +449,19 @@ fn input_monitoring_replaces_clips() {
     // Not monitored: the clip plays.
     let out = rig.render(0);
     assert!((out[0][100] - 0.5 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3);
-    // Monitored: the input replaces it, and it still sounds when stopped.
+    // Monitored: the input replaces it, and it still sounds when stopped. The switch ramps over
+    // its first 5 ms (240 samples, #730), so the block is read past the ramp.
     s.track_mut(t).unwrap().mixer.input_monitor = true;
     rig.publish(&s);
     let out = rig.render(512);
-    assert!((out[0][100] - 0.25 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3, "{}", out[0][100]);
+    assert!((out[0][300] - 0.25 * std::f32::consts::FRAC_1_SQRT_2).abs() < 1e-3, "{}", out[0][300]);
     rig.eng.monitor_only = true;
     let out = rig.render(1024);
     assert!(out[0][100] > 0.1);
     s.track_mut(t).unwrap().mixer.input_monitor = false;
     rig.publish(&s);
     let out = rig.render(1024);
-    assert!(out[0][100].abs() < 1e-6, "stopped, unmonitored: silence");
+    assert!(out[0][300].abs() < 1e-6, "stopped, unmonitored: silence past the ramp");
 }
 
 #[test]

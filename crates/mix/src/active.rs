@@ -53,7 +53,7 @@ fn slot_shape(kind: CellKind, s: &PluginSlot) -> Shape {
 }
 
 /// Moves a strip's running state into a new strip shell: note chasing, mute, gain
-/// reduction, latency, failures, meter, and its delay lines whole (with their contents and
+/// reduction, the monitoring gate, latency, failures, meter, and its delay lines whole (with their contents and
 /// capacity) where the shell holds placeholders for them. A shell with real (larger) lines keeps
 /// them. Only swaps and copies; what the shell had goes back with the old strip.
 fn move_strip(old: &mut Strip, new: &mut Strip) {
@@ -74,6 +74,8 @@ fn move_strip(old: &mut Strip, new: &mut Strip) {
     // A press or release can come with new tables (an edit in the same publish): the held and
     // returning parameters go on (#188).
     new.touch = old.touch;
+    // A monitoring switch in the same publish ramps from where the old strip's gate was (#730).
+    new.monitor = old.monitor;
     // The delays before keyed inserts continue from the old lines' history, insert by insert.
     for k in new.key_in.iter_mut() {
         if let Some(o) = old.key_in.iter().find(|o| o.slot == k.slot) {

@@ -112,8 +112,12 @@ mod meter_rms;
 mod meter_rms_tests;
 #[cfg(test)]
 mod monitor_armed_tests;
+mod monitor_gate;
+#[cfg(test)]
+mod monitor_ramp_tests;
 pub use meter_rms::RMS_WINDOW_MS;
 use meter_rms::RmsWindow;
+use monitor_gate::{MonitorGate, switch_samples};
 mod midi;
 mod midi_fx;
 mod note_delay;
@@ -628,6 +632,8 @@ struct Strip {
     rendered: strip_pool::Stamp,
     /// Touch mode (#188): the parameters the track holds or returns to their lanes.
     touch: TouchRamps,
+    /// An audio track's ramp between its live input and its clips (#730, [`monitor_gate`]).
+    monitor: MonitorGate,
 }
 
 /// Most latency delay compensation handles: 2^20 samples, about 22 s at 48 kHz. A strip reports
@@ -878,6 +884,7 @@ impl Strip {
             panic: None,
             rendered: strip_pool::Stamp::default(),
             touch: TouchRamps::default(),
+            monitor: MonitorGate::default(),
         }
     }
 }

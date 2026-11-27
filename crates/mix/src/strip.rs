@@ -101,29 +101,53 @@ pub(crate) fn input_channel(t: &Track, route: Option<&[Option<u16>]>, k: usize, 
     }
 }
 
+/// An audio track's source into the zeroed strip buffer: its live input when it hears it
+/// ([`hears_input`]), else its clips (nothing while stopped). The switch between the two ramps over
+/// the strip's monitoring gate ([`crate::monitor_gate`], #730); at rest each is written exactly as
+/// it is.
+fn audio_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>) {
+    let StripRender { s, live, pos, frames, .. } = *block;
+    let transport = crate::monitor_gate::Transport { stopped: live.monitor_only, recording: live.recording };
+    let gate = strip.monitor.begin(hears_input(t, live), transport, switch_samples(s.sample_rate.hz()), frames);
+    let steady = gate.steady();
+    if steady != Some(true) && !live.monitor_only {
+        render_audio_clips(s, t, strip, pos, frames);
+    }
+    if steady == Some(false) {
+        return;
+    }
+    if steady.is_none() {
+        for c in strip.buf.iter_mut() {
+            for (i, x) in c.iter_mut().take(frames).enumerate() {
+                *x *= gate.other(i);
+            }
+        }
+    }
+    // A named input route reads the channels the compiler resolved (no name lookup here); an
+    // unavailable one, or System Audio that does not run, is silent, never another input.
+    let n_in = live.input.len().max(1);
+    for (k, dst) in strip.buf.iter_mut().enumerate() {
+        let Some(src) = input_channel(t, strip.input_route.as_deref(), k, n_in).and_then(|c| live.input.get(c)) else { continue };
+        let src = src.iter().skip(live.input_offset);
+        if steady.is_none() {
+            for (i, (d, x)) in dst.iter_mut().zip(src).take(frames).enumerate() {
+                *d += *x * gate.input(i);
+            }
+        } else {
+            for (d, x) in dst.iter_mut().zip(src).take(frames) {
+                *d = *x;
+            }
+        }
+    }
+}
+
 fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, transport: &Transport) {
     let StripRender { s, busses, live, pos, frames, .. } = *block;
     for c in strip.buf.iter_mut() {
         c.iter_mut().take(frames).for_each(|x| *x = 0.0);
     }
     match t.kind {
-        TrackKind::Audio if hears_input(t, live) => {
-            // Input monitoring: the track hears its hardware input instead of its clips. A named
-            // input route reads the channels the compiler resolved (no name lookup here); an
-            // unavailable one, or System Audio that does not run, is silent, never another input.
-            let n_in = live.input.len().max(1);
-            for (k, dst) in strip.buf.iter_mut().enumerate() {
-                if let Some(src) = input_channel(t, strip.input_route.as_deref(), k, n_in).and_then(|c| live.input.get(c)) {
-                    for (d, x) in dst.iter_mut().zip(src.iter().skip(live.input_offset)).take(frames) {
-                        *d = *x;
-                    }
-                }
-            }
-        }
-        TrackKind::Audio if live.monitor_only => {}
-        TrackKind::Audio => {
-            render_audio_clips(s, t, strip, pos, frames);
-        }
+        TrackKind::Audio => audio_source(t, strip, block),
         TrackKind::Aux | TrackKind::Folder => {
             if let Route::Bus(b) = &t.mixer.input
                 && let Some(src) = busses.bus(*b)
