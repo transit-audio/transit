@@ -141,16 +141,19 @@ pub fn load_bundle(path: &Path) -> Result<Vec<Vst3Descriptor>, Vst3Error> {
 pub fn probe_class(path: &Path, class_id: &str) -> Result<Capability, Vst3Error> {
     let cid = parse_id(&format!("{}{class_id}", crate::ID_PREFIX)).ok_or_else(|| Vst3Error::NotFound(class_id.to_string()))?;
     let buses = Bundle::load(path)?.probe_buses(&cid)?;
-    let note_output = buses.event_outputs >= 1;
-    Ok(Capability {
-        note_output,
-        note_input: buses.event_inputs >= 1,
-        audio_outputs: u32::try_from(buses.audio_outputs).unwrap_or(0),
-        first_note_output: note_output.then_some(0),
-    })
+    // A count is recorded as the component declares it; a negative one is no answer at all.
+    let declared = |what: &str, n: i32| {
+        u32::try_from(n).map_err(|_| Vst3Error::Instantiate(class_id.to_string(), format!("the component declares {n} {what} buses")))
+    };
+    let event_outputs = declared("event output", buses.event_outputs)?;
+    let event_inputs = declared("event input", buses.event_inputs)?;
+    let audio_outputs = declared("audio output", buses.audio_outputs)?;
+    let note_output = event_outputs >= 1;
+    Ok(Capability { note_output, note_input: event_inputs >= 1, audio_outputs, first_note_output: note_output.then_some(0) })
 }
 
 pub fn probe_reply(file: &Path, class_id: &str) -> String {
+    scan_cache::enter_child();
     probe::reply(probe_class(file, class_id))
 }
 
@@ -190,7 +193,7 @@ fn probe_pass() {
     let Some(program) = scanner else { return };
     let stop = || SKIP.load(Ordering::Acquire) || background().pending || lock().generation != generation;
     let host = scan_cache::this_host();
-    let ran = probe::probe_files(
+    probe::probe_files(
         &mut files,
         &host,
         |path, d| {
@@ -207,18 +210,28 @@ fn probe_pass() {
             }
             answer
         },
-        |path, d| publish_probe(generation, path, d),
+        |path, d| {
+            publish_probe(generation, path, d);
+            persist(generation, cache_file.as_deref());
+        },
     );
-    if ran == 0 {
-        return;
-    }
+}
+
+/// Writes the published files, with every probe outcome so far, to the cache file: after each
+/// outcome, so that quitting during a long pass keeps what it found (a class not probed yet, or
+/// stopped, is written with no outcome and probed again by the next scan). Nothing is written once
+/// a newer listing was published (its scan writes the cache).
+fn persist(generation: u64, cache_file: Option<&Path>) {
+    let Some(f) = cache_file else { return };
+    // Taken before the registry lock, as the listing's write takes it after publishing: a write of
+    // an older listing cannot land after the newer listing's own.
     let _one_writer = cache_write_lock();
     let files = {
         let r = lock();
         (r.generation == generation).then(|| r.files.clone())
     };
-    if let (Some(f), Some(files)) = (cache_file, files) {
-        scan_cache::write(&f, &files);
+    if let Some(files) = files {
+        scan_cache::write(f, &files);
     }
 }
 
@@ -589,6 +602,7 @@ pub fn set_scanner(program: Option<PathBuf>) {
 }
 
 pub fn scan_reply(file: &Path) -> String {
+    scan_cache::enter_child();
     scan_cache::reply(load_bundle(file))
 }
 

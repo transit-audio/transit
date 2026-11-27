@@ -624,13 +624,14 @@ impl Class for Factory {
 }
 
 /// The classes this binary lists: the default four, or the sidechain pair (feature `sidechain`),
-/// or one of the scan-probe sets of `notes.rs` (features `notes`, `note-effects`, `probe-failures`).
-#[cfg(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))]
+/// or one of the scan-probe sets of `notes.rs` (features `notes`, `note-effects`, `probe-failures`,
+/// `edges`).
+#[cfg(any(feature = "notes", feature = "note-effects", feature = "probe-failures", feature = "edges"))]
 use notes::CLASSES;
-#[cfg(all(feature = "sidechain", not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
+#[cfg(all(feature = "sidechain", not(any(feature = "notes", feature = "note-effects", feature = "probe-failures", feature = "edges"))))]
 const CLASSES: [(TUID, &str, &str, &str); 2] =
     [(KEYED_CID, "Audio Module Class", "Fixture Sidechain", "Fx"), (PICKY_CID, "Audio Module Class", "Fixture Sidechain Picky", "Fx")];
-#[cfg(not(any(feature = "sidechain", feature = "notes", feature = "note-effects", feature = "probe-failures")))]
+#[cfg(not(any(feature = "sidechain", feature = "notes", feature = "note-effects", feature = "probe-failures", feature = "edges")))]
 const CLASSES: [(TUID, &str, &str, &str); 4] = [
     (GAIN_CID, "Audio Module Class", "Fixture Gain", "Fx"),
     (GAIN_CTRL_CID, "Component Controller Class", "Fixture Gain", ""),

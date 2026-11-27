@@ -27,5 +27,8 @@ slow-create = []
 notes = []
 note-effects = []
 probe-failures = []
+# Bus counts past the host's buffers and a negative one, and helper processes that hold the probe
+# child's output pipe (one in its own process group on Linux and macOS), then an ordinary class.
+edges = []
 
 [workspace]

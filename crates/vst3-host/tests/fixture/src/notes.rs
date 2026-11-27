@@ -27,6 +27,10 @@ pub(crate) const EFFECT_C_CID: TUID = uid(0x5C0A1D14, 0x11112222, 0x33334444, 0x
 pub(crate) const PROBE_ERROR_CID: TUID = uid(0x5C0A1D15, 0x11112222, 0x33334444, 0x55556666);
 pub(crate) const PROBE_CRASH_CID: TUID = uid(0x5C0A1D16, 0x11112222, 0x33334444, 0x55556666);
 pub(crate) const PROBE_BLOCK_CID: TUID = uid(0x5C0A1D17, 0x11112222, 0x33334444, 0x55556666);
+pub(crate) const BUSES_17_CID: TUID = uid(0x5C0A1D18, 0x11112222, 0x33334444, 0x55556666);
+pub(crate) const BUSES_NEGATIVE_CID: TUID = uid(0x5C0A1D19, 0x11112222, 0x33334444, 0x55556666);
+pub(crate) const PROBE_HELPER_CID: TUID = uid(0x5C0A1D1A, 0x11112222, 0x33334444, 0x55556666);
+pub(crate) const PROBE_ESCAPE_CID: TUID = uid(0x5C0A1D1B, 0x11112222, 0x33334444, 0x55556666);
 
 const MODULE: &str = "Audio Module Class";
 
@@ -50,6 +54,23 @@ pub(crate) const CLASSES: [(TUID, &str, &str, &str); 5] = [
     (NOTES_SILENT_CID, MODULE, "Fixture Notes Silent", "Instrument|Synth"),
 ];
 
+#[cfg(all(feature = "edges", unix, not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
+pub(crate) const CLASSES: [(TUID, &str, &str, &str); 5] = [
+    (BUSES_17_CID, MODULE, "Fixture Buses 17", "Instrument|Synth"),
+    (BUSES_NEGATIVE_CID, MODULE, "Fixture Buses Negative", "Fx"),
+    (PROBE_HELPER_CID, MODULE, "Fixture Probe Helper", "Fx"),
+    (PROBE_ESCAPE_CID, MODULE, "Fixture Probe Escape", "Fx"),
+    (NOTES_CID, MODULE, "Fixture Notes", "Instrument|Synth"),
+];
+
+#[cfg(all(feature = "edges", not(unix), not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
+pub(crate) const CLASSES: [(TUID, &str, &str, &str); 4] = [
+    (BUSES_17_CID, MODULE, "Fixture Buses 17", "Instrument|Synth"),
+    (BUSES_NEGATIVE_CID, MODULE, "Fixture Buses Negative", "Fx"),
+    (PROBE_HELPER_CID, MODULE, "Fixture Probe Helper", "Fx"),
+    (NOTES_CID, MODULE, "Fixture Notes", "Instrument|Synth"),
+];
+
 /// The buses a class declares.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Shape {
@@ -59,14 +80,29 @@ enum Shape {
     Silent,
     /// Event in, event out, no audio.
     Effect,
+    /// Seventeen audio outputs, event in, event out.
+    Buses17,
+    /// Audio out, event in, and -1 event output buses (a count no component may give).
+    NegativeEvents,
 }
 
 impl Shape {
-    fn audio_out(self) -> bool {
-        self != Shape::Effect
+    fn audio_outs(self) -> i32 {
+        match self {
+            Shape::Effect => 0,
+            Shape::Buses17 => 17,
+            _ => 1,
+        }
     }
-    fn event_out(self) -> bool {
-        self != Shape::Silent
+    fn audio_out(self) -> bool {
+        self.audio_outs() > 0
+    }
+    fn event_outs(self) -> i32 {
+        match self {
+            Shape::Silent => 0,
+            Shape::NegativeEvents => -1,
+            _ => 1,
+        }
     }
 }
 
@@ -92,6 +128,16 @@ pub(crate) fn create(cid: &TUID) -> Option<vst3::ComPtr<FUnknown>> {
         crash()
     } else if *cid == PROBE_BLOCK_CID {
         block()
+    } else if *cid == BUSES_17_CID {
+        Shape::Buses17
+    } else if *cid == BUSES_NEGATIVE_CID {
+        Shape::NegativeEvents
+    } else if *cid == PROBE_HELPER_CID {
+        spawn_helper("helper", false);
+        block()
+    } else if *cid == PROBE_ESCAPE_CID {
+        spawn_helper("escape", true);
+        block()
     } else {
         return None;
     };
@@ -110,19 +156,46 @@ fn crash() -> ! {
     std::process::abort()
 }
 
-/// Does not return while its scan parent lives, as a plug-in waiting on a dialog or a license
-/// server does; says so first in `blocking.mark` in the working folder.
+/// Does not return for 300 s, as a plug-in waiting on a dialog or a license server does. First it holds an
+/// exclusive lock on `blocking.lock` (released only when the process ends, so a test can wait for
+/// its end) and says it is blocking in `blocking.mark`, both in the working folder.
 fn block() -> ! {
+    let lock = std::fs::File::create("blocking.lock").and_then(|f| f.lock().map(|()| f));
     let _ = std::fs::write("blocking.mark", b"blocking in createInstance");
-    // Until its scan parent stops it; if the parent itself is gone (a failed test), the next line
-    // written to the closed pipe fails and the child ends, so no orphan is left behind.
-    loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        use std::io::Write as _;
-        let mut out = std::io::stdout();
-        if writeln!(out, "fixture: still blocking").and_then(|()| out.flush()).is_err() {
-            std::process::exit(1);
+    // Ends by itself after 300 s, saying so in `blocking.done`, so that a test of containment fails
+    // (rather than passes) when nothing killed it, and nothing is left for good.
+    std::thread::sleep(std::time::Duration::from_secs(300));
+    let _ = std::fs::write("blocking.done", b"ended by itself");
+    drop(lock);
+    std::process::exit(0)
+}
+
+/// Starts a helper process that inherits this process's standard output (the scan's pipe), as a
+/// plug-in that starts a license or update helper does: this program again with
+/// `--hold-output <name>`, which locks `<name>.lock` and writes its process id to `<name>.ready`
+/// once it holds the lock. Waits for that file (the helper's own start, not a clock budget: it
+/// gives up after 3000 checks). `escape`: the helper starts in a process group of its own (Linux
+/// and macOS), as a process that leaves its parent's group on purpose does.
+fn spawn_helper(name: &str, escape: bool) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    let mut c = std::process::Command::new(exe);
+    c.arg("--hold-output").arg(name).stdin(std::process::Stdio::null());
+    #[cfg(unix)]
+    if escape {
+        use std::os::unix::process::CommandExt as _;
+        c.process_group(0);
+    }
+    #[cfg(not(unix))]
+    let _ = escape;
+    if c.spawn().is_err() {
+        return;
+    }
+    let ready = format!("{name}.ready");
+    for _ in 0..3000 {
+        if std::fs::metadata(&ready).is_ok_and(|m| m.len() > 0) {
+            return;
         }
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
 
@@ -155,18 +228,17 @@ impl IComponentTrait for Notes {
     }
     unsafe fn getBusCount(&self, media: MediaType, dir: BusDirection) -> i32 {
         let out = dir == BusDirections_::kOutput as BusDirection;
-        let declared = if media == MediaTypes_::kAudio as MediaType {
-            out && self.shape.audio_out()
+        if media == MediaTypes_::kAudio as MediaType {
+            if out { self.shape.audio_outs() } else { 0 }
         } else if media == MediaTypes_::kEvent as MediaType {
-            !out || self.shape.event_out()
+            if out { self.shape.event_outs() } else { 1 }
         } else {
-            false
-        };
-        i32::from(declared)
+            0
+        }
     }
     unsafe fn getBusInfo(&self, media: MediaType, dir: BusDirection, index: i32, bus: *mut BusInfo) -> tresult {
         // SAFETY: forwarded from the host's own call.
-        if index != 0 || unsafe { self.getBusCount(media, dir) } == 0 {
+        if index < 0 || index >= unsafe { self.getBusCount(media, dir) } {
             return kInvalidArgument;
         }
         if media == MediaTypes_::kAudio as MediaType {
@@ -195,12 +267,12 @@ impl IComponentTrait for Notes {
 
 impl IAudioProcessorTrait for Notes {
     unsafe fn setBusArrangements(&self, _i: *mut SpeakerArrangement, n_in: i32, outputs: *mut SpeakerArrangement, n_out: i32) -> tresult {
-        let want = i32::from(self.shape.audio_out());
+        let want = self.shape.audio_outs();
         if n_in != 0 || n_out != want {
             return kResultFalse;
         }
         // SAFETY: the host passes n_out (checked above) output arrangements.
-        if want == 1 && unsafe { *outputs } != SpeakerArr::kStereo {
+        if want >= 1 && unsafe { *outputs } != SpeakerArr::kStereo {
             return kResultFalse;
         }
         kResultTrue
