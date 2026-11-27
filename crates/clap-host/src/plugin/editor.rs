@@ -27,7 +27,10 @@ impl transit_dsp::PluginStateReader for ClapState {
             return None;
         }
         let core = lock(&shared.core);
-        if !core.inst.load_state(data) {
+        let ok = core.inst.load_state(data);
+        // A state load reached the processor: a new lifecycle generation (ADR 0064, decision 6).
+        shared.life_out.next_generation(core.inst.is_active());
+        if !ok {
             return None;
         }
         shared.loads.fetch_add(1, Ordering::AcqRel);

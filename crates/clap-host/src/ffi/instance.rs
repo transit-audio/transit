@@ -307,7 +307,8 @@ impl Instance {
     }
 
     /// Runs one `clap_process` call over `frames` frames. Events must be sorted by time; their
-    /// times are made relative to `offset`. Returns the CLAP process status.
+    /// times are made relative to `offset`. The plug-in's note output on port `read` goes into
+    /// `notes` (ADR 0064, decision 3). Returns the CLAP process status.
     pub fn process(
         &mut self,
         frames: usize,
@@ -317,6 +318,8 @@ impl Instance {
         events: &[Event],
         offset: u32,
         transport: Option<&Transport>,
+        notes: &mut transit_dsp::hosted_out::HostedOutBuffer,
+        read: Option<u32>,
     ) -> Result<i32, ProcessError> {
         if !self.active {
             return Err(ProcessError::BeforeCall);
@@ -353,8 +356,9 @@ impl Instance {
             get: Some(in_events_get),
         };
         self.out_params.clear();
-        let out_events =
-            clap_output_events { ctx: (&mut self.out_params as *mut Vec<(u32, f64)>).cast::<c_void>(), try_push: Some(out_events_try_push) };
+        let frames_u32 = u32::try_from(frames).unwrap_or(u32::MAX);
+        let mut sink = OutSink { params: &mut self.out_params, notes, read, start: offset, frames: frames_u32 };
+        let out_events = clap_output_events { ctx: (&mut sink as *mut OutSink<'_>).cast::<c_void>(), try_push: Some(out_events_try_push) };
         let transport = transport.map(transport_event);
         let p = clap_process {
             steady_time,
@@ -369,8 +373,8 @@ impl Instance {
         };
         // SAFETY: valid, processing instance. Every buffer pointer refers to `frames` (or more)
         // valid f32s owned by `inputs`/`outputs`, which are borrowed for the whole call; the event
-        // lists and their contexts and the transport live on this stack frame / in `self.raw`,
-        // untouched until the call returns.
+        // lists and their contexts (the output sink included) and the transport live on this
+        // stack frame / in `self.raw`, untouched until the call returns.
         let status = unsafe { process(self.plugin, &p) };
         for &(id, v) in &self.out_params {
             trace::record(self.state.trace_id, trace::Call::OutParamValue, id, v, 0);

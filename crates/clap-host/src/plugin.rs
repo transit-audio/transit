@@ -43,6 +43,7 @@
 mod delivery;
 mod echoes;
 mod editor;
+mod note_out;
 mod parameter_queue;
 use echoes::{Echoes, Reported};
 
@@ -164,6 +165,9 @@ pub(crate) struct Shared {
     /// Live state loads (#78), bumped while holding `core`: the audio side drops the values it
     /// queued before one (see [`drop_before_load`]).
     loads: AtomicU64,
+    /// The lifecycle and what each activation read (ADR 0064, decisions 3, 4.1 and 6): see
+    /// `note_out.rs`.
+    life_out: note_out::LifeOut,
     /// What the plug-in reported for each parameter, and the value the session got for it (#651;
     /// written on the main thread, read by the audio side's [`Echoes`]).
     reported: Reported,
@@ -379,6 +383,7 @@ impl Shared {
         self.host.restart.store(false, Ordering::Relaxed);
         core.inst.deactivate();
         let activated = core.activate(self.info.id);
+        self.publish_activation(core, activated.is_some());
         self.key_input.store(core.key_port.is_some(), Ordering::Relaxed);
         let Some(latency) = activated else {
             self.latency.store(0, Ordering::Release);
@@ -453,6 +458,10 @@ pub struct ClapPlugin {
     loads_seen: u64,
     /// Which host-set values are the session's echo of a value the plug-in reported (#651).
     echoes: Echoes,
+    /// The last block's note output and call report (ADR 0064, decision 3).
+    note_out: transit_dsp::hosted_out::HostedOutBuffer,
+    /// The block size `prepare` asked for (the native calls a skipped block was due).
+    block: usize,
 }
 
 impl ClapPlugin {
@@ -501,6 +510,7 @@ impl ClapPlugin {
             processed_gen: AtomicU64::new(0),
             set_at: ids.iter().map(|_| AtomicU64::new(0)).collect(),
             loads: AtomicU64::new(0),
+            life_out: note_out::LifeOut::default(),
             reported: Reported::new(ids.len()),
         });
         lock(live()).push(Arc::downgrade(&shared));
@@ -535,6 +545,8 @@ impl ClapPlugin {
             process_errors: 0,
             loads_seen: 0,
             echoes,
+            note_out: transit_dsp::hosted_out::HostedOutBuffer::new(),
+            block: 0,
         };
         #[cfg(test)]
         CONSTRUCTED.set([plugin.queue.capacity(), plugin.delivery.capacity(), raw_capacity, plugin.info.params.len()]);
@@ -739,6 +751,7 @@ impl ClapPlugin {
         let _t = trace::scope(Thread::Audio);
         let ch = self.channels.min(io.len());
         let frames = io.iter().take(ch).map(Vec::len).fold(frames, usize::min);
+        self.note_out.begin_block();
         if frames == 0 || ch == 0 {
             collapse_params(&mut self.queue);
             self.delivery.carry();
@@ -759,12 +772,14 @@ impl ClapPlugin {
                 }
                 collapse_params(&mut self.queue);
                 self.delivery.carry();
+                self.skip_calls(frames);
                 self.gate.skip(io, ch, frames);
                 return;
             }
             _ => {
                 collapse_params(&mut self.queue);
                 self.delivery.carry();
+                self.skip_calls(frames);
                 self.gate.skip(io, ch, frames);
                 return;
             }
@@ -773,6 +788,7 @@ impl ClapPlugin {
         let Some(mut guard) = try_lock(&shared.core) else {
             collapse_params(&mut self.queue);
             self.delivery.carry();
+            self.skip_calls(frames);
             self.gate.skip(io, ch, frames);
             return;
         };
@@ -781,19 +797,24 @@ impl ClapPlugin {
         if core.max_block == 0 {
             collapse_params(&mut self.queue);
             self.delivery.carry();
+            self.skip_calls(frames);
             return; // never prepared
         }
         if !core.inst.is_active() {
             // Its activation failed: silent, not the input at unity (review N2).
             collapse_params(&mut self.queue);
             self.delivery.carry();
+            self.skip_calls(frames);
             drop(guard);
             self.gate.skip(io, ch, frames);
             return;
         }
         // Every change queued so far goes out in this block (parameter events are at time 0).
         let queued_up_to = shared.host_gen.load(Ordering::Acquire);
-        if std::mem::take(&mut self.reset_pending) {
+        // The input dialect of this activation, read with its generation (ADR 0064, 4.1).
+        self.take_dialect();
+        let mut reset_before = std::mem::take(&mut self.reset_pending);
+        if reset_before {
             core.inst.reset();
         }
         // This block answers a pending `request_process` or `params.request_flush` (one made
@@ -848,8 +869,20 @@ impl ClapPlugin {
             let k = self.queue.iter().position(|e| e.time() >= end).unwrap_or(self.queue.len());
             let offset = u32::try_from(start).unwrap_or(u32::MAX);
             let events = self.queue.get(..k).unwrap_or(&[]);
-            let r = core.inst.process(n, self.steady, &mut core.inputs, &mut core.outputs, events, offset, self.transport.as_ref());
+            let read = shared.life_out.read_port();
+            let r = core.inst.process(
+                n,
+                self.steady,
+                &mut core.inputs,
+                &mut core.outputs,
+                events,
+                offset,
+                self.transport.as_ref(),
+                &mut self.note_out,
+                read,
+            );
             if r == Err(crate::ffi::ProcessError::BeforeCall) {
+                self.skip_calls(frames - start);
                 // A refused start or missing process entry never consumed these values, nor the
                 // call's events: they stay queued for the next call (ADR 0059, 3a).
                 self.queue.retain(|e| matches!(e, Event::Param { .. }));
@@ -860,6 +893,9 @@ impl ClapPlugin {
                 return;
             }
             self.queue.drain(..k);
+            let generation = shared.life_out.generation();
+            self.note_out.record_call(transit_dsp::hosted_out::CallRecord { generation, reset_before, error: r.is_err() });
+            reset_before = false;
             self.delivery.finish(r.is_ok());
             let tail = core.inst.tail();
             self.tail = tail_samples_from(tail);
@@ -925,13 +961,14 @@ impl Plugin for ClapPlugin {
         self.gate.set_rate(sr);
         // A (re)activation starts from a clean state anyway.
         self.reset_pending = false;
-        let port = core.inst.note_port();
-        self.notes = note_mode(port);
-        self.midi_in = port.is_some_and(|p| p.supported & CLAP_NOTE_DIALECT_MIDI != 0);
+        self.block = mb;
         self.status = ProcessStatus::Continue;
         // A full (re)activation answers any restart request, including one left half done.
         self.host.restart.store(false, Ordering::Relaxed);
-        let latency = core.activate(self.info.id).unwrap_or(0);
+        let activated = core.activate(self.info.id);
+        shared.publish_activation(&core, activated.is_some());
+        self.take_dialect();
+        let latency = activated.unwrap_or(0);
         shared.key_input.store(core.key_port.is_some(), Ordering::Relaxed);
         drop(core);
         shared.latency.store(latency, Ordering::Release);
@@ -1006,6 +1043,18 @@ impl Plugin for ClapPlugin {
         self.process_errors
     }
 
+    fn note_output(&self) -> Option<transit_dsp::hosted_out::NoteOutputInfo> {
+        self.shared.life_out.note_output()
+    }
+
+    fn take_note_output(&mut self, out: &mut dyn FnMut(transit_dsp::hosted_out::HostedOut) -> bool) -> transit_dsp::hosted_out::CallReport {
+        self.note_out.take(out)
+    }
+
+    fn lifecycle(&self) -> transit_dsp::hosted_out::Lifecycle {
+        self.shared.life_out.lifecycle()
+    }
+
     fn process_with_key(&mut self, io: &mut [Vec<f32>], key: &[Vec<f32>], frames: usize) {
         self.process_keyed(io, Some(key), frames);
     }
@@ -1064,6 +1113,7 @@ impl Plugin for ClapPlugin {
     /// channel nibble. Controllers, bend, channel pressure and programs need a port that takes MIDI;
     /// what the port cannot take is accepted as nothing.
     fn event(&mut self, offset: u32, ev: &PluginEvent) -> bool {
+        self.take_dialect();
         let skip = match ev.message {
             Message::NoteOn { key, .. } | Message::NoteOff { key, .. } | Message::PolyPressure { key, .. } => {
                 key > 127 || self.notes == NoteMode::None || (self.notes == NoteMode::Midi && !self.midi_in)
@@ -1081,7 +1131,11 @@ impl Plugin for ClapPlugin {
 
     fn load_state(&mut self, data: &[u8]) -> bool {
         let _t = trace::scope(Thread::Audio);
-        let ok = lock(&self.shared.core).inst.load_state(data);
+        let core = lock(&self.shared.core);
+        let ok = core.inst.load_state(data);
+        // A state load reached the processor: a new lifecycle generation (ADR 0064, decision 6).
+        self.shared.life_out.next_generation(core.inst.is_active());
+        drop(core);
         if ok {
             self.refresh_values();
         }

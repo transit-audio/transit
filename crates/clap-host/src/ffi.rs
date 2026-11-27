@@ -95,6 +95,7 @@ mod gui_probe;
 mod host;
 mod instance;
 mod module;
+mod note_out;
 mod probe;
 #[cfg(target_os = "linux")]
 mod run_loop;
@@ -108,6 +109,8 @@ pub(crate) use gui::*;
 pub(crate) use host::*;
 pub(crate) use instance::*;
 pub(crate) use module::*;
+pub(crate) use note_out::OutSink;
+use note_out::out_events_try_push;
 use state::*;
 
 // ---- host window for embedded editors ------------------------------------------------------
@@ -295,6 +298,7 @@ mod tests {
         let mut inst = Bundle::load(&d.path).unwrap().instantiate(&d.plugin_id).unwrap();
         let mut inputs = PortBuffers::new(&[2], 64);
         let mut outputs = PortBuffers::new(&[2], 64);
+        let mut notes = transit_dsp::hosted_out::HostedOutBuffer::new();
         let original = inst.plugin;
         let mut vt = inst.vt();
         unsafe extern "C" fn refuse_start(_: *const clap_plugin) -> bool {
@@ -313,7 +317,7 @@ mod tests {
             inst.plugin = &vt;
             let frames = if case == 1 { 65 } else { 64 };
             let (failed, stats) = allocation_probe::measure(|| {
-                let result = inst.process(frames, 0, &mut inputs, &mut outputs, &[], 0, None);
+                let result = inst.process(frames, 0, &mut inputs, &mut outputs, &[], 0, None, &mut notes, None);
                 result.is_err()
             });
             // Restore the genuine lifecycle state before any assertion can unwind.

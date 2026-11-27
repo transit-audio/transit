@@ -53,6 +53,7 @@ use clap_sys::version::CLAP_VERSION;
 use std::ffi::{CStr, c_char, c_void};
 
 mod editor_modes;
+mod generator;
 mod notes;
 mod stop_after;
 #[cfg(target_os = "linux")]
@@ -1159,7 +1160,7 @@ unsafe extern "C" fn factory_desc(_f: *const clap_plugin_factory, i: u32) -> *co
 
 unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const clap_host, id: *const c_char) -> *const clap_plugin {
     let id = unsafe { CStr::from_ptr(id) };
-    if let Some(p) = notes::create(id) {
+    if let Some(p) = notes::create(id, host) {
         return p;
     }
     let (desc, synth, requests, events, keyed) = if id == c"org.soundcraft.test.gain" {

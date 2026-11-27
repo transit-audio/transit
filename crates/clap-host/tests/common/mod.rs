@@ -36,6 +36,22 @@ pub fn sidechain_fixture_dir() -> &'static Path {
     DIR.get_or_init(|| install(&["--features", "sidechain"], "clap-sidechain-fixture-target", "clap-sidechain-install", "Sidechain", 1))
 }
 
+/// Builds the fixture with its `notes` feature once and returns a folder containing `Notes.clap`
+/// with the note generators (ADR 0064 slices HM0 and HM1).
+#[allow(dead_code)]
+pub fn notes_fixture_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| install(&["--features", "notes"], "clap-notes-fixture-target", "clap-notes-install", "Notes", 2))
+}
+
+/// Builds the fixture with its `note-effects` feature once and returns a folder containing
+/// `NoteEffects.clap` with the three zero-audio note effects (ADR 0064 slices HM0 and HM1).
+#[allow(dead_code)]
+pub fn note_effects_fixture_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| install(&["--features", "note-effects"], "clap-note-effects-fixture-target", "clap-note-effects-install", "NoteEffects", 3))
+}
+
 fn install(features: &[&str], target_dir: &str, install_dir: &str, name: &str, plugins: usize) -> PathBuf {
     transit_clap_host::set_scan_extra_dirs_only(true);
     let dir = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp")))

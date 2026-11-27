@@ -1,4 +1,5 @@
-//! Note ports and events: host-to-plug-in events, the transport and the input and output event lists.
+//! Note ports and events: host-to-plug-in events, the transport and the input event list (the output
+//! list is `note_out`'s).
 
 use super::*;
 
@@ -185,29 +186,4 @@ pub(super) unsafe extern "C" fn in_events_get(list: *const clap_input_events, in
     // SAFETY: as in `in_events_size`; the Vec is not mutated while the plugin processes.
     let v = unsafe { ((*list).ctx as *const Vec<RawEvent>).as_ref() };
     v.and_then(|v| v.get(index as usize)).map_or(std::ptr::null(), RawEvent::header)
-}
-
-pub(super) unsafe extern "C" fn out_events_try_push(list: *const clap_output_events, event: *const clap_event_header) -> bool {
-    // Plugin → host events are accepted. Parameter values (typically edits in the plugin's GUI)
-    // are kept, while there is room, so the UI can write them into the session; the rest is
-    // ignored.
-    if list.is_null() || event.is_null() {
-        return true;
-    }
-    // SAFETY: CLAP passes a valid event header for the duration of the call.
-    let h = unsafe { &*event };
-    if h.space_id != CLAP_CORE_EVENT_SPACE_ID || h.type_ != CLAP_EVENT_PARAM_VALUE || (h.size as usize) < size_of::<clap_event_param_value>() {
-        return true;
-    }
-    // SAFETY: the header says this is a complete `clap_event_param_value` (type and size checked).
-    let e = unsafe { &*event.cast::<clap_event_param_value>() };
-    // SAFETY: `ctx` is null or the instance's preallocated `out_params` Vec, which `process`
-    // borrows exclusively for the duration of the plugin call.
-    if let Some(v) = unsafe { ((*list).ctx as *mut Vec<(u32, f64)>).as_mut() }
-        && v.len() < v.capacity()
-        && e.value.is_finite()
-    {
-        v.push((e.param_id, e.value));
-    }
-    true
 }

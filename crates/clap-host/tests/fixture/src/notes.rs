@@ -14,9 +14,10 @@
 //!   creation ("Fixture Probe Crash"), one that never returns from creation ("Fixture Probe
 //!   Block"), then "Fixture Notes Silent".
 //!
-//! None of them writes events yet; every output buffer is silent. The blocking plug-in first writes
-//! `blocking.mark` into the process's working folder, so a test can see that its probe child is
-//! inside the creation before it stops it.
+//! "Fixture Notes" and the note effects write scripted note output and record what the host does
+//! (`generator.rs`, ADR 0064 slice HM1); the others write nothing, and every audio output buffer
+//! is silent. The blocking plug-in first writes `blocking.mark` into the process's working folder,
+//! so a test can see that its probe child is inside the creation before it stops it.
 
 // Each build lists one set, so the ids and descriptors of the other sets go unused in it.
 #![allow(dead_code)]
@@ -98,7 +99,7 @@ pub(crate) static DESCS: [&clap_plugin_descriptor; 9] = [
 
 /// The ports a plug-in declares.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Shape {
+pub(crate) enum Shape {
     /// Stereo audio out; note in; note out 0 MIDI 2 only, note out 1 CLAP and MIDI.
     Generator,
     /// Stereo audio out; note in; note out 0 MIDI 2 only.
@@ -116,14 +117,18 @@ enum Shape {
 }
 
 #[repr(C)]
-struct Note {
-    plugin: clap_plugin,
-    shape: Shape,
+pub(crate) struct Note {
+    pub(crate) plugin: clap_plugin,
+    pub(crate) shape: Shape,
+    /// The host the plug-in was created with (alive as long as the plug-in).
+    pub(crate) host: *const clap_host,
+    /// The scripted generator's state (`generator.rs`; unused by the other shapes).
+    pub(crate) gen_state: std::sync::Mutex<crate::generator::State>,
 }
 
 /// The plug-in for one of this module's ids: `Some(null)` for the one whose creation fails,
 /// `None` for an id that is not this module's. The crashing and blocking plug-ins never return.
-pub(crate) fn create(id: &CStr) -> Option<*const clap_plugin> {
+pub(crate) fn create(id: &CStr, host: *const clap_host) -> Option<*const clap_plugin> {
     let (desc, shape) = if id == c"org.soundcraft.test.notes" {
         (&NOTES_DESC, Shape::Generator)
     } else if id == c"org.soundcraft.test.notes-silent" {
@@ -166,23 +171,24 @@ pub(crate) fn create(id: &CStr) -> Option<*const clap_plugin> {
         return None;
     };
     note_created();
-    let b = Box::new(Note {
-        plugin: clap_plugin {
-            desc: desc as *const _,
-            plugin_data: std::ptr::null_mut(),
-            init: Some(init),
-            destroy: Some(destroy),
-            activate: Some(activate),
-            deactivate: Some(deactivate),
-            start_processing: Some(start_processing),
-            stop_processing: Some(stop_processing),
-            reset: Some(reset),
-            process: Some(process),
-            get_extension: Some(get_extension),
-            on_main_thread: Some(on_main_thread),
-        },
-        shape,
-    });
+    let mut plugin = clap_plugin {
+        desc: desc as *const _,
+        plugin_data: std::ptr::null_mut(),
+        init: Some(init),
+        destroy: Some(destroy),
+        activate: Some(activate),
+        deactivate: Some(deactivate),
+        start_processing: Some(start_processing),
+        stop_processing: Some(stop_processing),
+        reset: Some(reset),
+        process: Some(process),
+        get_extension: Some(get_extension),
+        on_main_thread: Some(on_main_thread),
+    };
+    if matches!(shape, Shape::Generator | Shape::Effect) {
+        crate::generator::install(&mut plugin);
+    }
+    let b = Box::new(Note { plugin, shape, host, gen_state: std::sync::Mutex::new(crate::generator::State::default()) });
     let raw = Box::into_raw(b);
     // SAFETY: `raw` is the live box just leaked; it is freed in `destroy`.
     unsafe {
@@ -279,7 +285,7 @@ fn spawn_role(role: &str, name: &str, escape: bool) {
 
 /// # Safety
 /// `p` is a plug-in this module made and has not destroyed.
-unsafe fn note<'a>(p: *const clap_plugin) -> &'a Note {
+pub(crate) unsafe fn note<'a>(p: *const clap_plugin) -> &'a Note {
     // SAFETY: caller contract; `plugin_data` is the plug-in's own box.
     unsafe { &*((*p).plugin_data as *const Note) }
 }
@@ -339,7 +345,7 @@ unsafe extern "C" fn audio_get(p: *const clap_plugin, index: u32, is_input: bool
     true
 }
 
-static AUDIO: clap_plugin_audio_ports = clap_plugin_audio_ports { count: Some(audio_count), get: Some(audio_get) };
+pub(crate) static AUDIO: clap_plugin_audio_ports = clap_plugin_audio_ports { count: Some(audio_count), get: Some(audio_get) };
 
 /// The dialects of note port `index` in one direction; `None` past the last port.
 fn dialects(shape: Shape, index: u32, is_input: bool) -> Option<u32> {
@@ -366,7 +372,13 @@ unsafe extern "C" fn note_count(p: *const clap_plugin, is_input: bool) -> u32 {
 unsafe extern "C" fn note_get(p: *const clap_plugin, index: u32, is_input: bool, info: *mut clap_note_port_info) -> bool {
     // SAFETY: the host passes a live plug-in of this module.
     let shape = unsafe { note(p) }.shape;
-    let Some(supported) = dialects(shape, index, is_input) else { return false };
+    let Some(mut supported) = dialects(shape, index, is_input) else { return false };
+    // ADR 0064 slice HM1: a generator told to drop the CLAP dialect of its input port does so
+    // from its next activation.
+    // SAFETY: the host passes a live plug-in of this module.
+    if is_input && index == 0 && crate::generator::input_midi_only(unsafe { note(p) }) {
+        supported = CLAP_NOTE_DIALECT_MIDI;
+    }
     if shape == Shape::PortUnreadable && !is_input {
         return false;
     }
@@ -379,7 +391,7 @@ unsafe extern "C" fn note_get(p: *const clap_plugin, index: u32, is_input: bool,
     true
 }
 
-static NOTE_PORTS: clap_plugin_note_ports = clap_plugin_note_ports { count: Some(note_count), get: Some(note_get) };
+pub(crate) static NOTE_PORTS: clap_plugin_note_ports = clap_plugin_note_ports { count: Some(note_count), get: Some(note_get) };
 
 static NOTE_PORTS_WITHOUT_GET: clap_plugin_note_ports = clap_plugin_note_ports { count: Some(note_count), get: None };
 
