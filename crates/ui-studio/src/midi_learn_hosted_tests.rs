@@ -101,10 +101,11 @@ fn fresh_first_block(s: &Session, track: TrackId) -> Vec<Vec<f32>> {
     out
 }
 
-/// The parameter points the events synth received in the first block of `out`: (offset, id,
-/// value in millionths).
+/// The host-parameter points the events synth received in the first block of `out`: (offset, id,
+/// value in millionths). Parameters 100 and up are the fixture's MIDI-controller mappings (the mix's
+/// controller chase sends CC 121 there at a start), not host parameters.
 fn points(out: &[Vec<f32>]) -> Vec<(u32, u32, i64)> {
-    out[0].chunks(4).take_while(|r| r[0] != 0.0).filter(|r| r[0] == 4.0).map(|r| (r[1] as u32, r[2] as u32, r[3] as i64)).collect()
+    out[0].chunks(4).take_while(|r| r[0] != 0.0).filter(|r| r[0] == 4.0 && r[2] < 100.0).map(|r| (r[1] as u32, r[2] as u32, r[3] as i64)).collect()
 }
 
 #[test]
