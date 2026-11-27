@@ -314,11 +314,6 @@ impl NoteEvent {
             NoteEvent::On { time, .. } | NoteEvent::Off { time, .. } | NoteEvent::Pressure { time, .. } => time,
         }
     }
-    pub fn set_time(&mut self, t: u32) {
-        match self {
-            NoteEvent::On { time, .. } | NoteEvent::Off { time, .. } | NoteEvent::Pressure { time, .. } => *time = t,
-        }
-    }
 
     pub(super) fn to_raw(self, offset: u32) -> sv::Event {
         // SAFETY: `Event` is plain data (numbers and a union of plain structs); all-zero is valid.

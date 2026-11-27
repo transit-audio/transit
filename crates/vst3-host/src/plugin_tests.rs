@@ -34,24 +34,3 @@ fn process_status_follows_the_tail() {
     assert_eq!(status_from_tail(0), ProcessStatus::Tail);
     assert_eq!(status_from_tail(48_000), ProcessStatus::Tail);
 }
-
-#[test]
-fn reset_keeps_the_releases_it_owes() {
-    let mut notes = Vec::with_capacity(EVENT_CAP);
-    notes.push(NoteEvent::On { time: 3, key: 72, velocity: 1.0, channel: 0, id: -1 });
-    notes.push(NoteEvent::Off { time: 5, key: 67, velocity: 0.0, channel: 0, id: -1 });
-    notes.push(NoteEvent::Pressure { time: 6, key: 67, pressure: 0.5, channel: 0, id: -1 });
-    notes.push(NoteEvent::On { time: 7, key: 50, velocity: 0.0, channel: 2, id: 4 });
-    let mut held = [[false; 128]; MIDI_CHANNELS];
-    held[0][60] = true;
-    held[9][64] = true;
-    keep_releases_on_reset(&mut notes, &mut held);
-    assert!(notes.contains(&NoteEvent::On { time: 7, key: 50, velocity: 0.0, channel: 2, id: 4 }), "a velocity-0 note-on is a release");
-    notes.retain(|e| !matches!(e, NoteEvent::On { velocity: 0.0, .. }));
-    let mut keys: Vec<u8> = notes.iter().filter_map(|e| if let NoteEvent::Off { key, .. } = e { Some(*key) } else { None }).collect();
-    assert_eq!(keys.len(), notes.len(), "reset left a non-release queued");
-    keys.sort_unstable();
-    assert_eq!(keys, [60, 64, 67], "reset must queue an off for every held or already-released key");
-    assert!(held.iter().flatten().all(|h| !h), "reset must clear held");
-    assert!(notes.iter().any(|e| matches!(e, NoteEvent::Off { key: 64, channel: 9, .. })), "on its channel");
-}

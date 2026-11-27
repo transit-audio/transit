@@ -597,7 +597,7 @@ impl Bundle {
             max_frames: 0,
             in_params: ComWrapper::new(ParamChanges::new(PARAM_QUEUE_CAP, PARAM_POINTS)),
             out_params: ComWrapper::new(ParamChanges::new(PARAM_QUEUE_CAP, 0)),
-            in_events: ComWrapper::new(EventList::new(EVENT_CAP)),
+            in_events: ComWrapper::new(EventList::new(NATIVE_EVENTS)),
             out_events: ComWrapper::new(EventList::new(EVENT_CAP)),
             // SAFETY: `ProcessContext` is plain data (numbers and small structs); all-zero is valid.
             context: unsafe { std::mem::zeroed() },

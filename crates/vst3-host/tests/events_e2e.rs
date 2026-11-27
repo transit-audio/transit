@@ -109,8 +109,10 @@ fn a_host_set_value_reaches_the_processor_and_then_the_editor() {
     assert_eq!(r.iter().filter(|x| x.0 == 5).copied().collect::<Vec<_>>(), vec![(5, 0, 5, 800_000)], "the controller has 0.8: {r:?}");
 }
 
+/// ADR 0059, Decision 1: each note goes out with its ledger entry's own native `noteId`, its
+/// release and its poly pressure with the same one.
 #[test]
-fn notes_carry_their_channel_and_voice_id() {
+fn notes_carry_their_channel_and_their_entrys_note_id() {
     let mut p = synth(256);
     let n = NoteId::NONE;
     p.event(10, &ev(2, 7, Message::NoteOn { key: 60, velocity: 100, id: n }));
@@ -118,27 +120,39 @@ fn notes_carry_their_channel_and_voice_id() {
     p.event(20, &ev(2, 7, Message::NoteOff { key: 60, velocity: 0, id: n }));
     p.event(30, &ev(9, 8, Message::PolyPressure { key: 60, value: 64, id: n }));
     let r = records(&mut p, 256);
-    assert_eq!(r, vec![(1, 10, 2060, 7), (1, 10, 9060, 8), (2, 20, 2060, 7), (3, 30, 9060, 8)]);
+    let (a, b) = (r[0].3, r[1].3);
+    assert_ne!(a, b, "every entry has its own native id");
+    assert_eq!(r, vec![(1, 10, 2060, a), (1, 10, 9060, b), (2, 20, 2060, a), (3, 30, 9060, b)]);
 }
 
 #[test]
 fn a_note_off_survives_an_overfull_queue() {
-    let mut p = synth(4096);
+    // ADR 0059: starts take ledger entries beside a busy ordinary allowance (filled to its end on
+    // a second instance, since the fixture records at most 1,024 events a block), and every owned
+    // release is admitted.
+    let mut full = synth(256);
     let n = NoteId::NONE;
-    for i in 0..600u32 {
+    let mut ordinary = 0u32;
+    while full.event(1, &ev((ordinary % 16) as u8, -1, Message::PolyPressure { key: (ordinary % 128) as u8, value: 1, id: n })) {
+        ordinary += 1;
+    }
+    assert_eq!(ordinary, 1024, "ordinary events stop at their allowance");
+    assert!(full.event(2, &ev(0, 1, Message::NoteOn { key: 60, velocity: 90, id: n })), "a start beside a full allowance");
+    let mut p = synth(4096);
+    for i in 0..300u32 {
         assert!(p.event(1, &ev((i % 16) as u8, -1, Message::PolyPressure { key: (i % 128) as u8, value: 1, id: n })));
     }
     let admitted: Vec<i32> =
         (0..300).filter(|&i| p.event(2, &ev((i % 16) as u8, i, Message::NoteOn { key: (i % 128) as u8, velocity: 90, id: n }))).collect();
-    assert_eq!(admitted.len(), 1024 - 257 - 600, "non-releases stop at the release reserve");
+    assert_eq!(admitted.len(), 300, "starts take ledger entries, not the ordinary allowance");
     for &i in &admitted {
         assert!(p.event(3, &ev((i % 16) as u8, i, Message::NoteOff { key: (i % 128) as u8, velocity: 0, id: n })), "the off of admitted note {i}");
     }
     let r = records(&mut p, 4096);
-    let offs: Vec<i64> = r.iter().filter(|x| x.0 == 2).map(|x| x.3).collect();
-    let ons: Vec<i64> = r.iter().filter(|x| x.0 == 1).map(|x| x.3).collect();
-    assert_eq!(ons, admitted.iter().map(|&i| i64::from(i)).collect::<Vec<_>>());
-    assert_eq!(offs, ons, "every admitted note-on got its off");
+    let offs: Vec<(u32, i64)> = r.iter().filter(|x| x.0 == 2).map(|x| (x.2, x.3)).collect();
+    let ons: Vec<(u32, i64)> = r.iter().filter(|x| x.0 == 1).map(|x| (x.2, x.3)).collect();
+    assert_eq!(ons.len(), 300);
+    assert_eq!(offs, ons, "every admitted note-on got its off, with its own note id");
 }
 
 /// What `MixEngine::reset` does at Stop: the mix hands over the pedal-up and the note-off, then
@@ -151,7 +165,8 @@ fn a_reset_keeps_the_pedal_up_and_the_note_off() {
     assert!(p.event(0, &ev(0, -1, Message::Control { cc: 64, value: 127 })));
     assert!(p.event(0, &ev(0, 5, Message::NoteOn { key: 60, velocity: 100, id: n })));
     let r = records(&mut p, 256);
-    assert!(r.contains(&(4, 0, 100, 1_000_000)) && r.contains(&(1, 0, 60, 5)), "down and on reached: {r:?}");
+    let id = r.iter().find(|x| x.0 == 1).map(|x| x.3).unwrap();
+    assert!(r.contains(&(4, 0, 100, 1_000_000)) && r.contains(&(1, 0, 60, id)), "down and on reached: {r:?}");
     assert!(p.event(0, &ev(0, -1, Message::Control { cc: 64, value: 0 })));
     assert!(p.event(0, &ev(0, 5, Message::NoteOff { key: 60, velocity: 0, id: n })));
     assert!(p.event(0, &ev(1, -1, Message::Control { cc: 64, value: 127 })), "a non-release, dropped by the reset");
@@ -159,6 +174,6 @@ fn a_reset_keeps_the_pedal_up_and_the_note_off() {
     p.reset();
     let r = records(&mut p, 256);
     assert!(r.contains(&(4, 0, 100, 0)), "the pedal-up survives the reset: {r:?}");
-    assert!(r.contains(&(2, 0, 60, 5)), "the note-off survives the reset: {r:?}");
+    assert!(r.contains(&(2, 0, 60, id)), "the note-off survives the reset: {r:?}");
     assert!(!r.iter().any(|x| x.0 == 4 && x.2 == 101), "non-releases do not: {r:?}");
 }

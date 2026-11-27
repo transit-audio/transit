@@ -40,8 +40,8 @@
 //! call. Servicing happens only on the thread that created the instance.
 
 use crate::ffi::{
-    AFTERTOUCH, BusBuffers, EVENT_CAP, EditorLink, HostContext, Instance, MIDI_CHANNELS, NoteEvent, PARAM_POINTS, PARAM_QUEUE_CAP, PITCH_BEND,
-    ParamPoint, RELEASE_RESERVE,
+    BusBuffers, EVENT_CAP, EditorLink, HostContext, Instance, MIDI_CHANNELS, NATIVE_EVENTS, NoteEvent, PARAM_POINTS, PARAM_QUEUE_CAP, PITCH_BEND,
+    ParamPoint,
 };
 use crate::gate::{Gate, MAX_CHANNELS};
 use crate::params::{Echoes, Loads, Mapping, ParamCurves, PendingParams, Reported, differs, drop_before_load, resend_indices};
@@ -52,9 +52,11 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError, Wea
 use std::thread::ThreadId;
 use std::time::Duration;
 use transit_dsp::event::{Message, PluginEvent};
+use transit_dsp::plugins::instrument_queue::delivery::Delivery;
 use transit_dsp::{Plugin, PluginEditor, PluginInfo, ProcessStatus, Transport};
 use vst3::ComWrapper;
 
+mod delivery;
 mod editor;
 mod state;
 
@@ -487,8 +489,10 @@ pub struct Vst3Plugin {
     /// of an `f64`, or [`SYNCED`]). `set_param` may run on the audio thread, so it never calls the
     /// controller; the state reader, which already does, hands them over first.
     unsynced: Arc<[AtomicU64]>,
-    /// Pending notes, kept sorted by time. Never grows past `EVENT_CAP`; the last
-    /// `RELEASE_RESERVE` entries only take releases.
+    /// Every admitted event under ADR 0059: the ownership ledger, the ordinary allowance and the
+    /// safety slots, kept through skipped calls and separated onto frames by 3b's rule.
+    delivery: Delivery,
+    /// One `process` call's note events, translated from `delivery` (capacity [`NATIVE_EVENTS`]).
     notes: Vec<NoteEvent>,
     /// The parameter each MIDI controller drives on each channel (a copy of [`Shared::map`], see
     /// `Instance::midi_mapping`), and a second table to copy into.
@@ -498,9 +502,6 @@ pub struct Vst3Plugin {
     map_seen: u64,
     /// The [`Shared::activation`] whose values were last re-sent.
     activation_seen: u64,
-    /// Controller points for the next block (class 1). Bounded; the last `RELEASE_RESERVE`
-    /// entries only take pedal-offs and resets.
-    controls: Vec<ParamPoint>,
     /// Parameter points at an offset ([`Plugin::set_param_at`]) for the next block (class 0).
     timed: Vec<ParamPoint>,
     /// One `process` call's points, merged (capacity [`PARAM_POINTS`]).
@@ -511,8 +512,8 @@ pub struct Vst3Plugin {
     /// full. Either way the parameter's last value is kept, but at the offset of its latest kept
     /// point (or the block start), so it applies earlier than asked.
     points_dropped: u64,
-    /// Keys held per MIDI channel, for `all_notes_off` and `reset`.
-    held: [[bool; 128]; MIDI_CHANNELS],
+    /// Calls the plug-in's `process` reported as failed (ADR 0059, Decision 2).
+    process_errors: u64,
     channels: usize,
     /// Every audio input of the next block is silent (VST3 silence flags).
     silent: bool,
@@ -603,17 +604,17 @@ impl Vst3Plugin {
             echoes: Echoes::new(ids.len()),
             batch: Vec::with_capacity(PARAM_QUEUE_CAP),
             unsynced: ids.iter().map(|_| AtomicU64::new(SYNCED)).collect(),
-            notes: Vec::with_capacity(EVENT_CAP),
+            delivery: Delivery::new(true),
+            notes: Vec::with_capacity(NATIVE_EVENTS),
             midi_map: vec![None; MAP_ENTRIES].into_boxed_slice(),
             map_scratch: vec![None; MAP_ENTRIES].into_boxed_slice(),
             map_seen: u64::MAX,
             activation_seen: 0,
-            controls: Vec::with_capacity(EVENT_CAP),
             timed: Vec::with_capacity(TIMED_CAP),
             points: Vec::with_capacity(PARAM_POINTS),
             seq: 0,
             points_dropped: 0,
-            held: [[false; 128]; MIDI_CHANNELS],
+            process_errors: 0,
             channels: 2,
             silent: false,
             gate: Gate::new(),
@@ -816,39 +817,6 @@ impl Vst3Plugin {
         }
     }
 
-    /// Inserts keeping the queue time-sorted (after events at the same time). Refuses it when the
-    /// queue is full, or for a non-release when only the release reserve is left. Never allocates
-    /// on the audio thread.
-    fn push_note(&mut self, e: NoteEvent, release: bool) -> bool {
-        let room = if release { self.notes.capacity() } else { self.notes.capacity().saturating_sub(RELEASE_RESERVE) };
-        if self.notes.len() >= room {
-            return false;
-        }
-        let pos = self.notes.iter().rposition(|q| q.time() <= e.time()).map_or(0, |i| i + 1);
-        self.notes.insert(pos, e);
-        true
-    }
-
-    /// A MIDI controller (`ctrl`: a CC, [`AFTERTOUCH`] or [`PITCH_BEND`]) on `channel`: a point on
-    /// the parameter the plug-in maps it to. An unmapped controller has nothing to drive (true);
-    /// false when the controller queue refused it (non-releases stop at the release reserve).
-    /// `message` decides the class: a release may take the reserve, and a point that must reach
-    /// the plug-in ([`Message::survives_reset`]) is kept through a reset.
-    fn control(&mut self, time: u32, channel: u8, ctrl: usize, value: f64, message: &Message) -> bool {
-        let release = message.is_release();
-        // A table re-read on the main thread (`kMidiCCAssignmentChanged`) applies from this
-        // controller on.
-        self.refresh_midi_map();
-        let Some(&Some(id)) = self.midi_map.get(usize::from(channel & 0x0F) * MAP_LEN + ctrl) else { return true };
-        let room = if release { self.controls.capacity() } else { self.controls.capacity().saturating_sub(RELEASE_RESERVE) };
-        if self.controls.len() >= room {
-            return false;
-        }
-        self.seq = self.seq.wrapping_add(1);
-        self.controls.push(ParamPoint { time, id, class: 1, seq: self.seq, value, release: message.survives_reset() });
-        true
-    }
-
     /// Parameter points that missed their offset so far (see `points_dropped`).
     pub fn param_points_dropped(&self) -> u64 {
         self.points_dropped
@@ -876,12 +844,16 @@ impl Vst3Plugin {
         let frames = io.iter().take(ch).map(Vec::len).fold(frames, usize::min);
         if frames == 0 || ch == 0 {
             self.pending.fold_timed(&self.ids, &mut self.timed);
+            // A skipped call keeps its events at offset 0 in arrival order (ADR 0059, 3a).
+            self.delivery.carry();
             return;
         }
-        let shared: &Shared = &self.shared;
+        // A second handle (no allocation), so the core's guard does not hold `self` borrowed.
+        let shared = Arc::clone(&self.shared);
         // Held by the main thread only while it services the instance: a silent block.
         let Some(mut guard) = try_lock(&shared.core) else {
             self.pending.fold_timed(&self.ids, &mut self.timed);
+            self.delivery.carry();
             self.gate.skip(io, ch, frames);
             return;
         };
@@ -889,6 +861,7 @@ impl Vst3Plugin {
         let core = &mut *guard;
         if !core.inst.is_active() || core.max_block == 0 {
             self.pending.fold_timed(&self.ids, &mut self.timed);
+            self.delivery.carry();
             if core.block > 0 {
                 // Prepared, but its (re)activation failed: silent, not the buffer as it was
                 // (review N2).
@@ -899,12 +872,8 @@ impl Vst3Plugin {
         }
         core.inputs.set_silent(self.silent);
         let last = u32::try_from(frames - 1).unwrap_or(u32::MAX);
-        for e in &mut self.notes {
-            if e.time() > last {
-                e.set_time(last);
-            }
-        }
-        for c in self.controls.iter_mut().chain(self.timed.iter_mut()) {
+        self.delivery.prepare(u32::try_from(frames).unwrap_or(u32::MAX));
+        for c in &mut self.timed {
             c.time = c.time.min(last);
         }
         let mut start = 0usize;
@@ -940,13 +909,13 @@ impl Vst3Plugin {
                     }
                 }
             }
-            let k = self.notes.iter().position(|e| e.time() >= end).unwrap_or(self.notes.len());
             let offset = u32::try_from(start).unwrap_or(u32::MAX);
-            let notes = self.notes.get(..k).unwrap_or(&[]);
+            let k = self.delivery.batch(end).len();
             // This call's points: the host values at its start (leaving queues for the timed and
             // controller points; the rest waits), then the timed points and the controllers in it.
             let in_call = |p: &&ParamPoint| p.time >= offset && p.time < end;
-            let timed = self.timed.iter().filter(in_call).count() + self.controls.iter().filter(in_call).count();
+            let controllers = self.delivery.items().iter().take(k).filter(|it| !it.is_note()).count();
+            let timed = self.timed.iter().filter(in_call).count() + controllers;
             self.batch.clear();
             self.pending.take_into(&self.ids, &mut self.batch, PARAM_QUEUE_CAP.saturating_sub(timed));
             self.points.clear();
@@ -955,15 +924,30 @@ impl Vst3Plugin {
             }
             self.batch.clear();
             let room = self.points.capacity();
-            for p in self.timed.iter().chain(self.controls.iter()).filter(in_call) {
+            for p in self.timed.iter().filter(in_call) {
                 if self.points.len() < room {
                     self.points.push(*p);
                 }
             }
-            let r =
-                core.inst.process(n, &mut core.inputs, &mut core.outputs, &mut self.points, notes, offset, self.position, self.transport.as_ref());
+            self.notes.clear();
+            for i in 0..k {
+                if let Some(it) = self.delivery.items().get(i).copied() {
+                    self.translate(&it);
+                }
+            }
+            let r = core.inst.process(
+                n,
+                &mut core.inputs,
+                &mut core.outputs,
+                &mut self.points,
+                &self.notes,
+                offset,
+                self.position,
+                self.transport.as_ref(),
+            );
             self.points.clear();
-            self.notes.drain(..k);
+            self.notes.clear();
+            self.delivery.finish(r.is_ok());
             self.position = self.position.saturating_add(i64::try_from(n).unwrap_or(0));
             if let Ok(dropped) = r {
                 self.points_dropped = self.points_dropped.saturating_add(u64::from(dropped));
@@ -984,12 +968,24 @@ impl Vst3Plugin {
                         }
                     }
                 }
-                _ => {}
+                Ok(_) => {}
+                Err(_) => {
+                    // A processing error (ADR 0059, Decision 2): counted, this call and the rest
+                    // of the block silent, every start it handed owed its release (`finish`); the
+                    // mix contains the instrument until Stop.
+                    self.process_errors = self.process_errors.saturating_add(1);
+                    for dst in io.iter_mut().take(ch) {
+                        if let Some(dst) = dst.get_mut(start..frames) {
+                            dst.fill(0.0);
+                        }
+                    }
+                    break;
+                }
             }
             start += n;
         }
         drop(guard);
-        self.controls.clear();
+        self.delivery.carry();
         self.timed.clear();
         self.seq = 0;
         self.gate.processed(io, ch, frames);
@@ -1025,11 +1021,11 @@ impl Plugin for Vst3Plugin {
         }
     }
 
+    /// Stop: everything queued that owns nothing is dropped; every owned release stays and is
+    /// delivered at the next actual call, since this reset calls nothing in the processor and so
+    /// proves no voice ended (ADR 0059, 3d).
     fn reset(&mut self) {
-        keep_releases_on_reset(&mut self.notes, &mut self.held);
-        // A pedal-up or reset controller is a release too: the mix has already freed the pedal,
-        // so dropping its point here would leave sustain on (review F10-1).
-        self.controls.retain(|c| c.release);
+        self.delivery.reset();
         self.timed.clear();
     }
 
@@ -1162,56 +1158,31 @@ impl Plugin for Vst3Plugin {
         self.event(u32::try_from(offset).unwrap_or(u32::MAX), &PluginEvent { channel: status & 0x0F, note_id: PluginEvent::NO_ID, message });
     }
 
-    /// Notes and poly pressure go to the event bus with their channel and voice id (`noteId`);
-    /// controllers, channel pressure and pitch bend become points on the parameters the plug-in
-    /// maps them to on that channel (`IMidiMapping`). Releases may use the reserved entries.
+    /// Admission under ADR 0059 (`Delivery`): a note-on or a pedal press takes a ledger entry or is
+    /// refused at once; an owned release is never refused; a safety controller is accepted as the
+    /// releases it implies. Notes and poly pressure later go to the event bus with the entry's
+    /// native id (`noteId`); controllers, channel pressure and pitch bend become points on the
+    /// parameters the plug-in maps them to on that channel (`IMidiMapping`).
     fn event(&mut self, offset: u32, ev: &PluginEvent) -> bool {
-        let ch = ev.channel & 0x0F;
-        let release = ev.is_release();
         let notes_in = self.shared.event_input.load(Ordering::Relaxed);
-        let unit = |v: u8| f32::from(v.min(127)) / 127.0;
-        match ev.message {
-            Message::NoteOn { key, velocity, .. } if key <= 127 => {
-                if !notes_in {
-                    return true;
-                }
-                let ok = self.push_note(NoteEvent::On { time: offset, key, velocity: unit(velocity), channel: ch, id: ev.note_id }, release);
-                if ok && let Some(h) = self.held.get_mut(usize::from(ch)).and_then(|h| h.get_mut(usize::from(key))) {
-                    *h = true;
-                }
-                ok
-            }
-            Message::NoteOff { key, velocity, .. } if key <= 127 => {
-                if !notes_in {
-                    return true;
-                }
-                if let Some(h) = self.held.get_mut(usize::from(ch)).and_then(|h| h.get_mut(usize::from(key))) {
-                    *h = false;
-                }
-                self.push_note(NoteEvent::Off { time: offset, key, velocity: unit(velocity), channel: ch, id: ev.note_id }, release)
-            }
-            Message::PolyPressure { key, value, .. } if key <= 127 => {
-                !notes_in || self.push_note(NoteEvent::Pressure { time: offset, key, pressure: unit(value), channel: ch, id: ev.note_id }, release)
-            }
-            Message::Control { cc, value } if cc <= 127 => self.control(offset, ch, usize::from(cc), f64::from(value.min(127)) / 127.0, &ev.message),
-            Message::Control14 { msb, value } if msb < 32 => {
-                self.control(offset, ch, usize::from(msb), f64::from(value.min(16383)) / 16383.0, &ev.message)
-            }
-            Message::ChannelPressure { value } => self.control(offset, ch, AFTERTOUCH, f64::from(value.min(127)) / 127.0, &ev.message),
-            Message::PitchBend { value } => self.control(offset, ch, PITCH_BEND, f64::from(value.min(16383)) / 16383.0, &ev.message),
-            _ => true,
-        }
+        let skip = match ev.message {
+            Message::NoteOn { key, .. } | Message::NoteOff { key, .. } | Message::PolyPressure { key, .. } => key > 127 || !notes_in,
+            Message::Control { cc, .. } => cc > 127,
+            Message::Control14 { msb, .. } => msb >= 32,
+            Message::ChannelPressure { .. } | Message::PitchBend { .. } => false,
+            Message::Program { .. } => true,
+        };
+        skip || self.delivery.admit(offset, ev)
     }
 
+    /// The All MIDI Notes Off action: a note-off for every owned voice and a release for every
+    /// owned pedal; starts still queued are cancelled with their releases (ADR 0059, Decision 4).
     fn all_notes_off(&mut self) {
-        for ch in 0..MIDI_CHANNELS as u8 {
-            for key in 0..128u8 {
-                if self.held.get(usize::from(ch)).and_then(|h| h.get(usize::from(key))).copied().unwrap_or(false) {
-                    let message = Message::NoteOff { key, velocity: 0, id: transit_dsp::event::NoteId::NONE };
-                    self.event(0, &PluginEvent { channel: ch, note_id: PluginEvent::NO_ID, message });
-                }
-            }
-        }
+        self.delivery.all_notes_off();
+    }
+
+    fn process_errors(&self) -> u64 {
+        self.process_errors
     }
 
     fn load_state(&mut self, data: &[u8]) -> bool {
@@ -1315,24 +1286,6 @@ struct Vst3Editor {
     curves: Arc<ParamCurves>,
     /// The instance's `restartComponent` requests, serviced on each `idle`.
     shared: Weak<Shared>,
-}
-
-/// Reset's share of the note queue: drop everything pending except the releases the plug-in is
-/// owed. Each held key gets an off at time 0 on its channel and any off already queued survives,
-/// so a note that was sounding when the transport stopped is still released on the next block.
-fn keep_releases_on_reset(notes: &mut Vec<NoteEvent>, held: &mut [[bool; 128]; MIDI_CHANNELS]) {
-    notes.retain(|e| match *e {
-        NoteEvent::Off { .. } => true,
-        NoteEvent::On { velocity, .. } => velocity <= 0.0,
-        NoteEvent::Pressure { .. } => false,
-    });
-    for (channel, keys) in (0u8..).zip(held.iter_mut()) {
-        for (key, h) in (0u8..).zip(keys.iter_mut()) {
-            if std::mem::take(h) && notes.len() < notes.capacity() {
-                notes.insert(0, NoteEvent::Off { time: 0, key, velocity: 0.0, channel, id: -1 });
-            }
-        }
-    }
 }
 
 #[cfg(test)]

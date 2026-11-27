@@ -478,7 +478,7 @@ impl Instance {
         self.in_events.with(|v| {
             v.clear();
             if event_in {
-                for n in notes.iter().take(EVENT_CAP) {
+                for n in notes.iter().take(NATIVE_EVENTS) {
                     v.push(n.to_raw(offset));
                 }
             }

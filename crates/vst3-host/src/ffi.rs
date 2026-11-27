@@ -40,16 +40,18 @@ pub(crate) const MAX_PARAMS: i32 = 4096;
 const MAX_BUSES: i32 = 16;
 /// Most channels per audio bus.
 const MAX_BUS_CHANNELS: u32 = 64;
-/// Capacity of the per-block event lists (preallocated: `process` never allocates).
+/// Capacity of the timed parameter points and the plug-in's output event list (preallocated:
+/// `process` never allocates).
 pub(crate) const EVENT_CAP: usize = 1024;
-/// Every stored value plus the separate timed and mapped-controller budgets can land in one
-/// block. Reserving all their queues prevents a processed block from silently losing an ID.
-pub(crate) const PARAM_QUEUE_CAP: usize = MAX_PARAMS as usize + 2 * EVENT_CAP;
+/// Capacity of the input event list: the whole ownership ledger at two events per entry, the
+/// ordinary allowance and the safety slots (ADR 0059, Decision 1).
+pub(crate) const NATIVE_EVENTS: usize = transit_dsp::plugins::instrument_queue::delivery::NATIVE_EVENTS;
+/// Every stored value plus the timed points and the mapped controllers of the native list can
+/// land in one block. Reserving all their queues prevents a processed block from silently losing
+/// an ID.
+pub(crate) const PARAM_QUEUE_CAP: usize = MAX_PARAMS as usize + EVENT_CAP + NATIVE_EVENTS;
 /// Parameter points one block carries across all its queues (a preallocated slab).
 pub(crate) const PARAM_POINTS: usize = PARAM_QUEUE_CAP;
-/// Event entries kept for releases (F10): one per note and pedal the mix holds open (224 + 32),
-/// plus one reset. Other events are refused once only these remain.
-pub(crate) const RELEASE_RESERVE: usize = 257;
 /// MIDI channels the controller mapping covers.
 pub(crate) const MIDI_CHANNELS: usize = 16;
 // Largest plugin state we buffer (component or controller state).
