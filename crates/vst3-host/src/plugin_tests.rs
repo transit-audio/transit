@@ -57,5 +57,9 @@ fn storage_is_accounted_per_instance() {
         + old_cap * 16
         + EVENT_CAP * size_of::<vst3::Steinberg::Vst::Event>()
         + queue(old_cap);
-    assert_eq!((translated, native, total, before), (343_680, 605_440, 1_066_624, 729_088), "measured: translated {translated}, native {native}, total {total}, before {before}");
+    assert_eq!(
+        (translated, native, total, before),
+        (343_680, 605_440, 1_066_624, 729_088),
+        "measured: translated {translated}, native {native}, total {total}, before {before}"
+    );
 }

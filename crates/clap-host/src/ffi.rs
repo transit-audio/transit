@@ -88,8 +88,6 @@ fn read_name(buf: &[c_char]) -> String {
 
 mod audio;
 mod events;
-#[cfg(test)]
-mod storage_tests;
 mod gui;
 #[cfg(all(test, any(windows, target_os = "linux")))]
 mod gui_diagnostics_tests;
@@ -100,6 +98,8 @@ mod module;
 #[cfg(target_os = "linux")]
 mod run_loop;
 mod state;
+#[cfg(test)]
+mod storage_tests;
 
 pub(crate) use audio::*;
 pub(crate) use events::*;
