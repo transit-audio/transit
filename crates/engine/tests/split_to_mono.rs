@@ -478,3 +478,76 @@ fn a_split_carries_a_stereo_tracks_moved_panners_and_a_mono_track_keeps_hard_sid
         r["tracks"].as_array().unwrap().iter().map(|t| e.session().track(TrackId(t.as_u64().unwrap())).unwrap().mixer.pan.clone()).collect();
     assert_eq!(pans, [vec![-0.5], vec![0.25], vec![-1.0], vec![1.0]]);
 }
+
+/// #771: what a split cannot carry from a stereo track is said on the status line, each notice in
+/// full and together: a panner between hard left and right (the mono tracks follow the mono pan
+/// law), pan automation, and inserts. Hard pans, swapped or not, say nothing.
+#[test]
+fn a_split_says_what_it_could_not_carry_from_the_stereo_track() {
+    let d = transit_test_support::TestDir::new("split-to-mono-notices");
+    std::fs::create_dir_all(&*d).unwrap();
+    let wav = d.join("Mics.wav");
+    std::fs::write(&wav, stereo_wav(480, 16_384, -8_192)).unwrap();
+    let mut e = Engine::default();
+    let notice = |e: &mut Engine, name: &str, setup: &dyn Fn(&mut Engine, u64)| {
+        let t = e.execute("track.new", &json!({"kind": "audio", "format": "stereo", "name": name})).unwrap()["tracks"][0].as_u64().unwrap();
+        e.execute("file.import_audio", &json!({"path": wav.to_string_lossy(), "track": t})).unwrap();
+        setup(e, t);
+        let cid = e.session().track(TrackId(t)).unwrap().clips()[0].id.0;
+        e.execute("clip.split_to_mono", &json!({"clips": [cid]})).unwrap().get("notice").and_then(|n| n.as_str().map(String::from))
+    };
+    let law = "follow the mono pan law, so their levels can differ from the stereo track's.";
+    assert_eq!(notice(&mut e, "Default", &|_, _| {}), None, "default pans: nothing to say");
+    assert_eq!(
+        notice(&mut e, "Swapped", &|e, t| e.session_mut().track_mut(TrackId(t)).unwrap().mixer.pan = vec![1.0, -1.0]),
+        None,
+        "hard pans are exact under every law"
+    );
+    let moved = notice(&mut e, "Moved", &|e, t| e.session_mut().track_mut(TrackId(t)).unwrap().mixer.pan = vec![-0.5, 1.0]);
+    assert_eq!(moved.as_deref(), Some(format!("Split to 2 mono tracks. The mono tracks of Moved {law}").as_str()));
+    let automated = notice(&mut e, "Auto", &|e, t| {
+        let mut lane = transit_model::AutomationLane::new(transit_model::AutoParam::Pan(0));
+        lane.points.push(transit_model::AutomationPoint { at: 0, value: 0.5 });
+        e.session_mut().track_mut(TrackId(t)).unwrap().automation.push(lane);
+    });
+    assert_eq!(automated.as_deref(), Some("Split to 2 mono tracks. The pan automation on Auto was not carried."));
+    let all = notice(&mut e, "All", &|e, t| {
+        e.session_mut().track_mut(TrackId(t)).unwrap().mixer.pan = vec![0.0, 0.0];
+        let mut lane = transit_model::AutomationLane::new(transit_model::AutoParam::Pan(1));
+        lane.points.push(transit_model::AutomationPoint { at: 0, value: 0.5 });
+        e.session_mut().track_mut(TrackId(t)).unwrap().automation.push(lane);
+        e.execute("mix.insert", &json!({"track": t, "slot": 0, "plugin": "eq_7band"})).unwrap();
+    });
+    assert_eq!(
+        all.as_deref(),
+        Some(
+            format!(
+                "Split to 2 mono tracks. The inserts on All were not copied. The mono tracks of All {law} The pan automation on All was not carried."
+            )
+            .as_str()
+        )
+    );
+}
+
+/// #771: duplicating a track whose name is already 256 characters gives a name within the limit and
+/// different from the original, so a save and a reopen (which cut a longer name) keep two names.
+#[test]
+fn a_duplicate_of_a_track_with_a_256_character_name_stays_distinct_through_a_save() {
+    let d = transit_test_support::TestDir::new("duplicate-long-name");
+    std::fs::create_dir_all(&*d).unwrap();
+    let mut e = Engine::default();
+    let max = transit_model::MAX_NAME_CHARS;
+    let t = track(&mut e, "mono");
+    e.session_mut().track_mut(TrackId(t)).unwrap().name = "T".repeat(max);
+    e.execute("track.duplicate", &json!({"tracks": [t]})).unwrap();
+    let names = |e: &Engine| e.session().tracks.iter().map(|t| t.name.clone()).collect::<Vec<_>>();
+    let before = names(&e);
+    assert!(before.len() == 2 && before.iter().all(|n| n.chars().count() <= max), "{} names within the limit", before.len());
+    let file = d.join("dup.transit");
+    e.execute("session.save", &json!({"path": file.to_string_lossy()})).unwrap();
+    let mut f = Engine::default();
+    f.execute("session.open", &json!({"path": file.to_string_lossy()})).unwrap();
+    let after = names(&f);
+    assert_eq!(after, before, "a reopen changes no name");
+    assert_ne!(after[0], after[1], "the duplicate is a different name");
+}

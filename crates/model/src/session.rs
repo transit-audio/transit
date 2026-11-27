@@ -646,13 +646,15 @@ impl Session {
         TRACK_COLORS.get(n % TRACK_COLORS.len()).copied().unwrap_or([128, 128, 128])
     }
 
-    /// A unique track name: `base`, or `base 1`, `base 2` … like the incumbent ("Audio 1"). A name
-    /// that needs a number loses the end of its stem instead of going past [`MAX_NAME_CHARS`]: a
-    /// longer name is cut on a save, and two names that differed only at the end would meet there.
+    /// A unique track name: `base`, or `base 1`, `base 2` … like the incumbent ("Audio 1"). The name
+    /// is never longer than [`MAX_NAME_CHARS`]: a longer `base` is cut first, and a name that needs a
+    /// number loses the end of its stem to make room. A longer name is cut on a save, and two names
+    /// that differed only at the end would meet there.
     pub fn unique_track_name(&self, base: &str) -> String {
+        let base: String = base.chars().take(MAX_NAME_CHARS).collect();
         let taken = |n: &str| self.tracks.iter().any(|t| t.name == n);
-        if !base.is_empty() && !taken(base) && !matches!(base, "Audio" | "Aux" | "MIDI" | "Inst" | "VCA" | "Folder" | "Master") {
-            return base.to_string();
+        if !base.is_empty() && !taken(&base) && !matches!(base.as_str(), "Audio" | "Aux" | "MIDI" | "Inst" | "VCA" | "Folder" | "Master") {
+            return base;
         }
         (1..)
             .map(|i: u64| {
@@ -661,7 +663,7 @@ impl Session {
                 format!("{}{number}", base.chars().take(keep).collect::<String>())
             })
             .find(|n| !taken(n))
-            .unwrap_or_else(|| base.to_string())
+            .unwrap_or(base)
     }
 
     /// Add a track with defaults; returns its id.

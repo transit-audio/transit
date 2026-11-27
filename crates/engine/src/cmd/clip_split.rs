@@ -25,7 +25,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "Split to Mono Tracks",
         ["Clip"],
         None,
-        "{clips?} — each channel of the stereo or wider audio clips on a new mono track below its track; the originals are muted",
+        "{clips?} — each channel of the stereo or wider audio clips on a new mono track below its track; the originals are muted. A stereo track's panners go to its two mono tracks (hard left and right at their defaults; a panner between them follows the mono pan law, so levels can differ), its pan automation and inserts are not carried, and the notice says so",
         has_selection,
         split_to_mono
     )]
@@ -140,6 +140,7 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     let (mut new_tracks, mut new_clips, mut with_inserts) = (Vec::new(), Vec::new(), Vec::new());
+    let (mut pan_law, mut pan_automation): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
     // How many new tracks sit below each track so far: a track's second group goes below its first.
     let mut below: std::collections::HashMap<TrackId, usize> = std::collections::HashMap::new();
     for (t, clips) in by_track.into_values() {
@@ -148,6 +149,16 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         // were made for the mix of both channels. The status line says so.
         if tr.mixer.inserts.iter().any(Option::is_some) && !with_inserts.contains(&tr.name) {
             with_inserts.push(tr.name.clone());
+        }
+        // A stereo clip on a stereo track: what the split cannot carry over, named in the status line.
+        if clips.iter().any(|c| c.2 == 2) && tr.mixer.pan.len() == 2 {
+            if tr.mixer.pan.iter().any(|p| *p > -1.0 && *p < 1.0) && !pan_law.contains(&tr.name) {
+                pan_law.push(tr.name.clone());
+            }
+            let automated = tr.automation.iter().any(|l| matches!(l.param, transit_model::AutoParam::Pan(_)) && !l.points.is_empty());
+            if automated && !pan_automation.contains(&tr.name) {
+                pan_automation.push(tr.name.clone());
+            }
         }
         let first = below.get(&t).copied().unwrap_or(0);
         let n = clips.iter().map(|c| c.2).max().unwrap_or(0);
@@ -199,8 +210,19 @@ fn split_to_mono(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     let mut out = json!({"tracks": new_tracks, "clips": new_clips});
+    // What was not carried over, each said in full: no notice is cut for another.
+    let mut notes = Vec::new();
     if !with_inserts.is_empty() {
-        out["notice"] = json!(format!("Split to {} mono tracks. The inserts on {} were not copied.", new_tracks.len(), with_inserts.join(", ")));
+        notes.push(format!("The inserts on {} were not copied.", with_inserts.join(", ")));
+    }
+    if !pan_law.is_empty() {
+        notes.push(format!("The mono tracks of {} follow the mono pan law, so their levels can differ from the stereo track's.", pan_law.join(", ")));
+    }
+    if !pan_automation.is_empty() {
+        notes.push(format!("The pan automation on {} was not carried.", pan_automation.join(", ")));
+    }
+    if !notes.is_empty() {
+        out["notice"] = json!(format!("Split to {} mono tracks. {}", new_tracks.len(), notes.join(" ")));
     }
     Ok(out)
 }
