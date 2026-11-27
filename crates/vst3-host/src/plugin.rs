@@ -514,6 +514,8 @@ pub struct Vst3Plugin {
     points_dropped: u64,
     /// Calls the plug-in's `process` reported as failed (ADR 0059, Decision 2).
     process_errors: u64,
+    /// Native events translation could not place (an invariant: always zero).
+    untranslated: u64,
     channels: usize,
     /// Every audio input of the next block is silent (VST3 silence flags).
     silent: bool,
@@ -615,6 +617,7 @@ impl Vst3Plugin {
             seq: 0,
             points_dropped: 0,
             process_errors: 0,
+            untranslated: 0,
             channels: 2,
             silent: false,
             gate: Gate::new(),

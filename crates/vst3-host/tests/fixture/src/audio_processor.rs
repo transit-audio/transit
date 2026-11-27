@@ -249,6 +249,9 @@ impl IAudioProcessorTrait for Synth {
                     put([code, e.sampleOffset as f32, f32::from(ch) * 1000.0 + f32::from(pitch), id as f32]);
                 }
             }
+            // ADR 0059 R1: a call that carries the probe value 0.125 reports a processing error
+            // (`kResultFalse`) after reading everything, as a plug-in that failed part-way would.
+            let mut fail = false;
             // SAFETY: inputParameterChanges is null or a borrowed SDK interface valid in process.
             if let Some(changes) = unsafe { ComRef::from_raw(d.inputParameterChanges) } {
                 // SAFETY: changes is the live IParameterChanges interface borrowed above.
@@ -263,6 +266,7 @@ impl IAudioProcessorTrait for Synth {
                         // SAFETY: k is in the SDK queue; at and v are writable output values.
                         if unsafe { q.getPoint(k, &mut at, &mut v) } == kResultOk {
                             put([4.0, at as f32, pid as f32, (v * 1e6).round() as f32]);
+                            fail |= pid == PROBE_PARAM && v == 0.125;
                         }
                     }
                 }
@@ -278,7 +282,7 @@ impl IAudioProcessorTrait for Synth {
                 // SAFETY: The first SDK output channel remains live and has frames initialized samples.
                 o.copy_from_slice(unsafe { std::slice::from_raw_parts(first, frames) });
             }
-            return kResultOk;
+            return if fail { kResultFalse } else { kResultOk };
         }
         let mut events = Vec::new();
         if let Some(list) = unsafe { ComRef::from_raw(d.inputEvents) } {

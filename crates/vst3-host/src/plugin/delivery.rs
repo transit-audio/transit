@@ -17,16 +17,23 @@ impl Vst3Plugin {
         if self.points.len() < self.points.capacity() {
             self.seq = self.seq.wrapping_add(1);
             self.points.push(ParamPoint { time, id, class: 1, seq: self.seq, value, release: false });
+        } else {
+            self.untranslated = self.untranslated.saturating_add(1);
         }
     }
 
     /// One queued event in the native form: notes and poly pressure to the event list with the
-    /// entry's native id, controllers to points on the parameters the plug-in maps them to.
+    /// entry's native id, controllers to points on the parameters the plug-in maps them to. A
+    /// note-on with velocity 0 is the release the ledger matched it as: a native note-off.
     pub(super) fn translate(&mut self, it: &Item) {
         let ch = it.event.channel & 0x0F;
         let unit = |v: u8| f32::from(v.min(127)) / 127.0;
         let time = it.offset;
-        let note = match it.event.message {
+        let message = match it.event.message {
+            Message::NoteOn { key, velocity: 0, id } => Message::NoteOff { key, velocity: 0, id },
+            m => m,
+        };
+        let note = match message {
             Message::NoteOn { key, velocity, .. } if key <= 127 => {
                 Some(NoteEvent::On { time, key, velocity: unit(velocity), channel: ch, id: it.native })
             }
@@ -54,11 +61,19 @@ impl Vst3Plugin {
             }
             _ => None,
         };
-        if let Some(n) = note
-            && self.notes.len() < self.notes.capacity()
-        {
-            self.notes.push(n);
+        if let Some(n) = note {
+            if self.notes.len() < self.notes.capacity() {
+                self.notes.push(n);
+            } else {
+                self.untranslated = self.untranslated.saturating_add(1);
+            }
         }
+    }
+
+    /// Native events translation could not place so far (an invariant: always zero; every
+    /// buffer is sized for all admission permits).
+    pub fn untranslated(&self) -> u64 {
+        self.untranslated
     }
 
     /// Refusals at admission so far (ADR 0059: starts at a full ledger, ordinary events at a full

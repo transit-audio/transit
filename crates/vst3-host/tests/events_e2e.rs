@@ -179,3 +179,118 @@ fn a_reset_keeps_the_pedal_up_and_the_note_off() {
     assert!(r.contains(&(2, 1, 60, id)), "the note-off survives the reset, one frame after the pedal-up: {r:?}");
     assert!(!r.iter().any(|x| x.0 == 4 && x.2 == 101), "non-releases do not: {r:?}");
 }
+
+/// Review finding 4: a velocity-0 note-on is the release the ledger matched it as, so the plug-in
+/// gets a note-off with the entry's id, through `event` and through the public `note_on`.
+#[test]
+fn a_velocity_zero_note_on_reaches_the_plug_in_as_its_note_off() {
+    let mut p = synth(256);
+    let n = NoteId::NONE;
+    assert!(p.event(0, &ev(2, 5, Message::NoteOn { key: 60, velocity: 100, id: n })));
+    let r = records(&mut p, 256);
+    let id = r[0].3;
+    assert!(p.event(10, &ev(2, 5, Message::NoteOn { key: 60, velocity: 0, id: n })));
+    assert_eq!(records(&mut p, 256), vec![(2, 10, 2060, id)]);
+    p.note_on(0, 61, 100);
+    let r = records(&mut p, 256);
+    let id = r[0].3;
+    p.note_on(7, 61, 0);
+    assert_eq!(records(&mut p, 256), vec![(2, 7, 61, id)]);
+    assert!(records(&mut p, 256).is_empty(), "nothing more");
+}
+
+/// ADR 0059, Decision 1 at the VST3 boundary, on ONE instance: the ordinary allowance full, 300
+/// starts still admitted, every owned release admitted, and each off delivered with its on's id.
+#[test]
+fn a_saturated_instance_admits_and_delivers_every_owned_release() {
+    let mut p = synth(8192);
+    let n = NoteId::NONE;
+    let mut ordinary = 0u32;
+    while p.event(1, &ev((ordinary % 16) as u8, -1, Message::PolyPressure { key: (ordinary % 128) as u8, value: 1, id: n })) {
+        ordinary += 1;
+    }
+    assert_eq!(ordinary, 1024, "ordinary events stop at their allowance");
+    for i in 0..300i32 {
+        assert!(p.event(2, &ev((i % 16) as u8, i, Message::NoteOn { key: (i % 128) as u8, velocity: 90, id: n })), "start {i}");
+    }
+    for i in 0..300i32 {
+        assert!(p.event(3, &ev((i % 16) as u8, i, Message::NoteOff { key: (i % 128) as u8, velocity: 0, id: n })), "release {i}");
+    }
+    let r = records(&mut p, 8192);
+    assert_eq!(r.iter().filter(|x| x.0 == 3).count(), 1024, "every ordinary event");
+    let mut ons: Vec<(u32, i64)> = r.iter().filter(|x| x.0 == 1).map(|x| (x.2, x.3)).collect();
+    let mut offs: Vec<(u32, i64)> = r.iter().filter(|x| x.0 == 2).map(|x| (x.2, x.3)).collect();
+    assert_eq!(ons.len(), 300);
+    ons.sort_unstable();
+    offs.sort_unstable();
+    assert_eq!(offs, ons, "every off with its on's id");
+}
+
+/// ADR 0059, Decision 2 at the VST3 boundary: a `process` that returns an error is counted, its
+/// call and the rest of the block are silent, the start it handed owes its off (delivered at the
+/// next call with its id), and a start it never handed (a later sub-call) is cancelled.
+#[test]
+fn a_processing_error_owes_the_release_of_every_handed_start() {
+    let mut p = synth(64);
+    let n = NoteId::NONE;
+    assert!(p.event(10, &ev(0, -1, Message::NoteOn { key: 60, velocity: 100, id: n })));
+    assert!(p.event(100, &ev(0, -1, Message::NoteOn { key: 62, velocity: 100, id: n })), "in the second sub-call");
+    assert!(p.set_param("5", 0.125)); // the fixture fails the call that reads this value
+    let mut io = vec![vec![0.5f32; 128], vec![0.5f32; 128]];
+    p.process(&mut io, 128);
+    assert_eq!(p.process_errors(), 1);
+    assert!(io.iter().flatten().all(|v| *v == 0.0), "the failed call and the rest of the block are silent");
+    let r = records(&mut p, 64);
+    let notes: Vec<_> = r.iter().filter(|x| x.0 == 1 || x.0 == 2).copied().collect();
+    assert_eq!(notes.len(), 1, "only the owed off; the never-handed start was cancelled: {r:?}");
+    assert_eq!((notes[0].0, notes[0].1, notes[0].2), (2, 0, 60));
+    assert_eq!(p.process_errors(), 1);
+}
+
+/// ADR 0059, 3b at the VST3 boundary: with the pedal up, CC 64 = 127, note-off A, CC 64 = 100 at one
+/// frame reach the plug-in as the press at that frame and the off and the value one frame later,
+/// so A sustains whether the plug-in reads a frame's points before or after its events.
+#[test]
+fn a_press_an_off_and_a_value_at_one_frame_sustain_the_note_in_either_reading_order() {
+    let mut p = synth(256);
+    let n = NoteId::NONE;
+    assert!(p.event(0, &ev(0, -1, Message::NoteOn { key: 60, velocity: 100, id: n })));
+    assert!(p.event(8, &ev(0, -1, Message::Control { cc: 64, value: 127 })));
+    assert!(p.event(8, &ev(0, -1, Message::NoteOff { key: 60, velocity: 0, id: n })));
+    assert!(p.event(8, &ev(0, -1, Message::Control { cc: 64, value: 100 })));
+    let r = records(&mut p, 256);
+    let id = r.iter().find(|x| x.0 == 1).unwrap().3;
+    let notes: Vec<_> = r.iter().filter(|x| x.0 <= 2).copied().collect();
+    let pedal: Vec<(u32, i64)> = r.iter().filter(|x| x.0 == 4 && x.2 == 100).map(|x| (x.1, x.3)).collect();
+    assert_eq!(notes, vec![(1, 0, 60, id), (2, 9, 60, id)], "the off one frame after the press");
+    assert_eq!(pedal, vec![(8, 1_000_000), (9, 787_402)], "the press at 8, the value with the off at 9");
+    // The pedal's value when the off is read: points first sees the value at 9, notes first the
+    // press at 8. Both are down, so A sustains either way.
+    let at = |upto: u32| pedal.iter().rev().find(|(f, _)| *f <= upto).map(|x| x.1);
+    assert!(at(9).unwrap() >= 500_000 && at(8).unwrap() >= 500_000);
+}
+
+/// The panic at the VST3 boundary (replacing the old held-flag reset test): two voices of one key
+/// and a pedal, then All MIDI Notes Off with no reset: each voice gets its own off and the pedal its
+/// release; a start still queued is cancelled.
+#[test]
+fn the_panic_releases_both_voices_of_one_key_and_the_pedal() {
+    let mut p = synth(256);
+    let n = NoteId::NONE;
+    assert!(p.event(0, &ev(0, -1, Message::NoteOn { key: 60, velocity: 100, id: n })));
+    assert!(p.event(1, &ev(0, -1, Message::NoteOn { key: 60, velocity: 100, id: n })));
+    assert!(p.event(2, &ev(0, -1, Message::Control { cc: 64, value: 127 })));
+    let r = records(&mut p, 256);
+    let mut ids: Vec<i64> = r.iter().filter(|x| x.0 == 1).map(|x| x.3).collect();
+    assert_eq!(ids.len(), 2);
+    assert!(p.event(5, &ev(0, -1, Message::NoteOn { key: 64, velocity: 100, id: n })), "queued, then cancelled");
+    p.all_notes_off();
+    let r = records(&mut p, 256);
+    let mut offs: Vec<i64> = r.iter().filter(|x| x.0 == 2).map(|x| x.3).collect();
+    offs.sort_unstable();
+    ids.sort_unstable();
+    assert_eq!(offs, ids, "each voice its own off: {r:?}");
+    assert!(!r.iter().any(|x| x.0 == 1), "the queued start was cancelled");
+    assert!(r.iter().any(|x| x.0 == 4 && x.2 == 100 && x.3 == 0), "the pedal released: {r:?}");
+    assert!(records(&mut p, 256).is_empty());
+}
