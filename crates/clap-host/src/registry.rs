@@ -449,7 +449,7 @@ fn param_info(inst: &Instance, p: &RawParam) -> ParamInfo {
 }
 
 /// Builds and leaks the `PluginInfo` for one plugin type. Called once per id (cached), outside the registry lock.
-fn build_info(d: &ClapDescriptor, inst: &Instance) -> &'static PluginInfo {
+pub(crate) fn build_info(d: &ClapDescriptor, inst: &Instance) -> &'static PluginInfo {
     let params: Vec<ParamInfo> =
         inst.params().iter().filter(|p| p.flags & (CLAP_PARAM_IS_HIDDEN | CLAP_PARAM_IS_READONLY) == 0).map(|p| param_info(inst, p)).collect();
     let short: String = d.name.chars().take(8).collect();

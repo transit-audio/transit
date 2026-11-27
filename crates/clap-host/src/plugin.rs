@@ -463,6 +463,8 @@ impl ClapPlugin {
         }
         let ids: Vec<u32> = info.params.iter().map(|p| p.id.parse::<u32>().unwrap_or(u32::MAX)).collect();
         inst.reserve_parameter_events(ids.len());
+        #[cfg(test)]
+        let raw_capacity = inst.raw_capacity();
         let values = info.params.iter().zip(&ids).map(|(p, id)| inst.param_value(*id).map_or(p.default, |v| p.clamp(v as f32))).collect();
         let host = inst.host_state();
         let link = inst.link();
@@ -509,7 +511,7 @@ impl ClapPlugin {
                 echoes.hold(i, p.clamp(x as f32), x);
             }
         }
-        ClapPlugin {
+        let plugin = ClapPlugin {
             shared,
             host,
             info,
@@ -533,7 +535,10 @@ impl ClapPlugin {
             process_errors: 0,
             loads_seen: 0,
             echoes,
-        }
+        };
+        #[cfg(test)]
+        CONSTRUCTED.set([plugin.queue.capacity(), plugin.delivery.capacity(), raw_capacity, plugin.info.params.len()]);
+        plugin
     }
 
     /// Timed parameter points that missed their offset so far (see `params_dropped`).
@@ -1120,6 +1125,14 @@ struct ClapEditor {
     ids: Vec<u32>,
     /// The instance's requests, serviced on each `idle` (the host calls it every UI frame).
     shared: Weak<Shared>,
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// Test seam (ADR 0059 storage accounting): what the last `ClapPlugin::new` on this thread
+    /// allocated: the event queue's and the delivery list's capacities, the native list's
+    /// capacity, and the parameter count.
+    pub(crate) static CONSTRUCTED: std::cell::Cell<[usize; 4]> = const { std::cell::Cell::new([0; 4]) };
 }
 
 #[cfg(test)]

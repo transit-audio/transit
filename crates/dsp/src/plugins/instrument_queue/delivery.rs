@@ -148,6 +148,12 @@ impl Delivery {
         &self.ledger
     }
 
+    /// The native list's allocated capacity, in items (storage accounting).
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.items.capacity()
+    }
+
     /// Everything queued, in delivery order.
     #[must_use]
     pub fn items(&self) -> &[Item] {

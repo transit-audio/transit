@@ -25,6 +25,8 @@ impl ClapPlugin {
         let mut put = |queue: &mut Vec<Event>, e: Event| {
             if !parameter_queue::insert(queue, e) {
                 self.untranslated = self.untranslated.saturating_add(1);
+                #[cfg(feature = "test-hooks")]
+                crate::UNTRANSLATED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             }
         };
         match (message, self.notes) {

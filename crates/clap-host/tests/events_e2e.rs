@@ -275,6 +275,7 @@ fn midi_dialect_keeps_every_release_at_saturation_and_reclaims_identities() {
         assert_eq!(r.last(), Some(&(5, 800, 0x83_3C_00, 0)));
         all.extend(bytes(&r));
         assert!(voices_left(&all, true).is_empty() && voices_left(&all, false).is_empty());
+        assert_eq!(transit_clap_host::UNTRANSLATED.load(std::sync::atomic::Ordering::Relaxed), 0);
     }
 }
 
@@ -399,6 +400,7 @@ fn a_saturated_call_delivers_every_admitted_event() {
     assert_eq!(offs, sorted_ons, "every off delivered with its on's note id");
     assert_eq!(r.iter().filter(|x| x.0 == 5).count(), 1024, "both halves of every 14-bit controller");
     assert_eq!(r.iter().filter(|x| x.0 == 4).count(), 1025, "the block-start value and every timed point");
+    assert_eq!(transit_clap_host::UNTRANSLATED.load(std::sync::atomic::Ordering::Relaxed), 0, "nothing dropped in translation");
     // Every reservation was settled by a delivery: the next 704 starts are all admitted again.
     for k in 0..704u16 {
         assert!(p.event(0, &ev((k % 16) as u8, -1, Message::NoteOn { key: (k / 16) as u8, velocity: 90, id: n })));

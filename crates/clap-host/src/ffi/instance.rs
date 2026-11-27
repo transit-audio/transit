@@ -14,7 +14,14 @@ impl Instance {
     /// in addition to the timed-point and native-event budgets. Conversion must not truncate that
     /// reserve.
     pub(crate) fn reserve_parameter_events(&mut self, parameters: usize) {
-        self.raw.reserve(EVENT_CAP.saturating_add(NATIVE_EVENTS).saturating_add(parameters).saturating_sub(self.raw.len()));
+        // Exact: an amortized `reserve` may double the list (storage accounting, ADR 0059).
+        self.raw.reserve_exact(EVENT_CAP.saturating_add(NATIVE_EVENTS).saturating_add(parameters).saturating_sub(self.raw.len()));
+    }
+
+    /// Test seam (ADR 0059 storage accounting): the native list's allocated capacity.
+    #[cfg(test)]
+    pub(crate) fn raw_capacity(&self) -> usize {
+        self.raw.capacity()
     }
 }
 

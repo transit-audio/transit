@@ -318,6 +318,12 @@ pub fn cached_info(id: &str) -> Option<&'static PluginInfo> {
     api::cached_info(id)
 }
 
+/// Test hook (ADR 0059): native events translation could not place, summed over every instance
+/// of this process. An invariant: every translation buffer is sized for all admission permits, so
+/// it stays zero; integration tests assert it.
+#[cfg(feature = "test-hooks")]
+pub static UNTRANSLATED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[cfg(test)]
 mod tests {
     use super::*;
