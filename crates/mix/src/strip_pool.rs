@@ -885,6 +885,8 @@ impl StripPool {
         }
         self.counters.callback_renders.fetch_add(callback, Ordering::Relaxed);
         let deadline = self.deadline(b);
+        #[cfg(feature = "testing")]
+        let deadline = self.plain_gated_deadline(deadline);
         let cells_ref = &self.cells;
         let _report = self.set.finish(deadline, |i| {
             // Reclaimed by the callback: no worker can hold the cell.

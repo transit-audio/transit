@@ -12,7 +12,10 @@
 //! strips miss the block is the test's input (E49), not a scheduling outcome. Before E72 the real
 //! deadline still applied while a strip outside `gate` was unresolved (a test's far deadline, 60
 //! s): a stall past it skipped an unheld strip. Disarmed ([`crate::MixEngine::clock_deadline`]),
-//! the real deadline again.
+//! the real deadline again. Both render paths honor it: the graph path re-reads the deadline at
+//! each poll, the plain (unkeyed) path waits for it before `finish`
+//! ([`StripPool::plain_gated_deadline`]); before that, a held strip on the plain path was waited
+//! for to the far deadline, so a held worker never ended the block.
 
 use super::*;
 use transit_rt::strip_jobs::State;
@@ -76,6 +79,36 @@ impl StripPool {
     pub(crate) fn arm_tail_cost(&mut self, clock: transit_rt::worker_set::seams::CostClock) {
         self.set.arm_cost_clock(clock);
     }
+    /// The plain path's deadline under the deterministic deadline. The graph path re-reads
+    /// [`StripPool::gated_deadline`] at each poll and consumes finished strips in between; the
+    /// plain path hands `finish` one deadline and consumes nothing before it, so outcomes stay
+    /// `Pending` there and the job states decide: this waits (with workers) until every published
+    /// strip outside `gate` is `Done` and each held strip is claimed (or done), then gives `finish`
+    /// that moment, so the held strips are `Late` and the others `Mixed`. Unarmed, or with no
+    /// worker (the callback renders inline in `finish`, which needs the far deadline), `deadline`
+    /// unchanged.
+    pub(crate) fn plain_gated_deadline(&self, deadline: Instant) -> Instant {
+        if !self.gated || self.set.workers() == 0 {
+            return deadline;
+        }
+        loop {
+            let waiting = self.set.outcomes().iter().enumerate().any(|(i, o)| {
+                let held = self.gate.get(i).copied().unwrap_or(false);
+                let state = self.set.jobs().slot(i).map(|s| s.state());
+                *o == Outcome::Pending
+                    && match state {
+                        Some(State::Done) | None => false,
+                        Some(State::Claimed) => !held,
+                        Some(_) => true,
+                    }
+            });
+            if !waiting {
+                return Instant::now();
+            }
+            std::hint::spin_loop();
+        }
+    }
+
     /// The deadline a poll uses this block (see the module docs).
     pub(crate) fn gated_deadline(&self, deadline: Instant) -> Instant {
         if !self.gated {
