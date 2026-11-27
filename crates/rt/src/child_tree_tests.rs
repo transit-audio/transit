@@ -40,6 +40,8 @@ fn role_entry() {
             // Held back until the parent has contained this process (the scan children's rule).
             let mut go = String::new();
             std::io::stdin().read_line(&mut go).unwrap();
+            // Never waited for: the leaf lives until the tree is killed, which is the test.
+            #[allow(clippy::zombie_processes)]
             let leaf = role("leaf").stdin(Stdio::null()).spawn().unwrap();
             println!("LEAF {}", leaf.id());
             std::io::Write::flush(&mut std::io::stdout()).unwrap();
@@ -49,6 +51,8 @@ fn role_entry() {
             let mut c = role("watched");
             c.stdin(Stdio::null()).env("WATCH_PARENT", std::process::id().to_string());
             prepare(&mut c);
+            // Never waited for: `watched` lives until this process is killed, which is the test.
+            #[allow(clippy::zombie_processes)]
             let watched = c.spawn().unwrap();
             let tree = Tree::contain(&watched).unwrap();
             println!("WATCHED {}", watched.id());
@@ -88,7 +92,7 @@ fn killing_a_tree_ends_the_child_and_what_it_started() {
     std::io::Write::write_all(&mut holder.stdin.take().unwrap(), b"go\n").unwrap();
     let mut out = std::io::BufReader::new(holder.stdout.take().unwrap());
     let leaf = line_with(&mut out, "LEAF");
-    assert!(!leaf.is_empty());
+    assert_ne!(leaf, "");
     tree.kill();
     holder.wait().unwrap();
     // The leaf holds the pipe too: the end of file comes only once it is gone as well.
@@ -103,7 +107,7 @@ fn a_contained_child_ends_when_its_parent_is_killed() {
     let mut middle = role("middle").stdin(Stdio::null()).stdout(Stdio::piped()).spawn().unwrap();
     let mut out = std::io::BufReader::new(middle.stdout.take().unwrap());
     let watched = line_with(&mut out, "WATCHED");
-    assert!(!watched.is_empty());
+    assert_ne!(watched, "");
     middle.kill().unwrap();
     middle.wait().unwrap();
     // `watched` inherited the pipe: the end of file comes only once it is gone too (Windows: the

@@ -56,8 +56,12 @@ unsafe impl Send for Tree {}
 impl Tree {
     /// Contains `child`, started from a command passed to [`prepare`]. Windows: a new job object
     /// that kills its processes when its last handle closes, with the child assigned to it.
-    /// Linux and macOS: the child's process group. Err when the job could not be made or the
-    /// child not assigned (the caller decides what to do with an uncontained child).
+    /// Linux and macOS: the child's process group.
+    ///
+    /// # Errors
+    /// Windows: the system's error when the job could not be made, limited or the child assigned
+    /// to it (the caller decides what to do with an uncontained child). Linux and macOS: a child
+    /// id out of range for a process group.
     pub fn contain(child: &Child) -> std::io::Result<Tree> {
         imp::contain(child)
     }
