@@ -533,6 +533,12 @@ fn edge_declarations_and_helpers() {
     wait_until_unlocked(&vendor.join("helper.lock"));
     assert!(!vendor.join("helper.done").exists(), "the helper was killed with the probe child's tree; it did not end by itself");
     assert_eq!(p("Fixture Notes").note_output, Some(true), "the class after the helpers was probed");
+    // Review round 2, finding A: a helper of a child that ends by itself is killed with the
+    // child's tree, before the child is reaped (on Linux and macOS a kill after the reap signals
+    // nothing, and the helper would end only by itself, writing `reaped.done`).
+    assert!(error("Fixture Probe Helper Crash").contains("ended the scan process"), "{}", error("Fixture Probe Helper Crash"));
+    wait_until_unlocked(&vendor.join("reaped.lock"));
+    assert!(!vendor.join("reaped.done").exists(), "the crashed child's helper was killed with its tree; it did not end by itself");
     #[cfg(unix)]
     {
         // A helper that left the group on purpose is out of reach (a stated limit), but it no
@@ -545,12 +551,6 @@ fn edge_declarations_and_helpers() {
         wait_until_unlocked(&escape);
         assert!(alive, "the helper that left the group outlived its probe (the stated limit)");
     }
-    // Review round 2, finding A: a helper of a child that ends by itself is killed with the
-    // child's tree, before the child is reaped (on Linux and macOS a kill after the reap signals
-    // nothing, and the helper would end only by itself, writing `reaped.done`).
-    assert!(error("Fixture Probe Helper Crash").contains("ended the scan process"), "{}", error("Fixture Probe Helper Crash"));
-    wait_until_unlocked(&vendor.join("reaped.lock"));
-    assert!(!vendor.join("reaped.done").exists(), "the crashed child's helper was killed with its tree; it did not end by itself");
     // Finding C: a helper that keeps writing to the probe child's output pipe (in a group of its
     // own on Linux and macOS, so only the closing of the pipe can end it there) ends once the
     // probe is over: nothing in this process reads the pipe or holds it open any more.
