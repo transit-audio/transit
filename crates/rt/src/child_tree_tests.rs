@@ -61,8 +61,21 @@ fn role_entry() {
             std::mem::forget(tree);
             sleep_long()
         }
+        "quick" => {
+            let mut go = String::new();
+            std::io::stdin().read_line(&mut go).unwrap();
+            println!("QUICK");
+            std::process::exit(0)
+        }
+        "talker" => {
+            let mut go = String::new();
+            std::io::stdin().read_line(&mut go).unwrap();
+            println!("HELLO");
+            std::io::Write::flush(&mut std::io::stdout()).unwrap();
+            sleep_long()
+        }
         "watched" => {
-            exit_with_parent(std::env::var("WATCH_PARENT").unwrap().parse().unwrap());
+            exit_with_parent(std::env::var("WATCH_PARENT").unwrap().parse().unwrap()).unwrap();
             sleep_long()
         }
         other => panic!("unknown role {other}"),
@@ -115,4 +128,69 @@ fn a_contained_child_ends_when_its_parent_is_killed() {
     let mut rest = String::new();
     out.read_to_string(&mut rest).unwrap();
     assert!(!rest.contains(ENDED), "a process of the tree was not ended: {rest}");
+}
+
+/// Starts `name` contained, with its standard input and output piped, and says "go".
+fn contained(name: &str) -> (std::process::Child, Tree) {
+    let mut c = role(name);
+    c.stdin(Stdio::piped()).stdout(Stdio::piped());
+    prepare(&mut c);
+    let child = c.spawn().unwrap();
+    let tree = Tree::contain(&child).unwrap();
+    let mut child = child;
+    std::io::Write::write_all(&mut child.stdin.take().unwrap(), b"go\n").unwrap();
+    (child, tree)
+}
+
+/// Review finding A: the end of a child is observed without reaping it, so its tree is killed
+/// while its id still names its group; a tree killed after its child was reaped signals nothing.
+/// (One test: the refusal counter is process-wide.)
+#[test]
+fn a_tree_is_killed_only_while_its_child_is_unreaped() {
+    let (mut child, tree) = contained("quick");
+    let mut rest = String::new();
+    child.stdout.take().unwrap().read_to_string(&mut rest).unwrap();
+    assert!(rest.contains("QUICK"), "{rest}");
+    // The child closed its output when it ended; wait (without reaping) until the system says so.
+    while !exited(&mut child).unwrap() {
+        std::thread::yield_now();
+    }
+    assert!(exited(&mut child).unwrap(), "asking again finds it again: it was not reaped");
+    let before = refused_kills();
+    tree.kill();
+    assert_eq!(refused_kills(), before, "the tree was signalled: its child was still unreaped");
+    child.wait().unwrap();
+
+    let (mut reaped, late) = contained("quick");
+    reaped.wait().unwrap();
+    let before = refused_kills();
+    late.kill();
+    let refused = if cfg!(unix) { 1 } else { 0 };
+    assert_eq!(refused_kills(), before + refused, "a tree whose child was reaped is not signalled (Linux and macOS)");
+}
+
+/// Review finding C: output is read without blocking, and reading ends when the writers are gone.
+#[test]
+fn output_is_read_without_waiting_until_its_writers_are_gone() {
+    let (mut child, tree) = contained("talker");
+    let mut output = Output::new(child.stdout.take().unwrap()).unwrap();
+    let mut got = Vec::new();
+    let mut buf = [0u8; 256];
+    while !String::from_utf8_lossy(&got).contains("HELLO\n") {
+        match output.read_available(&mut buf).unwrap() {
+            Read::Bytes(n) => got.extend_from_slice(&buf[..n]),
+            Read::Nothing => std::thread::yield_now(),
+            Read::End => panic!("ended before HELLO"),
+        }
+    }
+    assert_eq!(output.read_available(&mut buf).unwrap(), Read::Nothing, "the talker sleeps: nothing to read, and no wait");
+    tree.kill();
+    loop {
+        match output.read_available(&mut buf).unwrap() {
+            Read::End => break,
+            Read::Nothing => std::thread::yield_now(),
+            Read::Bytes(_) => {}
+        }
+    }
+    child.wait().unwrap();
 }
