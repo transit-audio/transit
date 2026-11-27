@@ -101,8 +101,11 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
         s.sources.push(ns);
     }
     let mut out = Vec::new();
+    let mut renamed = Vec::new();
     for mut tr in picked {
+        let donor_id = tr.id;
         tr.id = TrackId(s.alloc());
+        renamed.push((donor_id, tr.id));
         tr.name = s.unique_track_name(&tr.name);
         tr.folder = None;
         tr.mixer.vca = None;
@@ -139,6 +142,16 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
         let pos = s.tracks.iter().position(|t| t.kind == TrackKind::Master).unwrap_or(s.tracks.len());
         out.push(tr.id);
         s.tracks.insert(pos, tr);
+    }
+    // ADR 0065: a route names its source by the donor's id, which means nothing here. A source
+    // that came along is followed to its copy; any other gets an id of its own that names nothing
+    // here, so the destination is disconnected (decision 6.6), never routed from another track.
+    for t in &out {
+        let Some(from) = s.track(*t).and_then(|tr| tr.midi_from) else { continue };
+        let track = renamed.iter().find(|(donor, _)| *donor == from.track).map_or_else(|| TrackId(s.alloc()), |(_, here)| *here);
+        if let Some(tr) = s.track_mut(*t) {
+            tr.midi_from = Some(transit_model::MidiFrom { track, ..from });
+        }
     }
     s.edit.selected_tracks = out.clone();
     // An imported hardware insert whose send path is taken here comes in disabled.

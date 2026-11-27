@@ -3,7 +3,7 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use transit_model::MidiPort;
+use transit_model::{MidiFrom, MidiPort, TrackId};
 
 const ID: &str = "midi.input";
 
@@ -46,6 +46,37 @@ fn port_param(value: &Value) -> Result<MidiPort> {
     }
 }
 
+/// `from`: absent, `null` (clear the route) or a source track by id or name (ADR 0065 1.7).
+fn from_param(e: &Engine, p: &Value) -> Result<Option<Option<TrackId>>> {
+    match p.get("from") {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(_) => Ok(Some(track_param(e, ID, p, "from")?)),
+    }
+}
+
+/// Refuses a route from `src` to each of `tracks` before any change (ADR 0065 1.5, 1.7): the
+/// track itself, a destination or source outside decision 1.5, and a route that closes a loop
+/// with any edge of the route graph.
+fn refuse_route(e: &Engine, tracks: &[TrackId], src: TrackId) -> Result<()> {
+    let s = e.session();
+    let source = s.track(src).ok_or_else(|| bad(ID, format!("no track {}", src.0)))?;
+    for id in tracks {
+        let Some(t) = s.track(*id) else { continue };
+        if *id == src {
+            return Err(bad(ID, format!("that route would create a routing loop: {}", transit_model::describe_cycle(s, &[src]))));
+        }
+        if let Some(why) = transit_model::destination_problem(t) {
+            return Err(bad(ID, transit_model::destination_refusal(&t.name, why)));
+        }
+    }
+    if let Some(why) = transit_model::source_problem(source) {
+        return Err(bad(ID, transit_model::source_refusal(&source.name, why)));
+    }
+    let changes: Vec<_> = tracks.iter().map(|t| transit_model::RouteChange::Midi { track: *t, from: Some(src) }).collect();
+    super::track::refuse_loop(s, ID, &changes)
+}
+
 fn set_input(e: &mut Engine, p: &Value) -> Result<Value> {
     if p.get("tracks").is_some_and(|v| !v.is_array()) {
         return Err(bad(ID, "`tracks` must be an array of track ids or names"));
@@ -53,9 +84,8 @@ fn set_input(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut tracks = tracks_required(e, ID, p)?;
     tracks.sort_by_key(|t| t.0);
     tracks.dedup();
-    if tracks.iter().any(|id| e.session().track(*id).is_none_or(|t| !t.kind.is_midi())) {
-        return Err(bad(ID, "MIDI input is available only on MIDI and instrument tracks"));
-    }
+    let from = from_param(e, p)?;
+    let listen = p.get("listen").map(|v| v.as_bool().ok_or_else(|| bad(ID, "`listen` must be true or false"))).transpose()?;
     let port = p.get("port").map(port_param).transpose()?;
     let channel = p
         .get("channel")
@@ -71,18 +101,52 @@ fn set_input(e: &mut Engine, p: &Value) -> Result<Value> {
             }
         })
         .transpose()?;
-    if port.is_none() && channel.is_none() {
-        return Err(bad(ID, "supply `port` or `channel`"));
+    if port.is_none() && channel.is_none() && from.is_none() && listen.is_none() {
+        return Err(bad(ID, "supply `port`, `channel`, `from` or `listen`"));
+    }
+    if matches!(from, Some(Some(_))) && port.is_some() {
+        return Err(bad(ID, "supply `from` or `port`, not both: a port clears the route"));
+    }
+    match from {
+        // The route checks name the destination's own reason (ADR 0065 1.7).
+        Some(Some(src)) => refuse_route(e, &tracks, src)?,
+        // Clearing a route or setting its Listen needs no hardware input.
+        _ if port.is_none() && channel.is_none() => {}
+        _ => {
+            if tracks.iter().any(|id| e.session().track(*id).is_none_or(|t| !t.kind.is_midi())) {
+                return Err(bad(ID, "MIDI input is available only on MIDI and instrument tracks"));
+            }
+        }
+    }
+    if from.is_none()
+        && listen.is_some()
+        && let Some(t) = tracks.iter().filter_map(|id| e.session().track(*id)).find(|t| t.midi_from.is_none())
+    {
+        return Err(bad(ID, format!("{} takes no MIDI from another track", t.name)));
     }
     for id in &tracks {
         if let Some(track) = e.session_mut().track_mut(*id) {
             if let Some(port) = &port {
                 track.midi_input.port = port.clone();
+                track.midi_from = None;
             }
             if let Some(channel) = channel {
                 track.midi_input.channel = channel;
+            }
+            match from {
+                Some(Some(src)) => track.midi_from = Some(MidiFrom { track: src, listen: listen.unwrap_or(true) }),
+                Some(None) => track.midi_from = None,
+                None => {
+                    if let (Some(on), Some(route)) = (listen, track.midi_from.as_mut()) {
+                        route.listen = on;
+                    }
+                }
             }
         }
     }
     Ok(json!({"tracks": tracks}))
 }
+
+#[cfg(test)]
+#[path = "tests_midi_routes.rs"]
+mod tests;

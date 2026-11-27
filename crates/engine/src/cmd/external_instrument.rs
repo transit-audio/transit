@@ -127,6 +127,10 @@ fn set_external(e: &mut Engine, p: &Value) -> Result<Value> {
     if track.kind != TrackKind::Instrument {
         return Err(bad(ID, "an External Instrument goes in an instrument track's instrument slot"));
     }
+    // ADR 0065 decision 1.5: a track that takes a route cannot hold an External Instrument yet.
+    if track.midi_from.is_some() {
+        return Err(bad(ID, transit_model::takes_route_refusal(e.session(), track)));
+    }
     // Validate everything before changing anything, so a refusal changes nothing.
     let port = match p.get("port") {
         Some(v) => Some(super::midi_output::port_param(v)?.ok_or_else(|| bad(ID, "`port` must be a MIDI output port object"))?),

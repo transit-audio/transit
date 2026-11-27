@@ -59,6 +59,10 @@ fn freeze_track(e: &mut Engine, id: &str, t: TrackId) -> Result<bool> {
         return Err(bad(id, format!("`{}` is not an audio or instrument track", tr.name)));
     }
     super::external_instrument::refuse_offline_print(id, tr)?;
+    // ADR 0065 decision 6.3: a route's source is never frozen.
+    if let Some(why) = transit_model::freeze_refusal(s, t) {
+        return Err(bad(id, why));
+    }
     let end = tr.clips().iter().map(Clip::end).max().unwrap_or(0);
     if end <= 0 {
         return Err(bad(id, format!("nothing to freeze: `{}` has no clips", tr.name)));

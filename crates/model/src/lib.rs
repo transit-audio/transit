@@ -33,6 +33,7 @@ mod midi_map;
 pub mod midi_transport;
 pub use midi_transport::{TransportControl, TransportPrefs, TransportProfiles};
 mod midi_output;
+mod midi_route;
 mod mixer;
 pub mod pad_notes;
 #[cfg(test)]
@@ -72,6 +73,10 @@ pub use midi_effect::{MAX_MIDI_EFFECTS, MIDI_EFFECT_SLOT, MidiEffectSlot};
 pub use midi_input::{MidiInput, MidiPort};
 pub use midi_map::{Control, ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Resolved, Scope, SourceKind, Strip, resolve};
 pub use midi_output::{MAX_MIDI_OUT_OFFSET_MS, MidiOutChannel, MidiOutPort, MidiOutput, device_name, device_of_id, same_midi_device};
+pub use midi_route::{
+    HARDWARE_NOT_YET, MidiFrom, RouteState, destination_problem, destination_refusal, freeze_refusal, new_hardware_route, route_load_notes,
+    sends_to_hardware, source_problem, source_refusal, takes_route_refusal,
+};
 pub use mixer::{
     Bus, ChannelFormat, EXTERNAL_GAIN_DB, EXTERNAL_INSTRUMENT_PLUGIN, ExternalInstrument, HARDWARE_PLUGIN, HardwareInsert, INSERT_SLOTS, Insert,
     InsertUid, KeyFrom, KeySource, MAX_EXTERNAL_LATENCY_MS, Mixer, OutputPath, Route, SEND_SLOTS, SendSlot, Speaker, SurroundPan, Tap,

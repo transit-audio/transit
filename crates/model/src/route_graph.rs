@@ -6,7 +6,10 @@
 //! - a track's output to a bus or to the main mix ([`EdgeKind::Output`]),
 //! - a track's send to a bus ([`EdgeKind::Send`], pre- or post-fader),
 //! - a bus to the aux or routing folder that reads it as its input ([`EdgeKind::Input`]),
-//! - a strip or bus to a strip whose insert detects on it ([`EdgeKind::Key`], a sidechain key).
+//! - a strip or bus to a strip whose insert detects on it ([`EdgeKind::Key`], a sidechain key),
+//! - a source track to a destination track that takes its MIDI ([`EdgeKind::Midi`], ADR 0065),
+//!   only while the route is in force (see `midi_route.rs`). It carries no audio: every walk of
+//!   the audio paths leaves it out, as it leaves out keys.
 //!   A key reaches a track other than an aux only from a track: busses and auxes render after the
 //!   audio tracks, so such a key is inert (no edge) and the insert keeps detecting on its own input.
 //!
@@ -46,6 +49,8 @@ pub enum EdgeKind {
     /// The insert in this slot of the target track detects on the source (a sidechain key),
     /// taken before the source's fader when `pre_fader`.
     Key { slot: usize, pre_fader: bool },
+    /// The target track takes its MIDI from the source track (ADR 0065 decision 2.1).
+    Midi,
 }
 
 /// One edge of the routing graph.
@@ -67,6 +72,8 @@ pub enum RouteChange {
     Send { track: TrackId, slot: usize, route: Route },
     /// `mix.insert_key`: the insert in `slot` of the track takes `key` (`None` clears it).
     Key { track: TrackId, slot: usize, key: Option<KeySource> },
+    /// `midi.input`: the track takes its MIDI from `from` (`None` clears the route).
+    Midi { track: TrackId, from: Option<TrackId> },
 }
 
 impl RouteChange {
@@ -75,7 +82,8 @@ impl RouteChange {
             RouteChange::Output { track, .. }
             | RouteChange::Input { track, .. }
             | RouteChange::Send { track, .. }
-            | RouteChange::Key { track, .. } => *track,
+            | RouteChange::Key { track, .. }
+            | RouteChange::Midi { track, .. } => *track,
         }
     }
 }
@@ -150,7 +158,9 @@ const NONE: usize = usize::MAX;
 /// Loops are broken in rounds: each round finds the strongly connected components (Tarjan,
 /// linear in the graph); in every component with a loop, the edges inside it that write the
 /// bus its first track (lowest index) reads are cut, so that aux keeps every source from outside
-/// the loop and loses only feedback. A session without loops takes one round; loops nested
+/// the loop and loses only feedback. When no loop has such an edge, the keys into the first track
+/// of each loop are cut, and when there are none either, the MIDI routes into it (ADR 0065
+/// decision 2.1). A session without loops takes one round; loops nested
 /// inside one another take one more round per level.
 #[derive(Debug, Clone, Default)]
 pub struct RouteScratch {
@@ -213,7 +223,8 @@ impl RouteScratch {
     /// Makes room for `s`'s graph (allocates when it is larger than any seen before).
     pub fn reserve(&mut self, s: &Session) {
         let n = s.tracks.len() + s.busses.len() + 1;
-        let e: usize = s.tracks.iter().map(|t| t.mixer.sends.len().saturating_add(t.mixer.inserts.len()).saturating_add(2)).sum();
+        // Per track: its sends, its keys, its input, its output and its MIDI route.
+        let e: usize = s.tracks.iter().map(|t| t.mixer.sends.len().saturating_add(t.mixer.inserts.len()).saturating_add(3)).sum();
         hold(&mut self.bus_ids, s.busses.len());
         hold(&mut self.edges, e);
         hold(&mut self.from, e);
@@ -257,7 +268,7 @@ impl RouteScratch {
                 match c {
                     RouteChange::Output { route, .. } => output = route,
                     RouteChange::Input { route, .. } => input = route,
-                    RouteChange::Send { .. } | RouteChange::Key { .. } => {}
+                    RouteChange::Send { .. } | RouteChange::Key { .. } | RouteChange::Midi { .. } => {}
                 }
             }
             if reads_bus(t)
@@ -300,6 +311,9 @@ impl RouteScratch {
                 if let Some(from) = self.key_node(s, t, i, key.from) {
                     self.edges.push(RouteEdge { from, to: RouteNode::Track(i), kind: EdgeKind::Key { slot, pre_fader: key.tap == Tap::Pre } });
                 }
+            }
+            if let Some(from) = midi::source_node(s, t, i, changes) {
+                self.edges.push(RouteEdge { from, to: RouteNode::Track(i), kind: EdgeKind::Midi });
             }
         }
     }
@@ -471,6 +485,10 @@ impl RouteScratch {
                 }
             }
             if !any {
+                // Neither: the loop runs through MIDI routes only. Cut the routes into its first track.
+                any = self.cut_into_first(|k| k == EdgeKind::Midi);
+            }
+            if !any {
                 break;
             }
         }
@@ -526,7 +544,7 @@ impl RouteScratch {
         self.dropped.clear();
         for e in 0..self.edges.len() {
             let (u, v) = (self.from[e], self.to[e]);
-            let key_cut = self.cut[e] && matches!(self.edges[e].kind, EdgeKind::Key { .. });
+            let key_cut = self.cut[e] && matches!(self.edges[e].kind, EdgeKind::Key { .. } | EdgeKind::Midi);
             if key_cut || (u < self.tracks && v >= self.tracks && v < self.tracks + self.busses && self.pos[u] >= self.reader[v - self.tracks]) {
                 self.dropped.push(e);
             }
@@ -801,7 +819,7 @@ pub fn hardware_conflict(s: &Session) -> Option<HardwareConflict> {
         let mut at = 0;
         while let Some(&n) = seen.get(at) {
             at += 1;
-            for e in graph.edges().iter().filter(|e| e.from == n && !matches!(e.kind, EdgeKind::Key { .. })) {
+            for e in graph.edges().iter().filter(|e| e.from == n && !matches!(e.kind, EdgeKind::Key { .. } | EdgeKind::Midi)) {
                 if !seen.contains(&e.to) {
                     seen.push(e.to);
                 }
@@ -886,6 +904,7 @@ fn same_routing(a: &Session, b: &Session) -> bool {
                     .all(|(p, q)| p.as_ref().map(|z| (z.key, &z.hardware)) == q.as_ref().map(|z| (z.key, &z.hardware)))
                 && x.mixer.sends.len() == y.mixer.sends.len()
                 && x.mixer.sends.iter().zip(&y.mixer.sends).all(|(p, q)| p.as_ref().map(|z| &z.target) == q.as_ref().map(|z| &z.target))
+                && midi::same_route(x, y)
         })
 }
 
@@ -931,6 +950,10 @@ pub fn new_cycle(before: &Session, after: &Session) -> Option<Vec<TrackId>> {
     }
     None
 }
+
+#[path = "route_graph_midi.rs"]
+mod midi;
+pub(crate) use midi::midi_loop_notes;
 
 #[cfg(test)]
 mod tests {

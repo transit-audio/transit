@@ -92,6 +92,12 @@ fn set_output(e: &mut Engine, p: &Value) -> Result<Value> {
     if offset.is_some_and(|o| o != 0.0) && tracks.iter().any(|id| e.session().track(*id).is_some_and(|t| t.external_instrument().is_some())) {
         return Err(bad(ID, "Latency is set on the External Instrument: the MIDI offset of its track is held at 0"));
     }
+    // ADR 0065 decision 1.5: a track that takes a route cannot send to a port yet.
+    if matches!(port, Some(Some(_)))
+        && let Some(t) = tracks.iter().filter_map(|id| e.session().track(*id)).find(|t| t.midi_from.is_some())
+    {
+        return Err(bad(ID, transit_model::takes_route_refusal(e.session(), t)));
+    }
     // Validate every track before changing any, so a refusal changes nothing.
     let mut next = Vec::with_capacity(tracks.len());
     for id in &tracks {

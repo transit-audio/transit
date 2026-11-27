@@ -241,6 +241,11 @@ pub struct Track {
     /// MIDI hardware input and channel filter (old documents accept every input).
     #[serde(default)]
     pub midi_input: crate::MidiInput,
+    /// The track this one takes its MIDI from, with the route's Listen switch (ADR 0065 decision
+    /// 1.6). While set, `midi_input.port` is kept and not used. Not written while unset, so files
+    /// without routes stay as older builds wrote them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub midi_from: Option<crate::MidiFrom>,
     /// Where the track's MIDI goes: its hosted instrument (default) or an external port (#61).
     /// Not written while internal, so files without external routing stay as older builds wrote them.
     #[serde(default, skip_serializing_if = "crate::MidiOutput::is_internal")]
@@ -322,6 +327,7 @@ impl Track {
             active_playlist: 0,
             mixer: Mixer::new(format),
             midi_input: crate::MidiInput::default(),
+            midi_from: None,
             midi_output: crate::MidiOutput::Internal,
             allow_echo_to_device: false,
             automation: Vec::new(),

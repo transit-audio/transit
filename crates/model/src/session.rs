@@ -434,8 +434,17 @@ impl Session {
     }
 
     /// Features a file can list under `needs` (see [`Session::to_json`]) that this build understands.
-    pub const KNOWN_NEEDS: [&'static str; 8] =
-        ["clip_anchor", "clip_loop", "clip_scale_mode", "device_pages", "midi_hidden_notes", "pre_count", "sampler_patch", "sampler_slicing_modes"];
+    pub const KNOWN_NEEDS: [&'static str; 9] = [
+        "clip_anchor",
+        "clip_loop",
+        "clip_scale_mode",
+        "device_pages",
+        "midi_hidden_notes",
+        "midi_routes",
+        "pre_count",
+        "sampler_patch",
+        "sampler_slicing_modes",
+    ];
 
     /// The `needs` entries this session's content requires: a reader that does not know one would
     /// silently drop or misplay it. Empty for a session that uses none.
@@ -462,6 +471,11 @@ impl Session {
         // to the first cycle) on a looped clip whose start was trimmed. Every playlist counts.
         if self.all_clips().any(Clip::holds_left_hidden) {
             needs.push("midi_hidden_notes");
+        }
+        // ADR 0065 decision 8: a track that takes MIDI from another track; an older build drops
+        // the field and plays the destination from its kept hardware choice.
+        if self.has_midi_routes() {
+            needs.push("midi_routes");
         }
         // ADR 0052: content before bar 1 (a pre-count zone).
         if self.start() < 0 {
@@ -818,6 +832,8 @@ impl Session {
             s.tracks.iter().filter_map(|t| t.instrument.as_ref().and_then(|i| i.sampler_patch.as_ref()).and_then(|p| p.note(&t.name))).collect();
         s.load_notes.extend(patch_notes);
         s.load_notes.extend(dropped_pages);
+        // ADR 0065 decision 8: inert routes and routes a loop cut, each named; the fields stay.
+        s.load_notes.extend(crate::route_load_notes(&s));
         let changes = crate::legacy_synth::uses_retired_synth(&s)
             || crate::legacy_effects::uses_retired_effects(&s)
             || crate::legacy_sampler::uses_one_sample_sampler(&s)

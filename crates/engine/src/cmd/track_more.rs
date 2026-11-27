@@ -345,6 +345,15 @@ fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
         let kit = kit_value.is_some() && ins.as_ref().is_some_and(|i| i.plugin == "sampler" && i.sampler_patch.is_some());
         targets.push(kit::Target { track: *t, mixer: mx, instrument: ins, kit });
     }
+    // ADR 0065 decision 1.5: a preset cannot put an External Instrument on a track that takes a
+    // route; refused before anything is applied.
+    for t in &targets {
+        if let Some(tr) = e.session().track(t.track).filter(|tr| tr.midi_from.is_some())
+            && t.instrument.as_ref().is_some_and(|i| i.external_instrument().is_some())
+        {
+            return Err(bad(id, transit_model::takes_route_refusal(e.session(), tr)));
+        }
+    }
     let mut notice = None;
     match kit_value.filter(|_| targets.iter().any(|t| t.kit)) {
         None => {

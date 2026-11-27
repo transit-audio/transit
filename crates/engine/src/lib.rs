@@ -920,6 +920,11 @@ impl Engine {
         if let Some(why) = transit_model::new_hardware_problem(before, &self.doc) {
             return Err(cmd::bad(id, why));
         }
+        // ADR 0065 decision 1.5: no path puts an external MIDI output or an External Instrument on
+        // a track that takes a route (a preset, a duplicate, a kind change).
+        if let Some(why) = transit_model::new_hardware_route(before, &self.doc) {
+            return Err(cmd::bad(id, why));
+        }
         if cmd::edits_frozen(before, &self.doc) {
             return Err(EngineError::TrackFrozen);
         }
