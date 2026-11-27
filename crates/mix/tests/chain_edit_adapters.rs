@@ -1,15 +1,25 @@
 //! ADR 0057 slice P3a (decision 2.13) through the engine at real instruments.
 //!
-//! **The VST3 adapter.** The cases of decision 13's P3a evidence run through the real VST3 adapter's
-//! admission, native translation and processing boundary: the instrument is the VST3 fixture's
-//! events synth in record mode (as `crates/vst3-host/tests/delivery_e2e.rs` drives it), which logs
-//! every note event and mapped controller point it receives, per call, so the frames the plug-in
-//! sees are checked at block sizes 1, 7, 64 and 512. The voice state is evaluated on those native
-//! records with the plug-in reading each frame's points before its note events and after them, and
-//! both readings must give the stated result. The only delays allowed are ADR 0059 decision 3b's
-//! separations (at one frame of one channel, a pedal edge is moved to the next frame behind a note
-//! event or another edge, in arrival order). The fixture maps CC 64 on channel c to parameter
-//! 100 + c, and CC 66, 67, 69, 120, 121, 123 to 200, 300, 400, 500, 600, 700 + c.
+//! **The VST3 adapter.** These cases of decision 13's P3a evidence run through the real VST3
+//! adapter's admission, native translation and processing boundary, each at the first insertion and
+//! at a later edit where both exist: a held identified key under CC 64; a note held only by the
+//! pedal; a lift and a new press (CC 64 and CC 66); a pedal held through an edit; two sources
+//! holding the pedal; a clip pedal-down one frame after the edit; pitch bend and the mod wheel kept;
+//! a press on the edit's first frame; consecutive edits adding the owning pass-through and then the
+//! gated generator (its consumed pedal press, its notes ending at their gates); Transpose as the
+//! first effect (first insertion only); an un-bypass and the removal of the last effect (later
+//! edits only). Not here: the refused-release cases (the R1-h adapter never refuses an owned
+//! release; they stay in `src/events/chain_edit/tests`, at an arrival-order model).
+//!
+//! The instrument is the VST3 fixture's events synth in record mode (as
+//! `crates/vst3-host/tests/delivery_e2e.rs` drives it), which logs every note event and mapped
+//! controller point it receives, per call, so the frames the plug-in sees are checked at block
+//! sizes 1, 7, 64 and 512. The voice state is evaluated on those native records with the plug-in
+//! reading each frame's points before its note events and after them, and both readings must give
+//! the stated result. The only delays allowed are ADR 0059 decision 3b's separations (at one frame
+//! of one channel, a pedal edge is moved to the next frame behind a note event or another edge, in
+//! arrival order). The fixture maps CC 64 on channel c to parameter 100 + c, CC 66, 67, 69, 120,
+//! 121, 123 to 200, 300, 400, 500, 600, 700 + c, and CC 1 and pitch bend to 800 + c and 900 + c.
 //!
 //! **A built-in instrument.** The pinned limit of 2.13 (70 notes and a held pedal at an edit, every
 //! release refused in its block) ends with the engine's Stop at a real Macro Oscillator: nothing
@@ -37,6 +47,11 @@ const SIZES: [usize; 4] = [1, 7, 64, 512];
 /// The edit's frame: a block start at every size.
 const E: u64 = 3584;
 const OWN: &str = "midi_test_owning";
+const GATED: &str = "midi_test_gated";
+const TRANSPOSE: &str = "midi_transpose";
+
+/// A MIDI effect slot: id, parameters, bypassed.
+type Fx<'a> = (&'a str, &'a [(&'a str, f32)], bool);
 
 // ---- the VST3 fixture ----
 
@@ -281,11 +296,26 @@ impl Rig {
 
     /// Publishes the session with `chain` as the track's MIDI effects (kept slots keep their ids).
     fn chain(&mut self, chain: &[&str]) {
+        let spec: Vec<Fx<'_>> = chain.iter().map(|id| (*id, &[][..], false)).collect();
+        self.chain_spec(&spec);
+    }
+
+    /// Publishes the session with the MIDI effects `spec` (id, parameters, bypassed): the slots it
+    /// keeps keep their ids (an edit changes what is new, removed or bypassed).
+    fn chain_spec(&mut self, spec: &[Fx<'_>]) {
         let mut s = self.session.clone();
         let t = s.track_mut(self.track).unwrap();
-        t.midi_effects.truncate(chain.len());
-        for id in chain.iter().skip(t.midi_effects.len()) {
-            t.midi_effects.push(MidiEffectSlot::new(*id));
+        t.midi_effects.truncate(spec.len());
+        for (i, (id, params, bypass)) in spec.iter().enumerate() {
+            if t.midi_effects.get(i).is_none_or(|fx| fx.plugin != *id) {
+                t.midi_effects.truncate(i);
+                t.midi_effects.push(MidiEffectSlot::new(*id));
+            }
+            let fx = &mut t.midi_effects[i];
+            for (k, v) in *params {
+                fx.params.insert((*k).into(), *v);
+            }
+            fx.bypass = *bypass;
         }
         self.publish(s);
     }
@@ -700,13 +730,13 @@ fn vst3_pitch_bend_and_the_mod_wheel_set_before_an_edit_are_kept() {
             r.live(1, 10, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE });
             edit(&mut r, at, size);
             r.run_until(E + 256, size);
-            assert_eq!(r.offered_from(E), [(E, "off", 60, 0)], "{ctx}: nothing offered for expression, no CC 120, 121 or 123");
-            assert_eq!(r.native_from(E), [(E, "off", 60, 0)], "{ctx}: native");
-            let before: Vec<_> = r.offered_from(0).into_iter().filter(|o| o.0 < E).collect();
-            assert!(
-                before.contains(&(5, "bend", 0, 10_000)) && before.contains(&(6, "cc", 1, 90)),
-                "{ctx}: the wheels reached it before: {before:?}"
-            );
+            // The processor got both before the edit: bend 10,000 / 16,383 and CC 1 90 / 127, in
+            // millionths.
+            let before: Vec<(u64, &str, u32, i64)> = r.native_from(0).into_iter().filter(|n| n.0 < E && n.2 >= 800).collect();
+            assert_eq!(before, [(5, "pt", 900, 610_389), (6, "pt", 800, 708_661)], "{ctx}: the wheels reached the processor before the edit");
+            // Through the edit: no replacement or reset point for either, and no CC 120, 121 or 123.
+            assert_eq!(r.native_from(E), [(E, "off", 60, 0)], "{ctx}: native, from the edit");
+            assert_eq!(r.offered_from(E), [(E, "off", 60, 0)], "{ctx}: nothing offered for expression");
         }
     }
 }
@@ -757,4 +787,101 @@ fn seventy_notes_and_a_pedal_refused_at_an_edit_are_silenced_by_stop_at_a_built_
     r.run_until(E + 1088, 64);
     let after = r.run_until(E + 4096, 64);
     assert_eq!(after, 0.0, "after Stop nothing sounds at the built-in instrument");
+}
+
+#[test]
+fn vst3_consecutive_edits_leave_no_generated_note_sounding_past_its_gate() {
+    // The owning pass-through added at 3584, the gated generator (period 32, gate 16) at 7168 (a
+    // block start at every size). The sustain pedal is held from before the first edit; a key is
+    // struck into the generator at 7170 and held; the stale pedal is lifted at 7180 (inside the
+    // second edit's block at sizes 64 and 512), pressed again at 7468 (the generator consumes it),
+    // and the key is released under it at 7568 (pedal-held in the generator).
+    const E2: u64 = 7168;
+    let gated: &[(&str, f32)] = &[("period", 32.0), ("gate", 16.0)];
+    for at in ATS {
+        for size in SIZES {
+            let ctx = format!("{at:?} block {size}");
+            let mut r = rig_at(at);
+            let cc = |value| Message::Control { cc: 64, value };
+            r.live(1, 5, cc(127));
+            r.live(1, E2 + 2, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE });
+            r.live(1, E2 + 12, cc(0));
+            r.live(1, E2 + 300, cc(127));
+            r.live(1, E2 + 400, Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE });
+            edit(&mut r, at, size);
+            r.run_until(E2, size);
+            let mut second: Vec<Fx<'_>> = if at == At::First { vec![(OWN, &[], false)] } else { vec![(OWN, &[], false), (OWN, &[], false)] };
+            second.push((GATED, gated, false));
+            r.chain_spec(&second);
+            r.run_until(E2 + 640, size);
+            // The generator's steps, on its clock from its reset at 7168, every 32 frames while it
+            // holds 60: from 7200 to 7776, each ending 16 frames later.
+            let steps: Vec<u64> = (E2 + 32..E2 + 640).step_by(32).collect();
+            let want: Vec<Vec<Option<u64>>> = vec![steps.iter().map(|on| Some(on + 16)).collect(); 2];
+            assert_eq!(ends(&r.recs(), 60).to_vec(), want, "{ctx}: every generated note ends at its gate");
+            let mut native = vec![(E, "pt", 100, 0)];
+            for on in &steps {
+                native.push((*on, "on", 60, 0));
+                native.push((on + 16, "off", 60, 0));
+            }
+            assert_eq!(r.native_from(E), native, "{ctx}: the first edit's pedal-up only; the lift and the press send nothing");
+            settled(&r.recs(), 64, false, &ctx);
+        }
+    }
+}
+
+/// A later edit from `before` to `after`: a note through the old chain ends at the edit, its late
+/// release is swallowed, and a new note goes through the new chain.
+fn vst3_a_later_edit_ends_the_chains_notes(before: &[Fx<'_>], after: &[Fx<'_>]) {
+    for size in SIZES {
+        let ctx = format!("block {size}");
+        let mut r = Rig::new(Kind::Vst3, &[]);
+        r.chain_spec(before);
+        r.live(1, 10, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE });
+        r.live(1, E + 36, Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE });
+        r.live(1, E + 50, Message::NoteOn { key: 62, velocity: 100, id: NoteId::NONE });
+        r.live(1, E + 60, Message::NoteOff { key: 62, velocity: 0, id: NoteId::NONE });
+        r.run_until(E, size);
+        r.chain_spec(after);
+        r.run_until(E + 256, size);
+        assert_eq!(
+            r.native_from(E),
+            [(E, "off", 60, 0), (E + 50, "on", 62, 0), (E + 60, "off", 62, 0)],
+            "{ctx}: the chain's note ends at the edit, its release at E + 36 is swallowed"
+        );
+        assert_eq!(ends(&r.recs(), 60), [vec![Some(E)], vec![Some(E)]], "{ctx}");
+        settled(&r.recs(), 64, false, &ctx);
+    }
+}
+
+#[test]
+fn vst3_an_un_bypass_ends_the_chains_notes_and_swallows_their_releases() {
+    vst3_a_later_edit_ends_the_chains_notes(&[(OWN, &[], true)], &[(OWN, &[], false)]);
+}
+
+#[test]
+fn vst3_removing_the_last_effect_ends_the_chains_notes_and_swallows_their_releases() {
+    vst3_a_later_edit_ends_the_chains_notes(&[(OWN, &[], false)], &[]);
+}
+
+#[test]
+fn vst3_transpose_as_the_first_effect_ends_a_note_the_mix_gave_directly() {
+    let transpose: &[(&str, f32)] = &[("semitones", 12.0)];
+    for size in SIZES {
+        let ctx = format!("block {size}");
+        let mut r = Rig::new(Kind::Vst3, &[]);
+        r.live(1, 10, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE });
+        r.live(1, E + 36, Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE });
+        r.live(1, E + 50, Message::NoteOn { key: 62, velocity: 100, id: NoteId::NONE });
+        r.live(1, E + 60, Message::NoteOff { key: 62, velocity: 0, id: NoteId::NONE });
+        r.run_until(E, size);
+        r.chain_spec(&[(TRANSPOSE, transpose, false)]);
+        r.run_until(E + 256, size);
+        // The direct note ends at the add with exactly one note-off; its release sends nothing; a
+        // new note goes through Transpose.
+        assert_eq!(r.native_from(E), [(E, "off", 60, 0), (E + 50, "on", 74, 0), (E + 60, "off", 74, 0)], "{ctx}");
+        assert_eq!(r.recs().iter().filter(|x| x.code == 2 && x.a == 60).count(), 1, "{ctx}: exactly one note-off of 60");
+        assert_eq!(ends(&r.recs(), 60), [vec![Some(E)], vec![Some(E)]], "{ctx}");
+        settled(&r.recs(), 64, false, &ctx);
+    }
 }

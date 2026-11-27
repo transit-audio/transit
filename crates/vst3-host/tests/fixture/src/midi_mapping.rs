@@ -31,6 +31,9 @@ pub(crate) fn controller_base(ctrl: CtrlNumber) -> Option<u32> {
         120 => Some(500),
         121 => Some(600),
         123 => Some(700),
+        // ADR 0057 P3a: the mod wheel and pitch bend (kPitchBend, 129) reach the processor too.
+        1 => Some(800),
+        129 => Some(900),
         _ => None,
     }
 }
