@@ -99,6 +99,11 @@ impl MidiEffect for Velocity {
         }
     }
 
+    /// No clock: one frame is no time.
+    fn process_between(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>) {
+        self.process(input, out, 1);
+    }
+
     #[cfg(feature = "testing")]
     fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
         self.record_state(w);

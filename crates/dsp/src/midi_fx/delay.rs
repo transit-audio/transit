@@ -46,6 +46,11 @@ impl MidiEffect for Delay {
         }
     }
 
+    /// No clock: one frame is no time (a delayed event is due after the next block's start).
+    fn process_between(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>) {
+        self.process(input, out, 1);
+    }
+
     /// Its one field, the delay (#742: the test fixture's writer).
     fn fingerprint(&self, w: &mut transit_state_record::Writer<'_>) {
         let Delay { samples } = self;

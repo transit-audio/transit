@@ -99,6 +99,11 @@ impl MidiEffect for Transpose {
         (id == "semitones").then_some(self.semitones)
     }
 
+    /// No clock: one frame is no time.
+    fn process_between(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>) {
+        self.process(input, out, 1);
+    }
+
     fn process(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>, _frames: u32) {
         for e in input {
             let mut ev = e.event;

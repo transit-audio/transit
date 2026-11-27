@@ -178,6 +178,16 @@ impl RandomSequencer {
         k.min(len.saturating_sub(1))
     }
 
+    /// The input: note-ons only with Thru; releases and every other message always.
+    fn pass(&self, input: &[TimedEvent], out: &mut MidiOut<'_>) {
+        let thru = self.v(P_THRU) >= 0.5;
+        for e in input {
+            if thru || !matches!(e.event.message, Message::NoteOn { .. }) {
+                out.push(*e);
+            }
+        }
+    }
+
     fn sync_seed(&mut self) {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // 0 to 9999.
         let seed = self.v(P_SEED).round().max(0.0) as u32;
@@ -268,12 +278,7 @@ impl MidiEffect for RandomSequencer {
     }
 
     fn process(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>, frames: u32) {
-        let thru = self.v(P_THRU) >= 0.5;
-        for e in input {
-            if thru || !matches!(e.event.message, Message::NoteOn { .. }) {
-                out.push(*e);
-            }
-        }
+        self.pass(input, out);
         let t = &self.transport;
         let block = Block { playing: t.playing, samples: t.samples, quarters: t.quarters, tempo: t.tempo, sample_rate: self.sample_rate, frames };
         let settings = self.settings();
@@ -293,6 +298,12 @@ impl MidiEffect for RandomSequencer {
         let others = (self.sequencer.dropped() - dropped_before).saturating_sub(ons);
         out.add_refused(u32::try_from(others).unwrap_or(u32::MAX));
         out.add_refused_ons(u32::try_from(ons).unwrap_or(u32::MAX));
+    }
+
+    /// No time passes (#559, third item): the input passes as in `process` and the sequencer does
+    /// not run, so a locate's releases cannot restart it on the last block's transport.
+    fn process_between(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>) {
+        self.pass(input, out);
     }
 
     #[cfg(feature = "testing")]
@@ -317,9 +328,9 @@ impl MidiEffect for RandomSequencer {
 /// Encoded: the parameter values, the sequencer (`transit_random_sequencer::record`: every field
 /// but its refused-event counts and the velocity voltage it draws before each use), and the
 /// transport and sample rate it holds. Those two are encoded, not left to the host: the mix's MIDI
-/// effect host gives both at the start of each block, but an event taken between blocks
-/// (`MidiFxHost::take` outside a block, as a revoked source's releases are sent) runs `process`
-/// with the ones held from the last block.
+/// effect host gives both at the start of each block, and an event taken between blocks
+/// (`MidiFxHost::take` outside a block, as a revoked source's releases are sent) runs
+/// `process_between` with the ones held from the last block.
 #[cfg(feature = "testing")]
 impl RandomSequencer {
     fn config() -> transit_state_record::Config<'static> {
@@ -447,6 +458,30 @@ mod tests {
         let mut out = MidiOut::new(&mut buf);
         fx.process(&[], &mut out, 128);
         assert!(out.events().iter().all(|e| matches!(e.event.message, Message::NoteOff { .. })));
+    }
+
+    /// #559, third item: a release between blocks, right after a block that started on a tick,
+    /// passes and nothing else happens: the sequence after it is the uninterrupted one.
+    #[test]
+    fn between_blocks_it_passes_input_and_the_sequence_runs_on_unchanged() {
+        let setup = || {
+            let mut fx = RandomSequencer::new();
+            fx.set_sample_rate(48_000.0);
+            fx.set_param("play", 3.0);
+            fx.set_param("thru", 1.0);
+            fx
+        };
+        let mut plain = setup();
+        let whole = run_blocks(&mut plain, 5_872, 4, 128);
+        let mut fx = setup();
+        let mut split = run_blocks(&mut fx, 5_872, 2, 128);
+        let mut buf = [TimedEvent::EMPTY; 8];
+        let mut out = MidiOut::new(&mut buf);
+        fx.process_between(&[off(0, 1, 40)], &mut out);
+        assert_eq!(out.events(), &[off(0, 1, 40)], "only the release");
+        split.extend(run_blocks(&mut fx, 6_128, 2, 128));
+        assert!(whole.iter().any(|(t, e)| *t == 6_000 && matches!(e.event.message, Message::NoteOn { .. })), "a tick at 6000");
+        assert_eq!(split, whole);
     }
 
     #[test]

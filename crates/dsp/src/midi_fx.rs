@@ -17,6 +17,10 @@
 //! - **Unknown releases pass.** A note-off for a note it never saw (one that started before the
 //!   effect was added) goes through unchanged.
 //! - **Velocity 1..=127.** A note-on it writes has a velocity of at least 1 (0 would be an off).
+//! - **No time passes between blocks.** An event the host sends between blocks (a locate's or a
+//!   Stop's releases, a pedal-up at Stop) comes through [`MidiEffect::process_between`]: the
+//!   effect writes that event's own consequences and moves no clock, starts no step and checks no
+//!   transport jump (ADR 0057, decision 4).
 //!
 //! The built-ins are values ([`Builtin`]), so the audio thread can make one in place without
 //! allocating. Transpose and Velocity rewrite events; the Random Sequencer (#202) generates notes on
@@ -26,6 +30,9 @@
 /// A test-only effect that delays every event (feature `testing`): it proves the carry.
 #[cfg(feature = "testing")]
 pub mod delay;
+/// A test-only generator and latch (feature `testing`): the host slices' fixture (ADR 0057, P2).
+#[cfg(feature = "testing")]
+pub mod generator;
 pub mod random_sequencer;
 pub mod transpose;
 pub mod velocity;
@@ -159,6 +166,13 @@ pub trait MidiEffect: Send {
     /// Transforms one block: `input` is sorted by offset, each below `frames`. Writes to `out`;
     /// an offset at or past `frames` is due in a later block.
     fn process(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>, frames: u32);
+    /// Events sent between blocks, in a call in which no time passes (ADR 0057, decision 4;
+    /// #559): every input event is at offset 0. The effect applies each event's own consequences,
+    /// written at offset 0 (an offset past 0 is due that many frames after the next block's
+    /// start), and moves no clock, starts no step, emits nothing scheduled for later and checks
+    /// no transport jump; the transport and parameters are still the last block's. An effect
+    /// with no clock or schedule may run its `process` over one frame.
+    fn process_between(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>);
     /// Test seam (feature `testing`; ADR 0029, amendment for #742, section 12): the effect's state
     /// record, as [`crate::Plugin::fingerprint`]. The default writes no state.
     #[cfg(feature = "testing")]
@@ -197,6 +211,8 @@ pub enum Builtin {
     RandomSequencer(random_sequencer::RandomSequencer),
     #[cfg(feature = "testing")]
     Delay(delay::Delay),
+    #[cfg(feature = "testing")]
+    Generator(generator::Generator),
 }
 
 impl Builtin {
@@ -214,6 +230,10 @@ impl Builtin {
             if id == delay::DELAY_INFO.id {
                 return Some(Builtin::Delay(delay::Delay::default()));
             }
+            #[cfg(feature = "testing")]
+            if id == generator::GENERATOR_INFO.id {
+                return Some(Builtin::Generator(generator::Generator::default()));
+            }
             None
         }
     }
@@ -225,6 +245,8 @@ impl Builtin {
             Builtin::RandomSequencer(x) => x,
             #[cfg(feature = "testing")]
             Builtin::Delay(x) => x,
+            #[cfg(feature = "testing")]
+            Builtin::Generator(x) => x,
         }
     }
 
@@ -236,6 +258,8 @@ impl Builtin {
             Builtin::RandomSequencer(x) => x,
             #[cfg(feature = "testing")]
             Builtin::Delay(x) => x,
+            #[cfg(feature = "testing")]
+            Builtin::Generator(x) => x,
         }
     }
 }

@@ -6,7 +6,8 @@
 //! plug-in. Within a block ([`MidiFxHost::begin`] to [`MidiFxHost::flush`]) the host collects the
 //! block's events; right before the instrument processes, it runs them through the effects in
 //! chain order and gives the instrument what comes out, at the offsets the effects wrote. Outside a
-//! block (a Stop, a seek, a failure) an event runs through the chain at once, at offset 0.
+//! block (a Stop, a seek, a failure) an event runs through the chain at once, at offset 0, through
+//! each effect's call in which no time passes (`MidiEffect::process_between`, ADR 0057 slice P2).
 //!
 //! **Order and offsets.** Each effect gets its input sorted by offset (a stable sort: events at
 //! one offset keep the order the mix gave them) and may move, add, remove or rewrite events. An
@@ -426,7 +427,7 @@ impl MidiFxHost {
 
     /// Runs `a` (`a_len` events at offsets below `frames`) through the chain and gives the result
     /// to `plugin`. `block`: a rendered block, whose carried events come due (else an event run
-    /// between blocks, which only adds to the carries).
+    /// between blocks through each effect's no-time call, which only adds to the carries).
     fn run(&mut self, plugin: &mut dyn Plugin, frames: u32, block: bool) {
         if block {
             // Last block's refused releases first, at offset 0. One refused again is held again,
@@ -449,7 +450,13 @@ impl MidiFxHost {
             self.b.clear();
             let mut sink = |e| self.b.push(e);
             let mut out = MidiOut::with_sink(&mut sink);
-            fx.effect().process(self.a.get(..self.a_len).unwrap_or_default(), &mut out, frames);
+            let input = self.a.get(..self.a_len).unwrap_or_default();
+            if block {
+                fx.effect().process(input, &mut out, frames);
+            } else {
+                // Between blocks no time passes (ADR 0057, slice P2; #559, third item).
+                fx.effect().process_between(input, &mut out);
+            }
             let (refused, refused_ons) = (out.refused(), out.refused_ons());
             // MidiOut counts admission refusals, including the generator's own schedule;
             // the sink additionally counts events evicted after admission.

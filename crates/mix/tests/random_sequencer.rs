@@ -130,6 +130,56 @@ fn a_stop_ends_every_note() {
     assert!(paired(&all, true), "{all:?}");
 }
 
+/// #559, third item, through a real locate (ADR 0057, slice P2): with Thru on, a clip note (key 40)
+/// sounds through the sequencer when the playhead jumps from the block that starts on the sixteenth
+/// at 96,000 back to 0. The jump releases the clip note between blocks; the sequencer then plays
+/// exactly what it plays when no clip note is released there, at each block size the rig allows.
+#[test]
+fn a_locate_releasing_a_clip_note_starts_no_stray_note() {
+    let run = |block: usize, clip: bool| {
+        let mut rig = Rig::new();
+        with_sequencer(&mut rig, &[("play", 3.0), ("thru", 1.0)]);
+        if clip {
+            let mut s = rig.session.clone();
+            let mut seq = transit_midi::Sequence::default();
+            // Tick 3830 is frame 95,750 at 25 frames a tick: inside the run up to the jump.
+            seq.notes.push(transit_midi::Note { pitch: 40, velocity: 100, release_velocity: 0, channel: 0, start: 3830, length: 400 });
+            let cid = s.new_clip_id();
+            s.track_mut(rig.track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::midi(cid, "held", 0, 200_000, seq));
+            rig.publish(&s);
+            rig.session = s;
+        }
+        rig.heard.lock().unwrap().clear();
+        let now = rig.mix.next_frame().0;
+        let mut out = vec![vec![0.0; BLOCK]; 2];
+        let lead = 300usize.div_ceil(block) * block;
+        rig.pos = 96_000 - lead as i64;
+        for _ in 0..lead / block + 1 {
+            rig.mix.render_active(rig.pos, block, &mut out);
+            rig.pos += block as i64;
+        }
+        let jump = rig.mix.next_frame().0 - now;
+        rig.pos = 0;
+        for _ in 0..(6_000 + 256) / block + 1 {
+            rig.mix.render_active(rig.pos, block, &mut out);
+            rig.pos += block as i64;
+        }
+        // Render frames from the run's start, which is timeline frame 96,000 - `lead`.
+        let heard: Vec<(u64, PluginEvent)> = rig.heard_by(1).into_iter().map(|(f, e)| (f - now, e)).collect();
+        (heard, lead as u64, jump)
+    };
+    for block in [1, 7, 64, 256] {
+        let ((with, lead, jump), (without, _, _)) = (run(block, true), run(block, false));
+        let clip = |h: &[(u64, PluginEvent)]| notes(&h.iter().filter(|(_, e)| e.note_id != PluginEvent::NO_ID).copied().collect::<Vec<_>>());
+        let clip_notes: Vec<(u64, bool, u8)> = clip(&with).iter().map(|n| (n.0, n.1, n.2)).collect();
+        assert_eq!(clip_notes, [(lead - 250, true, 40), (jump, false, 40)], "{block}-frame blocks: the clip note, released at the jump");
+        let generated = |h: &[(u64, PluginEvent)]| h.iter().filter(|(_, e)| e.note_id == PluginEvent::NO_ID).copied().collect::<Vec<_>>();
+        assert_eq!(notes(&generated(&with)), notes(&generated(&without)), "{block}-frame blocks");
+        let ons: Vec<u64> = notes(&generated(&without)).iter().filter(|n| n.1).map(|n| n.0).collect();
+        assert_eq!(ons, [lead, jump, jump + 6_000], "{block}-frame blocks: the sixteenths before and after the jump");
+    }
+}
+
 #[test]
 fn the_slot_with_the_sequencer_allocates_nothing() {
     MixEngine::force_serial(true);
