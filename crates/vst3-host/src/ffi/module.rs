@@ -561,7 +561,7 @@ impl Bundle {
     }
 
     /// Creates an object of class `cid` and queries interface `I` on it.
-    fn create<I: Interface>(&self, cid: &[u8; 16]) -> Option<ComPtr<I>> {
+    pub(super) fn create<I: Interface>(&self, cid: &[u8; 16]) -> Option<ComPtr<I>> {
         let mut obj: *mut c_void = std::ptr::null_mut();
         let iid = I::IID;
         // SAFETY: valid factory; `cid` and `iid` point to 16 readable bytes each (VST3 passes TUIDs

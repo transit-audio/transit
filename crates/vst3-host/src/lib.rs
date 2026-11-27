@@ -55,7 +55,8 @@ use transit_host_common::scan_cache;
 mod trace;
 
 pub use plugin::Vst3Plugin;
-pub use scan_cache::ScanSummary;
+pub use scan_cache::{Deadline, ScanSummary};
+pub use transit_host_common::probe::{Capability, ProbeOutcome, ProbeProblem};
 
 use std::path::{Path, PathBuf};
 use transit_dsp::{Category, Plugin, PluginInfo};
@@ -98,6 +99,20 @@ pub struct Vst3Descriptor {
     pub is_instrument: bool,
     /// The `.vst3` bundle or file it lives in.
     pub path: PathBuf,
+    /// What the scan's probe of this class found (ADR 0064, decision 2.4): `note_output`,
+    /// `note_input` and `audio_outputs` once a probe answered; the reason and build when it failed.
+    /// The probe never changes the fields above.
+    #[serde(flatten)]
+    pub probe: ProbeOutcome,
+}
+
+impl transit_host_common::probe::Probed for Vst3Descriptor {
+    fn outcome(&self) -> &ProbeOutcome {
+        &self.probe
+    }
+    fn outcome_mut(&mut self) -> &mut ProbeOutcome {
+        &mut self.probe
+    }
 }
 
 /// Why a VST3 operation failed.
@@ -237,6 +252,41 @@ pub fn set_scanner(program: Option<PathBuf>) {
 /// plugins or the reason it failed, to print to standard output.
 pub fn scan_reply(file: &Path) -> String {
     api::scan_reply(file)
+}
+
+/// The arguments that make the scan program probe one class (ADR 0064, decision 2.4):
+/// `<program> --probe-vst3 <file> <class id>` (the 32 hex digits); the program then prints
+/// [`probe_reply`] and exits. After a scan has listed every file and published the list, each
+/// listed class that has no probe outcome yet (or whose probe failed in another app build) is
+/// probed in a child of its own, and each outcome is published as it arrives.
+pub const PROBE_FLAG: &str = "--probe-vst3";
+
+/// The answer of a probe child process for one class of one VST3 file: a line with what the
+/// class's component declares (event buses in both directions, audio output buses) or why it could
+/// not be read. The component is created, initialized and terminated; nothing else runs.
+pub fn probe_reply(file: &Path, class_id: &str) -> String {
+    api::probe_reply(file, class_id)
+}
+
+/// The classes of the last scan whose probe failed, with the reason and the build that tried it,
+/// for the diagnostics report. Such a class keeps its listing and its category-based placement.
+pub fn probe_problems() -> Vec<ProbeProblem> {
+    api::probe_problems()
+}
+
+/// Replaces the probe children's timeout (one per probe, made when it starts) with `make(class
+/// id)`. Only for scan tests, which decide the moment themselves. `None` restores the timeout.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn set_probe_deadline(make: Option<std::sync::Arc<dyn Fn(&str) -> Box<dyn Deadline> + Send + Sync>>) {
+    registry::set_probe_deadline(make)
+}
+
+/// Runs `hook(class id)` before each probe child starts. Only for scan tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn set_probe_hook(hook: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>) {
+    registry::set_probe_hook(hook)
 }
 
 /// The plugin file a scan is loading now: its index among the files found, their number and its

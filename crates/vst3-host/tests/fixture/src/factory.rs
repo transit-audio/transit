@@ -58,7 +58,7 @@ impl IPluginFactoryTrait for Factory {
         } else if cid == EVENTS_CID {
             ComWrapper::new(Synth { events: true, ..Synth::new() }).to_com_ptr::<FUnknown>()
         } else {
-            None
+            notes::create(&cid)
         };
         match unknown {
             Some(u) => {

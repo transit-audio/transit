@@ -21,5 +21,11 @@ sidechain = []
 # Fixture Synth takes 500 ms (or VST3_FIXTURE_CREATE_MS) to create, like a plug-in with a heavy
 # library (backlog 12).
 slow-create = []
+# Builds binaries for the scan-probe tests (ADR 0064 slice HM0, see src/notes.rs), each listing only
+# its own classes: the note generators, the three zero-audio note effects, or the probe failures
+# (an error, a crash and a block on creation, between two ordinary classes).
+notes = []
+note-effects = []
+probe-failures = []
 
 [workspace]

@@ -58,6 +58,7 @@ mod connection_point;
 mod edit_controller;
 mod factory;
 mod midi_mapping;
+mod notes;
 mod plug_view;
 
 use std::ffi::{c_char, c_int, c_void};
@@ -622,10 +623,14 @@ impl Class for Factory {
     type Interfaces = (IPluginFactory2,);
 }
 
-#[cfg(feature = "sidechain")]
+/// The classes this binary lists: the default four, or the sidechain pair (feature `sidechain`),
+/// or one of the scan-probe sets of `notes.rs` (features `notes`, `note-effects`, `probe-failures`).
+#[cfg(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))]
+use notes::CLASSES;
+#[cfg(all(feature = "sidechain", not(any(feature = "notes", feature = "note-effects", feature = "probe-failures"))))]
 const CLASSES: [(TUID, &str, &str, &str); 2] =
     [(KEYED_CID, "Audio Module Class", "Fixture Sidechain", "Fx"), (PICKY_CID, "Audio Module Class", "Fixture Sidechain Picky", "Fx")];
-#[cfg(not(feature = "sidechain"))]
+#[cfg(not(any(feature = "sidechain", feature = "notes", feature = "note-effects", feature = "probe-failures")))]
 const CLASSES: [(TUID, &str, &str, &str); 4] = [
     (GAIN_CID, "Audio Module Class", "Fixture Gain", "Fx"),
     (GAIN_CTRL_CID, "Component Controller Class", "Fixture Gain", ""),

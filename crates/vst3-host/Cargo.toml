@@ -77,6 +77,11 @@ type_complexity = "allow"
 name = "real_plugin_repro"
 harness = false
 
+# The test program is also the scan program its scans start (ADR 0064 slice HM0).
+[[test]]
+name = "probe_scan"
+harness = false
+
 # Test-only hook in the scan (see tests/registry_race.rs); off in every normal build.
 [features]
 test-hooks = []

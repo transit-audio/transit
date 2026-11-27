@@ -31,40 +31,48 @@ pub fn slow_fixture_dir() -> &'static Path {
 fn install(features: &[&str], target_dir: &str, install_dir: &str, plugins: usize) -> PathBuf {
     {
         transit_vst3_host::set_scan_extra_dirs_only(true);
-        let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture/Cargo.toml");
-        let target =
-            Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp"))).join(target_dir);
-        let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-        let st = Command::new(cargo)
-            .args(["build", "--quiet", "--manifest-path"])
-            .arg(&manifest)
-            .args(features)
-            .arg("--target-dir")
-            .arg(&target)
-            .env_remove("RUSTFLAGS")
-            .status()
-            .expect("run cargo");
-        assert!(st.success(), "building the VST3 fixture failed");
-        let (lib, folder, exe) = if cfg!(target_os = "macos") {
-            ("libvst3_fixture.dylib", "MacOS", "Fixture")
-        } else if cfg!(windows) {
-            ("vst3_fixture.dll", "x86_64-win", "Fixture.vst3")
-        } else {
-            ("libvst3_fixture.so", if cfg!(target_arch = "aarch64") { "aarch64-linux" } else { "x86_64-linux" }, "Fixture.so")
-        };
-        let built = target.join("debug").join(lib);
         let dir = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp")))
             .join(format!("{install_dir}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         // Install as a real bundle to exercise bundle resolution and the module entry.
-        let bin = dir.join("vendor/Fixture.vst3/Contents").join(folder);
-        std::fs::create_dir_all(&bin).unwrap();
-        std::fs::copy(&built, bin.join(exe)).unwrap();
+        install_named(features, target_dir, &dir, "Fixture");
         if plugins > 0 {
             assert_eq!(transit_vst3_host::add_search_dir(&dir), plugins, "the fixture's plug-ins");
         }
         dir
     }
+}
+
+/// Builds the fixture with `features` in its own target folder `target_dir` and installs it as a
+/// bundle `<dir>/vendor/<name>.vst3`, which it returns.
+#[allow(dead_code)]
+pub fn install_named(features: &[&str], target_dir: &str, dir: &Path, name: &str) -> PathBuf {
+    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture/Cargo.toml");
+    let target = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp"))).join(target_dir);
+    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let st = Command::new(cargo)
+        .args(["build", "--quiet", "--manifest-path"])
+        .arg(&manifest)
+        .args(features)
+        .arg("--target-dir")
+        .arg(&target)
+        .env_remove("RUSTFLAGS")
+        .status()
+        .expect("run cargo");
+    assert!(st.success(), "building the VST3 fixture failed");
+    let (lib, folder, exe) = if cfg!(target_os = "macos") {
+        ("libvst3_fixture.dylib", "MacOS", name.to_string())
+    } else if cfg!(windows) {
+        ("vst3_fixture.dll", "x86_64-win", format!("{name}.vst3"))
+    } else {
+        ("libvst3_fixture.so", if cfg!(target_arch = "aarch64") { "aarch64-linux" } else { "x86_64-linux" }, format!("{name}.so"))
+    };
+    let built = target.join("debug").join(lib);
+    let bundle = dir.join(format!("vendor/{name}.vst3"));
+    let bin = bundle.join("Contents").join(folder);
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::copy(&built, bin.join(exe)).unwrap();
+    bundle
 }
 
 /// Private-FFI unit tests load through their own crate instance, avoiding a second module entry.

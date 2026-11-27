@@ -4,12 +4,13 @@ use crate::ffi::{Bundle, Instance, PARAM_BYPASS, PARAM_HIDDEN, PARAM_READ_ONLY, 
 use crate::plugin::Vst3Plugin;
 use crate::scan as paths;
 use crate::scan_cache;
-use crate::{AUDIO_MODULE_CLASS, Vst3Descriptor, Vst3Error, parse_id};
+use crate::{AUDIO_MODULE_CLASS, Capability, ProbeOutcome, ProbeProblem, Vst3Descriptor, Vst3Error, parse_id};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
 use transit_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
+use transit_host_common::probe;
 
 /// Most labels read for a stepped parameter (more steps are shown as a plain range).
 const MAX_CHOICES: i32 = 128;
@@ -101,9 +102,102 @@ pub fn load_bundle(path: &Path) -> Result<Vec<Vst3Descriptor>, Vst3Error> {
                 sdk_version: c.sdk_version,
                 sub_categories: subs,
                 path: path.to_path_buf(),
+                probe: ProbeOutcome::default(),
             }
         })
         .collect())
+}
+
+/// Probes one class of a `.vst3` (ADR 0064, decision 2.4): its component's event buses in both
+/// directions and its audio output buses. VST3's first readable note output is event output bus
+/// 0 (every event bus carries the same event types).
+pub fn probe_class(path: &Path, class_id: &str) -> Result<Capability, Vst3Error> {
+    let cid = parse_id(&format!("{}{class_id}", crate::ID_PREFIX)).ok_or_else(|| Vst3Error::NotFound(class_id.to_string()))?;
+    let buses = Bundle::load(path)?.probe_buses(&cid)?;
+    let note_output = buses.event_outputs >= 1;
+    Ok(Capability {
+        note_output,
+        note_input: buses.event_inputs >= 1,
+        audio_outputs: u32::try_from(buses.audio_outputs).unwrap_or(0),
+        first_note_output: note_output.then_some(0),
+    })
+}
+
+pub fn probe_reply(file: &Path, class_id: &str) -> String {
+    probe::reply(probe_class(file, class_id))
+}
+
+/// The argument that makes the scan program probe one class: `<program> --probe-vst3 <file> <id>`.
+const PROBE_FLAG: &str = crate::PROBE_FLAG;
+
+pub fn probe_problems() -> Vec<ProbeProblem> {
+    probe::problems(lock().scanned.iter().flatten(), |d| (d.path.clone(), d.id.clone(), d.name.clone()))
+}
+
+/// Writes a probe outcome into the published list as it arrives.
+fn publish_probe(path: &Path, d: &Vst3Descriptor) {
+    let mut r = lock();
+    if let Some(found) = r.scanned.iter_mut().flatten().find(|x| x.id == d.id && x.path == path) {
+        found.probe = d.probe.clone();
+    }
+}
+
+/// Phase two of a scan (ADR 0064, decision 2.4), after the listing is published: each listed class
+/// that needs it is probed in a child process of its own (`program`), and each outcome is
+/// published as it arrives. A skip stops it; the classes left are probed by the next scan. Without
+/// a scan program nothing is probed: a class is never created in this process to read its buses.
+/// Returns how many probes ran.
+fn probe_listed(files: &mut [scan_cache::Entry<Vst3Descriptor>], scanner: Option<&Path>, host: &str) -> usize {
+    let Some(program) = scanner else { return 0 };
+    probe::probe_files(
+        files,
+        host,
+        |path, d| {
+            if SKIP.load(Ordering::Acquire) {
+                return None;
+            }
+            #[cfg(feature = "test-hooks")]
+            run_probe_hook(&d.class_id);
+            let mut deadline = probe_deadline(&d.class_id);
+            scan_cache::probe_in_child(program, PROBE_FLAG, path, &d.class_id, || SKIP.load(Ordering::Acquire), &mut *deadline)
+        },
+        publish_probe,
+    )
+}
+
+/// A probe child's deadline: [`scan_cache::CHILD_TIMEOUT`] from its start.
+fn probe_deadline(_class_id: &str) -> Box<dyn scan_cache::Deadline> {
+    #[cfg(feature = "test-hooks")]
+    if let Some(make) = PROBE_DEADLINE.lock().unwrap_or_else(PoisonError::into_inner).clone() {
+        return make(_class_id);
+    }
+    Box::new(scan_cache::Timeout::child())
+}
+
+/// Test hook: the probe children's deadline.
+#[cfg(feature = "test-hooks")]
+static PROBE_DEADLINE: Mutex<Option<std::sync::Arc<dyn Fn(&str) -> Box<dyn scan_cache::Deadline> + Send + Sync>>> = Mutex::new(None);
+
+#[cfg(feature = "test-hooks")]
+pub fn set_probe_deadline(make: Option<std::sync::Arc<dyn Fn(&str) -> Box<dyn scan_cache::Deadline> + Send + Sync>>) {
+    *PROBE_DEADLINE.lock().unwrap_or_else(PoisonError::into_inner) = make;
+}
+
+/// Test hook: runs before each probe child starts.
+#[cfg(feature = "test-hooks")]
+static PROBE_HOOK: Mutex<Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>> = Mutex::new(None);
+
+#[cfg(feature = "test-hooks")]
+pub fn set_probe_hook(hook: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>) {
+    *PROBE_HOOK.lock().unwrap_or_else(PoisonError::into_inner) = hook;
+}
+
+#[cfg(feature = "test-hooks")]
+fn run_probe_hook(class_id: &str) {
+    let hook = PROBE_HOOK.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    if let Some(h) = hook {
+        h(class_id);
+    }
 }
 
 /// Scans `dirs` (uncached). Unloadable files are logged and skipped; the first plugin with a
@@ -203,7 +297,14 @@ fn scan_now(reuse: bool) -> Vec<Vst3Descriptor> {
             if let Some(f) = &cache_file {
                 scan_cache::write(f, &files);
             }
-            return list;
+            // The listing is out; now each class is probed on its own (ADR 0064, decision 2.4).
+            if probe_listed(&mut files, scanner.as_deref(), &host) == 0 {
+                return list;
+            }
+            if let Some(f) = &cache_file {
+                scan_cache::write(f, &files);
+            }
+            return merge(files);
         }
         for dir in &late {
             r.refresh_dirs.remove(dir);
