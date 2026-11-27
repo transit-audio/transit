@@ -57,6 +57,7 @@ mod component;
 mod connection_point;
 mod edit_controller;
 mod factory;
+mod generator;
 mod midi_mapping;
 mod notes;
 mod plug_view;

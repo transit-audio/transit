@@ -58,6 +58,7 @@ use vst3::ComWrapper;
 
 mod delivery;
 mod editor;
+mod note_out;
 mod state;
 
 /// Largest block we set a plugin up for.
@@ -180,6 +181,12 @@ pub(crate) struct Shared {
     activation: AtomicU64,
     /// Live state loads (#78): the audio side drops what it queued before one.
     loads: Loads,
+    /// The lifecycle (ADR 0064, decision 6): bumped while holding `core` at every activation
+    /// attempt and every state load applied to the processor; `alive`: the last activation
+    /// succeeded; `event_outputs`: the event output buses it declared.
+    generation: AtomicU64,
+    alive: AtomicBool,
+    event_outputs: AtomicU32,
     map: MidiMap,
     /// The thread that created the instance: its main (UI) thread.
     main: ThreadId,
@@ -296,12 +303,15 @@ impl Shared {
                 self.tail.store(core.inst.tail() as usize, Ordering::Relaxed);
                 self.map.publish(&core.inst.midi_mapping());
                 self.activation.fetch_add(1, Ordering::Release);
+                self.event_outputs.store(layout.event_outputs, Ordering::Relaxed);
+                self.next_generation(true);
                 true
             }
             Err(e) => {
                 log::warn!("{}: {e}", self.info.id);
                 self.latency.store(0, Ordering::Release);
                 self.activation.fetch_add(1, Ordering::Release);
+                self.next_generation(false);
                 false
             }
         }
@@ -512,8 +522,15 @@ pub struct Vst3Plugin {
     /// full. Either way the parameter's last value is kept, but at the offset of its latest kept
     /// point (or the block start), so it applies earlier than asked.
     points_dropped: u64,
-    /// Calls the plug-in's `process` reported as failed (ADR 0059, Decision 2).
+    /// Calls the plug-in's `process` reported as failed (ADR 0059, Decision 2), and failed stage
+    /// resets (ADR 0064, decision 6).
     process_errors: u64,
+    /// The last block's note output and call report (ADR 0064, decision 3).
+    note_out: transit_dsp::hosted_out::HostedOutBuffer,
+    /// The stage reset's `setProcessing` cycle waits for the next actual call (decision 6).
+    cycle_pending: bool,
+    /// The block size `prepare` asked for (the native calls a skipped block was due).
+    block: usize,
     /// Native events translation could not place (an invariant: always zero).
     untranslated: u64,
     channels: usize,
@@ -582,6 +599,9 @@ impl Vst3Plugin {
             key_input: AtomicBool::new(key_input),
             activation: AtomicU64::new(0),
             loads: Loads::default(),
+            generation: AtomicU64::new(0),
+            alive: AtomicBool::new(false),
+            event_outputs: AtomicU32::new(0),
             map: MidiMap::new(),
             main: std::thread::current().id(),
             host,
@@ -617,6 +637,9 @@ impl Vst3Plugin {
             seq: 0,
             points_dropped: 0,
             process_errors: 0,
+            note_out: transit_dsp::hosted_out::HostedOutBuffer::new(),
+            cycle_pending: false,
+            block: 0,
             untranslated: 0,
             channels: 2,
             silent: false,
@@ -847,6 +870,7 @@ impl Vst3Plugin {
         }
         let ch = self.channels.min(io.len());
         let frames = io.iter().take(ch).map(Vec::len).fold(frames, usize::min);
+        self.note_out.begin_block();
         if frames == 0 || ch == 0 {
             self.pending.fold_timed(&self.ids, &mut self.timed);
             // A skipped call keeps its events at offset 0 in arrival order (ADR 0059, 3a).
@@ -859,6 +883,7 @@ impl Vst3Plugin {
         let Some(mut guard) = try_lock(&shared.core) else {
             self.pending.fold_timed(&self.ids, &mut self.timed);
             self.delivery.carry();
+            self.note_out.skipped(transit_dsp::hosted_out::calls_due(frames, self.block));
             self.gate.skip(io, ch, frames);
             return;
         };
@@ -867,6 +892,7 @@ impl Vst3Plugin {
         if !core.inst.is_active() || core.max_block == 0 {
             self.pending.fold_timed(&self.ids, &mut self.timed);
             self.delivery.carry();
+            self.note_out.skipped(transit_dsp::hosted_out::calls_due(frames, self.block));
             if core.block > 0 {
                 // Prepared, but its (re)activation failed: silent, not the buffer as it was
                 // (review N2).
@@ -940,6 +966,7 @@ impl Vst3Plugin {
                     self.translate(&it);
                 }
             }
+            let reset = self.stage_reset(core);
             let r = core.inst.process(
                 n,
                 &mut core.inputs,
@@ -952,6 +979,7 @@ impl Vst3Plugin {
             );
             self.points.clear();
             self.notes.clear();
+            let r = self.note_call(core, r, reset, offset, n);
             self.delivery.finish(r.is_ok());
             self.position = self.position.saturating_add(i64::try_from(n).unwrap_or(0));
             if let Ok(dropped) = r {
@@ -1013,6 +1041,7 @@ impl Plugin for Vst3Plugin {
         core.block = mb;
         self.gate.set_rate(sr);
         core.mono = self.channels == 1;
+        self.block = mb;
         shared.activate(&mut core);
         drop(core);
         self.activation_seen = shared.activation.load(Ordering::Acquire);
@@ -1190,11 +1219,32 @@ impl Plugin for Vst3Plugin {
         self.process_errors
     }
 
+    fn note_output(&self) -> Option<transit_dsp::hosted_out::NoteOutputInfo> {
+        self.shared.note_output()
+    }
+
+    fn take_note_output(&mut self, out: &mut dyn FnMut(transit_dsp::hosted_out::HostedOut) -> bool) -> transit_dsp::hosted_out::CallReport {
+        self.note_out.take(out)
+    }
+
+    fn lifecycle(&self) -> transit_dsp::hosted_out::Lifecycle {
+        self.shared.lifecycle()
+    }
+
+    /// The stage reset (ADR 0064, decision 6): today's `reset` of the queues, then the
+    /// `setProcessing` cycle at the next actual call, before its `process`.
+    fn restart_processing(&mut self) {
+        self.reset();
+        self.cycle_pending = true;
+    }
+
     fn load_state(&mut self, data: &[u8]) -> bool {
         let _t = trace::scope(Thread::Audio);
         let shared = Arc::clone(&self.shared);
         let core = lock(&shared.core);
         let ok = core.inst.load_state(data);
+        // A state load reached the processor: a new lifecycle generation (ADR 0064, decision 6).
+        shared.next_generation(shared.alive.load(Ordering::Relaxed));
         if ok {
             self.refresh_values(&core.inst);
         }

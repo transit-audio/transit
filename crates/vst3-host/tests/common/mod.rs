@@ -28,6 +28,22 @@ pub fn slow_fixture_dir() -> &'static Path {
     DIR.get_or_init(|| install(&["--features", "slow-create"], "vst3-slow-fixture-target", "vst3-slow-fixture-install", 3))
 }
 
+/// Builds the fixture with its `notes` feature once and returns a folder containing `Fixture.vst3`
+/// with the note generator classes (ADR 0064 slices HM0 and HM1).
+#[allow(dead_code)]
+pub fn notes_fixture_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| install(&["--features", "notes"], "vst3-notes-fixture-target", "vst3-notes-install", 2))
+}
+
+/// Builds the fixture with its `note-effects` feature once and returns a folder containing
+/// `Fixture.vst3` with the three zero-audio note effects (ADR 0064 slices HM0 and HM1).
+#[allow(dead_code)]
+pub fn note_effects_fixture_dir() -> &'static Path {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(|| install(&["--features", "note-effects"], "vst3-note-effects-fixture-target", "vst3-note-effects-install", 3))
+}
+
 fn install(features: &[&str], target_dir: &str, install_dir: &str, plugins: usize) -> PathBuf {
     {
         transit_vst3_host::set_scan_extra_dirs_only(true);

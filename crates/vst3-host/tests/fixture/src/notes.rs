@@ -10,9 +10,10 @@
 //!   ("Fixture Probe Error"), one that ends the process on creation ("Fixture Probe Crash"), one
 //!   that never returns from creation ("Fixture Probe Block"), then "Fixture Notes Silent".
 //!
-//! None of them writes events yet; every output buffer is silent. The blocking class first writes
-//! `blocking.mark` into the process's working folder, so a test can see that its probe child is
-//! inside the creation before it stops it.
+//! "Fixture Notes" and the note effects write scripted note output and record what the host does
+//! (`generator.rs`, ADR 0064 slice HM1); the other classes write nothing, and every audio output
+//! buffer is silent. The blocking class first writes `blocking.mark` into the process's working
+//! folder, so a test can see that its probe child is inside the creation before it stops it.
 
 // Each build lists one set, so the ids and descriptors of the other sets go unused in it.
 #![allow(dead_code)]
@@ -82,7 +83,7 @@ pub(crate) const CLASSES: [(TUID, &str, &str, &str); 7] = [
 
 /// The buses a class declares.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum Shape {
+pub(crate) enum Shape {
     /// Stereo audio out, event in, event out.
     Generator,
     /// Stereo audio out, event in.
@@ -128,11 +129,13 @@ impl Class for Notes {
 /// whose creation fails). The crashing and blocking classes never return.
 pub(crate) fn create(cid: &TUID) -> Option<vst3::ComPtr<FUnknown>> {
     let shape = if *cid == NOTES_CID {
-        Shape::Generator
+        note_created();
+        return crate::generator::create(Shape::Generator);
     } else if *cid == NOTES_SILENT_CID {
         Shape::Silent
     } else if [EFFECT_A_CID, EFFECT_B_CID, EFFECT_C_CID].contains(cid) {
-        Shape::Effect
+        note_created();
+        return crate::generator::create(Shape::Effect);
     } else if *cid == PROBE_CRASH_CID {
         crash()
     } else if *cid == PROBE_BLOCK_CID {
@@ -245,6 +248,58 @@ fn spawn_role(role: &str, name: &str, escape: bool) {
     }
 }
 
+/// The buses of a class of this module, for `IComponent::getBusCount`.
+pub(crate) fn bus_count(shape: Shape, media: MediaType, dir: BusDirection) -> i32 {
+    let out = dir == BusDirections_::kOutput as BusDirection;
+    if media == MediaTypes_::kAudio as MediaType {
+        if out { shape.audio_outs() } else { 0 }
+    } else if media == MediaTypes_::kEvent as MediaType {
+        if out { shape.event_outs() } else { 1 }
+    } else {
+        0
+    }
+}
+
+/// `IComponent::getBusInfo` for a class of this module.
+pub(crate) fn bus_info(shape: Shape, media: MediaType, dir: BusDirection, index: i32, bus: *mut BusInfo) -> tresult {
+    if index < 0 || index >= bus_count(shape, media, dir) {
+        return kInvalidArgument;
+    }
+    if media == MediaTypes_::kAudio as MediaType {
+        audio_bus(bus, dir, "Out");
+    } else {
+        event_bus(bus, dir, if dir == BusDirections_::kInput as BusDirection { "Notes In" } else { "Notes Out" });
+    }
+    kResultOk
+}
+
+/// `IAudioProcessor::setBusArrangements` for a class of this module: no audio input, and its
+/// audio outputs stereo.
+///
+/// # Safety
+/// `outputs` points to `n_out` arrangements.
+pub(crate) unsafe fn set_arrangements(shape: Shape, n_in: i32, outputs: *mut SpeakerArrangement, n_out: i32) -> tresult {
+    let want = shape.audio_outs();
+    if n_in != 0 || n_out != want {
+        return kResultFalse;
+    }
+    // SAFETY: the host passes n_out (checked above) output arrangements.
+    if want >= 1 && unsafe { *outputs } != SpeakerArr::kStereo {
+        return kResultFalse;
+    }
+    kResultTrue
+}
+
+/// `IAudioProcessor::getBusArrangement` for a class of this module.
+pub(crate) fn get_arrangement(shape: Shape, dir: BusDirection, index: i32, arr: *mut SpeakerArrangement) -> tresult {
+    if dir != BusDirections_::kOutput as BusDirection || index != 0 || !shape.audio_out() {
+        return kInvalidArgument;
+    }
+    // SAFETY: the host passes a writable SpeakerArrangement.
+    unsafe { *arr = SpeakerArr::kStereo };
+    kResultOk
+}
+
 fn event_bus(bus: *mut BusInfo, dir: BusDirection, name: &str) {
     // SAFETY: the host passes a writable BusInfo.
     let b = unsafe { &mut *bus };
@@ -273,26 +328,10 @@ impl IComponentTrait for Notes {
         kResultOk
     }
     unsafe fn getBusCount(&self, media: MediaType, dir: BusDirection) -> i32 {
-        let out = dir == BusDirections_::kOutput as BusDirection;
-        if media == MediaTypes_::kAudio as MediaType {
-            if out { self.shape.audio_outs() } else { 0 }
-        } else if media == MediaTypes_::kEvent as MediaType {
-            if out { self.shape.event_outs() } else { 1 }
-        } else {
-            0
-        }
+        bus_count(self.shape, media, dir)
     }
     unsafe fn getBusInfo(&self, media: MediaType, dir: BusDirection, index: i32, bus: *mut BusInfo) -> tresult {
-        // SAFETY: forwarded from the host's own call.
-        if index < 0 || index >= unsafe { self.getBusCount(media, dir) } {
-            return kInvalidArgument;
-        }
-        if media == MediaTypes_::kAudio as MediaType {
-            audio_bus(bus, dir, "Out");
-        } else {
-            event_bus(bus, dir, if dir == BusDirections_::kInput as BusDirection { "Notes In" } else { "Notes Out" });
-        }
-        kResultOk
+        bus_info(self.shape, media, dir, index, bus)
     }
     unsafe fn getRoutingInfo(&self, _i: *mut RoutingInfo, _o: *mut RoutingInfo) -> tresult {
         kNotImplemented
@@ -313,23 +352,11 @@ impl IComponentTrait for Notes {
 
 impl IAudioProcessorTrait for Notes {
     unsafe fn setBusArrangements(&self, _i: *mut SpeakerArrangement, n_in: i32, outputs: *mut SpeakerArrangement, n_out: i32) -> tresult {
-        let want = self.shape.audio_outs();
-        if n_in != 0 || n_out != want {
-            return kResultFalse;
-        }
-        // SAFETY: the host passes n_out (checked above) output arrangements.
-        if want >= 1 && unsafe { *outputs } != SpeakerArr::kStereo {
-            return kResultFalse;
-        }
-        kResultTrue
+        // SAFETY: forwarded from the host's own call.
+        unsafe { set_arrangements(self.shape, n_in, outputs, n_out) }
     }
     unsafe fn getBusArrangement(&self, dir: BusDirection, index: i32, arr: *mut SpeakerArrangement) -> tresult {
-        if dir != BusDirections_::kOutput as BusDirection || index != 0 || !self.shape.audio_out() {
-            return kInvalidArgument;
-        }
-        // SAFETY: the host passes a writable SpeakerArrangement.
-        unsafe { *arr = SpeakerArr::kStereo };
-        kResultOk
+        get_arrangement(self.shape, dir, index, arr)
     }
     unsafe fn canProcessSampleSize(&self, size: i32) -> tresult {
         if size == SymbolicSampleSizes_::kSample32 as i32 { kResultOk } else { kNotImplemented }

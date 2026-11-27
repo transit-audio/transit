@@ -245,6 +245,11 @@ impl IParameterChangesTrait for ParamChanges {
 pub(crate) struct EventList {
     events: Mutex<Vec<sv::Event>>,
     cap: usize,
+    /// Most events `addEvent` takes (at most `cap`): an output list is limited to the room left in
+    /// the block's note output buffer (ADR 0064, decision 3).
+    room: AtomicUsize,
+    /// `addEvent` calls refused since the last [`EventList::take_refused`].
+    refused: AtomicU32,
 }
 
 impl Class for EventList {
@@ -253,12 +258,22 @@ impl Class for EventList {
 
 impl EventList {
     pub(super) fn new(cap: usize) -> EventList {
-        let list = EventList { events: Mutex::new(Vec::with_capacity(cap)), cap };
+        let list = EventList { events: Mutex::new(Vec::with_capacity(cap)), cap, room: AtomicUsize::new(cap), refused: AtomicU32::new(0) };
         // On macOS the first lock boxes the mutex's pthread_mutex_t (64 bytes). Take it once here,
         // on the control thread, so `process` never allocates (see the audio-thread knowledge note).
         drop(list.events.lock());
         list
     }
+    /// Limits what `addEvent` takes to `room` events (never more than the capacity).
+    pub(super) fn set_room(&self, room: usize) {
+        self.room.store(room.min(self.cap), Ordering::Relaxed);
+    }
+
+    /// `addEvent` calls refused since the last call.
+    pub(super) fn take_refused(&self) -> u32 {
+        self.refused.swap(0, Ordering::Relaxed)
+    }
+
     pub(super) fn with<R>(&self, f: impl FnOnce(&mut Vec<sv::Event>) -> R) -> Option<R> {
         match self.events.try_lock() {
             Ok(mut g) => Some(f(&mut g)),
@@ -287,8 +302,9 @@ impl IEventListTrait for EventList {
     unsafe fn addEvent(&self, e: *mut sv::Event) -> sb::tresult {
         // SAFETY: in-pointer from the plugin (or null, handled).
         let Some(&ev) = (unsafe { e.as_ref() }) else { return sb::kInvalidArgument };
-        let cap = self.cap;
-        // Output events (e.g. MIDI out) are accepted while there is room; SoundCraft ignores them.
+        let cap = self.cap.min(self.room.load(Ordering::Relaxed));
+        // Output events are accepted while the block's note output has room (ADR 0064, decision
+        // 3); a refusal is counted.
         match self.with(|v| {
             if v.len() < cap {
                 v.push(ev);
@@ -298,7 +314,10 @@ impl IEventListTrait for EventList {
             }
         }) {
             Some(true) => sb::kResultOk,
-            _ => sb::kResultFalse,
+            _ => {
+                self.refused.fetch_add(1, Ordering::Relaxed);
+                sb::kResultFalse
+            }
         }
     }
 }

@@ -39,7 +39,10 @@ impl transit_dsp::PluginStateReader for Vst3State {
             return None;
         }
         let core = lock(&shared.core);
-        if !core.inst.load_state(data) {
+        let ok = core.inst.load_state(data);
+        // A state load reached the processor: a new lifecycle generation (ADR 0064, decision 6).
+        shared.next_generation(shared.alive.load(Ordering::Relaxed));
+        if !ok {
             return None;
         }
         shared.loads.bump();

@@ -105,6 +105,7 @@ mod host_context;
 mod host_objects;
 mod instance;
 mod module;
+mod note_out;
 mod probe;
 #[cfg(target_os = "linux")]
 mod run_loop;

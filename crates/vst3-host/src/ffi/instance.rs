@@ -27,6 +27,8 @@ pub(crate) struct Layout {
     pub inputs: Vec<u32>,
     pub outputs: Vec<u32>,
     pub event_input: bool,
+    /// Event output buses the component declares (ADR 0064: bus 0 is activated and read).
+    pub event_outputs: u32,
     /// The activated auxiliary (sidechain) audio input bus, when the plug-in declares one and
     /// accepted an arrangement for it.
     pub key_bus: Option<usize>,
@@ -266,7 +268,7 @@ impl Instance {
         self.active
     }
 
-    fn bus_count(&self, media: sv::MediaTypes, dir: sv::BusDirections) -> i32 {
+    pub(super) fn bus_count(&self, media: sv::MediaTypes, dir: sv::BusDirections) -> i32 {
         // SAFETY: valid component.
         unsafe { self.component.getBusCount(media as sv::MediaType, dir as sv::BusDirection) }.clamp(0, MAX_BUSES)
     }
@@ -364,8 +366,13 @@ impl Instance {
         }
         let inputs: Vec<u32> = (0..nin).map(|i| self.bus_channels(din, i)).collect();
         let key_bus = aux.filter(|_| tried_ok).and_then(|i| usize::try_from(i).ok()).filter(|&i| inputs.get(i).is_some_and(|&c| c > 0));
-        let layout =
-            Layout { inputs, outputs: (0..nout).map(|i| self.bus_channels(dout, i)).collect(), event_input: self.bus_count(event, din) > 0, key_bus };
+        let layout = Layout {
+            inputs,
+            outputs: (0..nout).map(|i| self.bus_channels(dout, i)).collect(),
+            event_input: self.bus_count(event, din) > 0,
+            event_outputs: u32::try_from(self.bus_count(event, dout)).unwrap_or(0),
+            key_bus,
+        };
         // Main buses on, plus the sidechain bus when it has an arrangement; other aux buses off
         // (VST3 still gets buffers for every bus).
         for (dir, n) in [(din, nin), (dout, nout)] {
@@ -379,6 +386,9 @@ impl Instance {
         if layout.event_input {
             // SAFETY: valid component; event input bus 0 exists.
             unsafe { self.component.activateBus(event as sv::MediaType, din as sv::BusDirection, 0, 1) };
+        }
+        if layout.event_outputs > 0 {
+            self.activate_event_output();
         }
         self.event_in = layout.event_input;
         // SDK enum constants are signed on Windows and unsigned on Unix.
