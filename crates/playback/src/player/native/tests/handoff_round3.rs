@@ -171,6 +171,56 @@ fn a_close_the_full_device_queue_refuses_is_kept_until_taken() {
     new.finish();
 }
 
+/// The refused close (review round 1): an input whose open failed (another program holds the
+/// port) and whose close the device thread's full queue refused is kept by the handover, sent again
+/// before any open, and no open is made while it waits; once the queue takes it, the replacement
+/// opens the port.
+#[test]
+fn a_failed_inputs_refused_close_is_kept_and_sent_again_before_the_replacement_opens() {
+    let fake = Fake::default();
+    let key = fake.add_input("Keys");
+    let mut session = Session::default();
+    track(&mut session, MidiInput::default());
+    let holder = fake.io().open_input(&key, transit_midi_io::InputConfig::default()).unwrap();
+    let mut old = Fixture::new(session.clone(), fake.io());
+    until(|| {
+        old.tick();
+        !old.native.inputs.is_empty()
+    });
+    // The device thread tried the open (refused: the port is held), then takes no more requests;
+    // its failure reply is out by the pass that acknowledges the stall.
+    // (The holder's own open is the first attempt.)
+    until(|| fake.input_open_attempts(&key) == 2);
+    let io = old.native.io.as_ref().unwrap();
+    let (stall, held) = (Arc::clone(&io.stall), Arc::clone(&io.held));
+    stall.store(true, Ordering::Release);
+    until(|| held.load(Ordering::Acquire));
+    while io.request(Request::Close(u64::MAX)).is_ok() {}
+    until(|| {
+        old.tick();
+        old.native.inputs.iter().any(|input| input.failed)
+    });
+    let id = old.native.inputs[0].id;
+    assert!(!old.native.inputs[0].closed, "the full queue refused the failed input's close");
+    let carried = old.hand_over();
+    assert_eq!(carried.closing, [id], "the handover keeps the refused close");
+    let mut new = replacement(session, &fake, carried);
+    for _ in 0..3 {
+        new.tick();
+        assert_eq!(new.native.closing, [id], "kept while the queue is full");
+        assert!(new.native.inputs.is_empty(), "no open while the close waits");
+    }
+    drop(holder);
+    stall.store(false, Ordering::Release);
+    until(|| {
+        new.tick();
+        let status = new.native.status();
+        new.native.closing.is_empty() && status.open_inputs == 1 && status.routes == 1
+    });
+    assert_eq!(fake.input_open_attempts(&key), 3, "the holder's, one refused open, then the replacement's");
+    new.finish();
+}
+
 /// #760: the same window with Learn not armed. A mapped transport press after the cutoff, while the
 /// worker has not resumed yet, is acted on once (nothing would capture it after the resume).
 #[test]

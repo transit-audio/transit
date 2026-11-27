@@ -25,7 +25,7 @@
 //! unplug (an open connection keeps its now silent sink until dropped); [`Fake::input_port`]
 //! gives the [`FakeInputPort`] whose [`deliver`](FakeInputPort::deliver) plays the backend
 //! callback (it stays usable after the unplug, like a dying driver thread); [`Fake::input_opens`]
-//! counts the opens of an input; [`Fake::sent`]
+//! counts the opens of an input ([`Fake::input_open_attempts`] also the refused ones); [`Fake::sent`]
 //! returns what was sent to an output ([`Fake::sends`] with instants and threads); [`Fake::key`] builds an id-less key.
 
 use crate::backend::{Backend, InputConnection, OutputConnection};
@@ -61,6 +61,8 @@ struct State {
     next_id: u64,
     /// Every input open the backend served, by the port's full key, in order.
     input_opens: Vec<PortKey>,
+    /// Every input open asked of the backend, served or refused, by the key asked for.
+    input_attempts: Vec<PortKey>,
 }
 
 impl State {
@@ -226,6 +228,12 @@ impl Fake {
         state.input_opens.iter().filter(|opened| **opened == full).count()
     }
 
+    /// How many input opens were asked for with exactly `key`, whether served or refused.
+    #[must_use]
+    pub fn input_open_attempts(&self, key: &PortKey) -> usize {
+        lock(&self.state).input_attempts.iter().filter(|asked| *asked == key).count()
+    }
+
     /// Everything sent to the output `key` names.
     #[must_use]
     pub fn sent(&self, key: &PortKey) -> Vec<Vec<u8>> {
@@ -271,6 +279,7 @@ impl Backend for Fake {
     }
 
     fn open_input(&self, key: &PortKey, sink: InputSink) -> Result<(PortKey, Box<dyn InputConnection>), MidiIoError> {
+        lock(&self.state).input_attempts.push(key.clone());
         let (full, slot) = self.slot(key).ok_or_else(|| MidiIoError::PortNotFound(key.clone()))?;
         let mut held = lock(&slot);
         if held.is_some() {

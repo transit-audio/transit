@@ -100,6 +100,10 @@ struct IoThread {
     /// Tests: the device thread takes no request (its queue fills), as one stuck in a driver would.
     #[cfg(test)]
     stall: Arc<AtomicBool>,
+    /// Tests: set by a pass of the device thread that took no request because of `stall` (any
+    /// reply it held was offered first in that pass).
+    #[cfg(test)]
+    held: Arc<AtomicBool>,
 }
 
 impl IoThread {
@@ -113,6 +117,10 @@ impl IoThread {
         let stall = Arc::new(AtomicBool::new(false));
         #[cfg(test)]
         let stalled = Arc::clone(&stall);
+        #[cfg(test)]
+        let held = Arc::new(AtomicBool::new(false));
+        #[cfg(test)]
+        let holding = Arc::clone(&held);
         let thread = std::thread::Builder::new().name("transit-midi-devices".into()).spawn(move || {
             struct Finished(Arc<AtomicBool>);
             impl Drop for Finished {
@@ -164,6 +172,8 @@ impl IoThread {
                 }
                 #[cfg(test)]
                 let take = !stalled.load(Ordering::Acquire);
+                #[cfg(test)]
+                holding.store(!take, Ordering::Release);
                 #[cfg(not(test))]
                 let take = true;
                 if pending.is_none() && take {
@@ -201,6 +211,8 @@ impl IoThread {
             thread,
             #[cfg(test)]
             stall,
+            #[cfg(test)]
+            held,
         })
     }
 
