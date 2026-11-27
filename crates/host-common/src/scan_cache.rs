@@ -291,7 +291,9 @@ fn run_child(program: &Path, args: &[&OsStr], file: &Path, deadline: &mut dyn De
     use std::process::{Command, Stdio};
     let fail = |m: String| format!("{}: {m}", file.display());
     let mut command = Command::new(program);
-    command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    // The child waits for "go" on its standard input before it loads anything ([`enter_child`]),
+    // so that it and everything it starts are contained first.
+    command.args(args).env(PARENT_ENV, std::process::id().to_string()).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;
@@ -299,19 +301,33 @@ fn run_child(program: &Path, args: &[&OsStr], file: &Path, deadline: &mut dyn De
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
+    transit_rt::child_tree::prepare(&mut command);
     let mut child = command.spawn().map_err(|e| fail(format!("the scan process did not start: {e}")))?;
+    // The child's process tree ends with this call (and with this process, a crash included):
+    // see `transit_rt::child_tree` for what each system guarantees.
+    let tree = match transit_rt::child_tree::Tree::contain(&child) {
+        Ok(tree) => Some(tree),
+        Err(e) => {
+            log::warn!("{}: the scan process could not be contained ({e}); it runs uncontained", file.display());
+            None
+        }
+    };
+    if let Some(mut input) = child.stdin.take() {
+        use std::io::Write as _;
+        let _ = input.write_all(b"go\n");
+    }
     // Read while it runs, so that a chatty plugin cannot fill the pipe and stall it. The reader
     // also flags the answer line the moment it arrives: a plugin that answers and then hangs the
     // process on exit (Native Instruments' plug-ins do, in their library unload) must not cost
     // the whole timeout, so the parent stops waiting on the answer, not on the exit.
     let out = child.stdout.take().ok_or_else(|| fail("no output from the scan process".into()))?;
     let answered = Arc::new(AtomicBool::new(false));
+    let text = Arc::new(std::sync::Mutex::new(String::new()));
     let reader = {
-        let answered = Arc::clone(&answered);
+        let (answered, text) = (Arc::clone(&answered), Arc::clone(&text));
         std::thread::spawn(move || {
             use std::io::BufRead as _;
             let mut reader = std::io::BufReader::new(out);
-            let mut text = String::new();
             let mut line = Vec::new();
             // Bytes, converted lossily: a plugin printing non-UTF-8 cannot hide the answer.
             while let Ok(n) = reader.read_until(b'\n', &mut line) {
@@ -319,38 +335,76 @@ fn run_child(program: &Path, args: &[&OsStr], file: &Path, deadline: &mut dyn De
                     break;
                 }
                 let s = String::from_utf8_lossy(&line);
+                text.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push_str(&s);
+                // Flagged once the line is in the text, so whoever sees the flag finds the line.
                 if s.starts_with(REPLY) {
                     answered.store(true, Ordering::Release);
                 }
-                text.push_str(&s);
                 line.clear();
             }
-            text
         })
+    };
+    let end = |child: &mut std::process::Child| {
+        // The tree first, while the child's id still names it; then the child itself.
+        if let Some(tree) = &tree {
+            tree.kill();
+        }
+        let _ = child.kill();
+        let _ = child.wait();
     };
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break Some(status),
             // Answered: the plugin's start-up is done; its unload is not waited for.
             Ok(None) if answered.load(Ordering::Acquire) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                end(&mut child);
                 break None;
             }
             Ok(None) if !deadline.passed() && !stop() => std::thread::sleep(Duration::from_millis(10)),
             _ => {
-                let _ = child.kill();
-                let _ = child.wait();
+                end(&mut child);
                 break None;
             }
         }
     };
-    let text = reader.join().unwrap_or_default();
+    // Whatever the child started ends with it (a helper process may hold the output pipe open).
+    if let Some(tree) = &tree {
+        tree.kill();
+    }
+    // The output ends at end of file, which a process outside the tree (one that left it on
+    // purpose) can hold off for ever: collection also ends at the answer, the deadline or a stop.
+    while !reader.is_finished() && !answered.load(Ordering::Acquire) && !deadline.passed() && !stop() {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if reader.is_finished() {
+        let _ = reader.join();
+    }
+    drop(tree);
+    let text = text.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone();
     let answer = text.lines().rev().find_map(|l| l.strip_prefix(REPLY));
     match (answer, status) {
         (Some(json), _) => Ok(json.to_string()),
         (None, None) => Err(fail(format!("still loading after {} s; stopped", deadline.limit().as_secs()))),
         (None, Some(status)) => Err(fail(format!("the plugin ended the scan process ({status})"))),
+    }
+}
+
+/// Names the parent process of a scan child (its id), set by this module when it starts one.
+const PARENT_ENV: &str = "TRANSIT_SCAN_PARENT";
+
+/// First thing in a scan child's work (the listing and probe replies call it): when this process
+/// was started by [`load_in_child`] or [`probe_in_child`], ties it to its parent
+/// (`transit_rt::child_tree::exit_with_parent`) and waits until the parent says "go" on standard
+/// input, which it does once the child is contained. A parent that is gone before that (end of
+/// file, or anything else) ends this process before it loads anything. In any other process it
+/// does nothing.
+pub fn enter_child() {
+    let Some(parent) = std::env::var(PARENT_ENV).ok().and_then(|v| v.parse::<u32>().ok()) else { return };
+    transit_rt::child_tree::exit_with_parent(parent);
+    let mut line = String::new();
+    match std::io::stdin().read_line(&mut line) {
+        Ok(_) if line.trim() == "go" => {}
+        _ => std::process::exit(0),
     }
 }
 

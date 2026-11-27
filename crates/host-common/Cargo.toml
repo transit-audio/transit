@@ -8,6 +8,8 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+# Containing the scan children and their descendants (`child_tree`), the one home of new unsafe.
+transit-rt.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
