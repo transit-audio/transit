@@ -774,6 +774,15 @@ impl Plugin for TextureSynth {
 
     fn reset(&mut self) {
         if self.restored {
+            // The restored cloud stays for its first block, but nothing queued or held before the
+            // reset may sound after it: a reset is a proven end of every voice (ADR 0059, 3d).
+            self.events.clear();
+            self.held = [false; 128];
+            self.pairing.clear();
+            self.pressed = [0; 128];
+            self.presses = 0;
+            self.pedalled = [false; 128];
+            self.sustain = false;
             return;
         }
         // The synth back to its power-on state (in place), so a render after a reset plays as a new

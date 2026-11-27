@@ -665,3 +665,29 @@ fn a_chord_in_one_block_sounds_its_newest_note_at_its_pitch() {
     println!("newest note 69: {hz:.4} Hz ({cents:+.4} cents)");
     assert!(cents.abs() < 1.0, "{hz} Hz ({cents:+.3} cents)");
 }
+
+/// ADR 0059, 3d: a reset of an instance holding a restored state ends what was queued before it.
+/// A note-on queued before the first block, then `reset`: nothing of it sounds, and the restored
+/// cloud plays on as one restored without the note.
+#[test]
+fn a_reset_with_a_restored_state_drops_a_note_queued_before_it() {
+    let sr = 48_000u32;
+    let params = [("density", 20.0), ("size", 95.0), ("dry_wet", 80.0), ("reverb", 40.0)];
+    let mut live = instrument(sr, &params);
+    let _ = render(&mut live, 30_000, 500, &[(0, Ev::On(57, 100)), (12_000, Ev::Param("freeze", 1.0)), (20_000, Ev::Off(57))]);
+    let state = live.save_state().expect("frozen");
+    let fresh = || {
+        let mut t = TextureSynth::new();
+        assert!(t.load_state(&state));
+        t.prepare(sr as f32, 333, 2);
+        t
+    };
+    let mut plain = fresh();
+    plain.reset();
+    let mut queued = fresh();
+    queued.note_on(5, 64, 120);
+    queued.reset();
+    let a = render(&mut plain, 24_000, 333, &[]);
+    let b = render(&mut queued, 24_000, 333, &[]);
+    assert!(same_bits(&a, &b), "the note queued before the reset never sounds");
+}
