@@ -181,6 +181,31 @@ impl Ledger {
             .count()
     }
 
+    /// The native id of the newest open note of `key` on `channel` with voice id `voice` (poly
+    /// pressure follows its note), or [`PluginEvent::NO_ID`].
+    #[must_use]
+    pub fn native_of(&self, channel: u8, key: u8, voice: i32) -> i32 {
+        self.iter()
+            .filter(|(_, e)| e.open() && e.channel == channel & 0x0F && e.owner == Owner::Note { key, voice })
+            .max_by_key(|(_, e)| e.seq)
+            .map_or(PluginEvent::NO_ID, |(_, e)| e.native)
+    }
+
+    /// Notes of `key` on `channel` the plug-in holds (start handed, release not yet handed), other
+    /// than entry `except`.
+    #[must_use]
+    pub fn holders(&self, channel: u8, key: u8, except: u16) -> usize {
+        self.iter()
+            .filter(|(i, e)| {
+                *i != except
+                    && e.channel == channel & 0x0F
+                    && e.start == Start::Handed
+                    && e.release != Release::Handed
+                    && matches!(e.owner, Owner::Note { key: k, .. } if k == key)
+            })
+            .count()
+    }
+
     fn reserve(&mut self, channel: u8, owner: Owner) -> Option<u16> {
         let i = self.free.pop()?;
         self.seq = self.seq.wrapping_add(1);

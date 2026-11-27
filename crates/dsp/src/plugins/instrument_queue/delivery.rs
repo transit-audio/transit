@@ -186,7 +186,11 @@ impl Delivery {
                 true
             }
             Verdict::Ordinary => {
-                if self.ordinary < ORDINARY && Self::insert(&mut self.items, &mut self.seq, offset, *ev, PluginEvent::NO_ID, Class::Ordinary) {
+                let native = match ev.message {
+                    Message::PolyPressure { key, .. } => self.ledger.native_of(ev.channel, key, ev.note_id),
+                    _ => PluginEvent::NO_ID,
+                };
+                if self.ordinary < ORDINARY && Self::insert(&mut self.items, &mut self.seq, offset, *ev, native, Class::Ordinary) {
                     self.ordinary += 1;
                     true
                 } else {
@@ -277,6 +281,17 @@ impl Delivery {
         let k = self.items.iter().position(|it| it.offset >= end).unwrap_or(self.items.len());
         self.batch = k;
         self.items.get(..k).unwrap_or(&[])
+    }
+
+    /// Marks item `j` of the current batch handed now, before the call returns (what `finish`
+    /// does for the whole batch), so a translation can ask the ledger what the plug-in holds at
+    /// that item.
+    pub fn hand(&mut self, j: usize) {
+        match self.items.get(j).map(|it| it.class) {
+            Some(Class::Start(i)) => self.ledger.start_handed(i),
+            Some(Class::Release(i)) => self.ledger.release_handed(i),
+            _ => {}
+        }
     }
 
     /// The sub-call that handed [`Delivery::batch`] returned: `ok` frees every entry whose release
