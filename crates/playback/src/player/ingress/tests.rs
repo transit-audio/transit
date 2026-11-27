@@ -299,7 +299,6 @@ pub(super) fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSen
             monitor: None,
             maps: None,
             map_out: rtrb::RingBuffer::new(MAP_CAPACITY).0,
-            map_pass_on: false,
             resumed: 0,
             between_check_and_push: None,
             after_routes_applied: None,

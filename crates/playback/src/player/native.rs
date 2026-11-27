@@ -787,7 +787,8 @@ impl Native {
         self.floor.clear();
         // MIDI Learn: hand the worker a fresh snapshot when the list or the open ports changed.
         let ids = self.map_ids();
-        if let Some(snapshot) = self.wanted.rebuild(ids)
+        let cutoffs = self.input_cutoffs();
+        if let Some(snapshot) = self.wanted.rebuild(ids, |id| cutoff_of(&cutoffs, id))
             && let Err(error) = self.worker.set_maps(snapshot)
         {
             self.wanted.unsent();
@@ -796,7 +797,17 @@ impl Native {
     }
 }
 
+/// The cutoff of ingress input `id` among `cutoffs`: where a mapping new to it starts matching.
+fn cutoff_of(cutoffs: &[(u64, u64)], id: u64) -> u64 {
+    cutoffs.iter().find(|(input, _)| *input == id).map_or(0, |(_, cutoff)| *cutoff)
+}
+
 impl Native {
+    /// Each attached input's ingress id and its cutoff now.
+    fn input_cutoffs(&self) -> Vec<(u64, u64)> {
+        self.inputs.iter().filter_map(|input| input.attached.as_ref().map(|(id, open)| (*id, open.cutoff()))).collect()
+    }
+
     /// The ingress input id of each wanted mapping's port, `None` for a port not open.
     fn map_ids(&self) -> Vec<Option<u64>> {
         (0..self.wanted.len())

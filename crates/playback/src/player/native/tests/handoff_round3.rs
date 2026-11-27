@@ -49,6 +49,13 @@ fn renewed_mappings_start_from_the_controls_values() {
         new.tick();
         new.native.map_ports_open() == Some(vec![true])
     });
+    // `map_ports_open` is control-side: wait until the worker applied the boundary (the renewed
+    // mappings go to it before the resume), so the moves below meet the renewed cells.
+    let token = new.native.handovers;
+    until(|| {
+        new.tick();
+        new.native.worker.resumed() >= token
+    });
     assert!(port.deliver(0, &[0xB0, 7, 0]));
     until(|| {
         new.tick();

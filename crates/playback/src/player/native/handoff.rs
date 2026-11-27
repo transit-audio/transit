@@ -75,14 +75,14 @@ impl Native {
         drop(self.worker.take_map_events());
         drop(self.wanted.take_moves());
         self.wanted.renew();
-        let cutoffs: Vec<(u64, u64)> =
-            self.inputs.iter().filter_map(|input| input.attached.as_ref().map(|(id, open)| (*id, open.cutoff()))).collect();
+        let cutoffs = self.input_cutoffs();
         for (id, cutoff) in &cutoffs {
             self.buttons.cutoffs.insert(*id, *cutoff);
         }
         self.floor.clone_from(&cutoffs);
-        // The renewed mappings reach the worker before it resumes matching.
-        if let Some(snapshot) = self.wanted.rebuild(self.map_ids()) {
+        // The renewed mappings reach the worker before it resumes matching; each starts matching
+        // at its input's boundary.
+        if let Some(snapshot) = self.wanted.rebuild(self.map_ids(), |id| super::cutoff_of(&cutoffs, id)) {
             bind.queue.push_back(ingress::Update::Maps(snapshot));
         }
         bind.queue.push_back(ingress::Update::Resume { token, cutoffs });

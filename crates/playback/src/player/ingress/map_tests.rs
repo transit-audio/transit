@@ -66,11 +66,19 @@ fn build(routed: bool) -> Rig {
 }
 
 impl Rig {
+    /// Queue these mappings for the worker as Main does, with "KeyStep" open as input `PORT`: a
+    /// mapping new to the port matches from the port's cutoff now. The worker applies them at its
+    /// next step.
+    fn queue_maps(&mut self, specs: Vec<MapSpec>) {
+        self.wanted.set(specs);
+        let cutoff = self._handle.boundary().cutoff();
+        let snapshot = self.wanted.rebuild(vec![Some(PORT); self.wanted.len()], |_| cutoff).unwrap();
+        self.send.send(Update::Maps(snapshot)).ok().unwrap();
+    }
+
     /// Hand the worker these mappings, with "KeyStep" open as input `PORT`.
     fn map(&mut self, specs: Vec<MapSpec>) {
-        self.wanted.set(specs);
-        let snapshot = self.wanted.rebuild(vec![Some(PORT); self.wanted.len()]).unwrap();
-        self.send.send(Update::Maps(snapshot)).ok().unwrap();
+        self.queue_maps(specs);
         self.worker.step();
     }
     /// Deliver a CC and step; the continuous values Main would apply.
@@ -195,7 +203,6 @@ fn without_mappings_or_a_learn_the_worker_does_no_mapping_work() {
     }
     let (_, heap) = measure(|| rig.worker.step());
     assert!(heap.is_zero(), "{heap:?}");
-    assert!(!rig.worker.map_pass_on);
     assert_eq!(rig.worker.inputs[0].mon.map_next, 0, "nothing was matched or even looked at");
     assert!(rig.drain().is_empty());
 }
@@ -410,7 +417,8 @@ fn a_thousand_ccs_a_second_on_two_ports_against_a_sixty_hertz_apply_loop_lose_no
     let mut s2 = spec(SourceKind::Cc, 9, MapMode::Jump, false);
     s2.port = "Second".into();
     rig.wanted.set(vec![spec(SourceKind::Cc, 7, MapMode::Jump, false), s2]);
-    let snapshot = rig.wanted.rebuild(vec![Some(PORT), Some(PORT + 1)]).unwrap();
+    let (a, b) = (rig._handle.boundary().cutoff(), _h2.boundary().cutoff());
+    let snapshot = rig.wanted.rebuild(vec![Some(PORT), Some(PORT + 1)], |id| if id == PORT { a } else { b }).unwrap();
     rig.send.send(Update::Maps(snapshot)).ok().unwrap();
     rig.worker.step();
     // One second of simulated time: 1000 messages per port per second, the UI applies at 60 Hz.
@@ -448,4 +456,95 @@ fn presses_that_overflow_the_ring_are_counted_not_silent() {
     assert_eq!(rig.drain().len(), 4);
     assert_eq!(rig.worker.shared.map_dropped.load(Ordering::Relaxed), 6, "the six that did not fit are counted");
     assert_eq!(rig.worker.shared.map_dropped.load(Ordering::Relaxed), 6);
+}
+
+// ---- each mapping matches only what arrived after it was first queued (#760) ----
+
+/// The first move of a mapped control right after the mapping was created. The matcher was off
+/// (no mapping, no learn) and the port had a backlog on the other control; Main queues the mappings,
+/// then a control moves before the worker applies them. Only the later move drives a control.
+#[test]
+fn the_first_move_after_a_mapping_is_queued_is_matched_and_the_older_backlog_is_not() {
+    let mut rig = rig();
+    rig.port.deliver(0, &[0xB0, 8, 10]);
+    rig.worker.step();
+    rig.queue_maps(vec![spec(SourceKind::Cc, 7, MapMode::Jump, false), spec(SourceKind::Cc, 8, MapMode::Jump, false)]);
+    rig.port.deliver(0, &[0xB0, 7, 127]);
+    rig.worker.step();
+    assert_eq!(rig.moves(), vec![1.0], "the move after the mappings were queued, and only it");
+}
+
+/// Two mapping updates queued before the worker applies either: CC7 is mapped, CC7 moves, then
+/// CC8 is added. The unchanged CC7 mapping keeps the start it was first queued with, so that move
+/// drives its control; the new CC8 mapping starts at the second update.
+#[test]
+fn an_unchanged_mapping_keeps_its_start_across_a_later_update() {
+    let mut rig = rig();
+    rig.queue_maps(vec![spec(SourceKind::Cc, 7, MapMode::Jump, false)]);
+    rig.port.deliver(0, &[0xB0, 7, 127]);
+    rig.queue_maps(vec![spec(SourceKind::Cc, 7, MapMode::Jump, false), spec(SourceKind::Cc, 8, MapMode::Jump, false)]);
+    rig.worker.step();
+    assert_eq!(rig.moves(), vec![1.0], "the CC7 move after its mapping was queued");
+}
+
+/// An input attached in the same worker step as the mappings: a value it received before the
+/// mapping for it was queued does not drive the newly mapped control; a later one does.
+#[test]
+fn an_input_attached_with_the_mappings_in_one_step_skips_what_preceded_its_mapping() {
+    let mut rig = rig();
+    let fake2 = Fake::default();
+    let key2 = fake2.add_input("Second");
+    let (h2, consumer2) = fake2.io().open_input(&key2, InputConfig::default()).unwrap();
+    let port2 = fake2.input_port(&key2).unwrap();
+    rig.send
+        .send(Update::Input(Box::new(Input {
+            buttons: Vec::new(),
+            buttons_enabled: true,
+            id: PORT + 1,
+            mon: Mon::default(),
+            guard: storm::Guard::default(),
+            live: false,
+            consumer: consumer2,
+            routes: Vec::new(),
+        })))
+        .ok()
+        .unwrap();
+    assert!(port2.deliver(0, &[0xB0, 9, 10]), "before the mapping");
+    let mut second = spec(SourceKind::Cc, 9, MapMode::Jump, false);
+    second.port = "Second".into();
+    rig.wanted.set(vec![second]);
+    let cutoff = h2.boundary().cutoff();
+    let snapshot = rig.wanted.rebuild(vec![Some(PORT + 1)], |_| cutoff).unwrap();
+    rig.send.send(Update::Maps(snapshot)).ok().unwrap();
+    rig.worker.step();
+    assert!(rig.moves().is_empty(), "the value from before the mapping drove it");
+    assert!(port2.deliver(0, &[0xB0, 9, 127]));
+    rig.worker.step();
+    assert_eq!(rig.moves(), vec![1.0]);
+}
+
+/// A value from before a mapping existed, on a port already open, never moves the parameter the
+/// new mapping drives; the next move does.
+#[test]
+fn a_stale_value_from_before_a_mapping_existed_does_not_move_the_newly_mapped_control() {
+    let mut rig = rig();
+    rig.port.deliver(0, &[0xB0, 8, 10]);
+    rig.worker.step();
+    rig.map(vec![spec(SourceKind::Cc, 8, MapMode::Jump, false)]);
+    assert!(rig.moves().is_empty(), "the stale value drove the new mapping");
+    assert_eq!(rig.cc(8, 127), vec![1.0]);
+}
+
+/// MIDI Learn armed: the learned message is the candidate, and the mapping made from it does not
+/// take that same message as a move; the next move drives the control.
+#[test]
+fn a_learned_message_does_not_move_the_mapping_made_from_it() {
+    let mut rig = rig();
+    rig.worker.shared.learn.store(true, Ordering::Release);
+    rig.port.deliver(0, &[0xB0, 7, 100]);
+    rig.worker.step();
+    assert!(matches!(rig.drain()[..], [MapEvent::Candidate { number: 7, .. }]));
+    rig.map(vec![spec(SourceKind::Cc, 7, MapMode::Jump, false)]);
+    assert!(rig.moves().is_empty(), "the learned message moved the mapping made from it");
+    assert_eq!(rig.cc(7, 127), vec![1.0]);
 }

@@ -248,3 +248,51 @@ fn carried_threads_that_ended_leave_the_replacement_to_open_the_input() {
     assert_eq!(fake.input_opens(&key), 2, "the replacement's own open");
     new.finish();
 }
+
+/// Review round 1 (#760): the old worker never matched (it took the mapping only once suspended),
+/// so its matcher counts as off. A mapped control moved after the replacement's boundary and before
+/// the worker resumed is still matched when it resumes: the renewed mapping starts at the boundary,
+/// so it sees what follows it whatever the matcher did before.
+#[test]
+fn a_mapped_control_after_the_boundary_is_matched_when_the_matcher_was_off_before_the_reopen() {
+    let fake = Fake::default();
+    let key = fake.add_input("Keys");
+    let session = Session::default();
+    let mut old = Fixture::new(session.clone(), fake.io());
+    // The monitor opens the port with no route and no mapping.
+    old.native.set_monitor(true, false);
+    old.ready(1, 0);
+    old.native.worker.stall(true);
+    old.native.set_mappings(vec![cc("Keys", 7)]);
+    old.tick();
+    let port = fake.input_port(&key).unwrap();
+    let carried = old.hand_over();
+    carried.worker.stall(false);
+    let mut new = replacement(session, &fake, carried);
+    let token = new.native.handovers;
+    until(|| new.native.worker.suspend_seen() >= token);
+    // Room for the lane, the echo producer and the monitor tap; none for the resume.
+    new.native.worker.stall(true);
+    for _ in 0..sources::PORTS - 3 {
+        assert!(new.native.worker.set_buttons(Vec::new()).is_ok());
+    }
+    new.native.set_mappings(vec![cc("Keys", 7)]);
+    new.tick();
+    assert!(new.native.unbound.is_some() && !new.native.before_boundary(), "the boundary is drawn, the resume waits");
+    assert!(port.deliver(0, &[0xB0, 7, 127]), "a move after the boundary, before the resume");
+    new.native.worker.stall(false);
+    let mut got = Vec::new();
+    until(|| {
+        new.tick();
+        got.extend(new.native.take_map_events());
+        new.native.worker.resumed() >= token
+    });
+    // Resumed: the move is published by the step that applied the resume, or not at all.
+    until(|| {
+        new.tick();
+        got.extend(new.native.take_map_events());
+        !got.is_empty()
+    });
+    assert!(matches!(got[..], [MapMsg::Move { value, .. }] if (value - 1.0).abs() < 1e-6), "{got:?}");
+    new.finish();
+}

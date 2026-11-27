@@ -113,6 +113,9 @@ struct Shared {
     /// The latest handover the worker has seen at the start of a step: everything it published
     /// before that is already in the map ring.
     suspend_seen: AtomicU64,
+    /// Tests: the latest handover whose boundary the worker applied ([`Update::Resume`]).
+    #[cfg(test)]
+    resumed: AtomicU64,
 }
 
 /// Main's per-open cancellation identity. Capture/publish all port cutoffs
@@ -378,7 +381,6 @@ impl Worker {
             monitor: None,
             maps: None,
             map_out,
-            map_pass_on: false,
             resumed: 0,
             #[cfg(test)]
             between_check_and_push: None,
@@ -526,6 +528,12 @@ impl Worker {
     /// The latest handover the worker has taken up.
     pub(super) fn suspend_seen(&self) -> u64 {
         self.shared.suspend_seen.load(Ordering::Acquire)
+    }
+
+    /// Tests: the latest handover whose boundary the worker applied (it matches again from then).
+    #[cfg(test)]
+    pub(super) fn resumed(&self) -> u64 {
+        self.shared.resumed.load(Ordering::Acquire)
     }
 
     /// Swaps in the MIDI Learn mappings (ADR 0028). The worker owns a reference until the next swap.
@@ -676,8 +684,6 @@ struct Pump {
     /// The MIDI Learn mappings (ADR 0028) and the ring their events go out on.
     maps: Option<Arc<Snapshot>>,
     map_out: rtrb::Producer<MapEvent>,
-    /// Whether the matcher ran on the last step, so a start skips the backlog.
-    map_pass_on: bool,
     /// The last handover whose boundary the worker applied ([`Update::Resume`]).
     resumed: u64,
     /// Tests: runs after the route check and before the echo push, where a preemption can land.
@@ -718,8 +724,6 @@ impl Pump {
             }
             keep
         });
-        // Inputs the worker held before this step's attachments (they are appended after these).
-        let known = self.inputs.len();
         for _ in 0..sources::PORTS {
             match self.receive.try_recv() {
                 Ok(Update::Buttons(buttons)) => {
@@ -771,6 +775,8 @@ impl Pump {
                         input.mon.captured = [0; 32];
                     }
                     self.resumed = self.resumed.max(token);
+                    #[cfg(test)]
+                    self.shared.resumed.fetch_max(token, Ordering::AcqRel);
                 }
                 Ok(Update::Routes { id, routes, applied }) => {
                     if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) {
@@ -891,10 +897,10 @@ impl Pump {
         // listens to still maps, and each message is seen once (`map_next`). A port with an
         // admitting route is matched where it is popped instead, so nothing arriving between this
         // pass and the pop is missed and a consumed message never reaches the route.
-        // The first step after the matcher turns on skips what was already pending on the ports
-        // the worker held while it was off; a port attached in this same step opened after Main
-        // turned the matcher on (an armed learn opens every port), so its backlog is all news and
-        // its first message may be the learn's candidate (#160).
+        // A mapping sees only what arrived at or after its input's cutoff when it was first queued
+        // (`midi_map::Entry::from_seq`, #760), on every input, however the matcher was on or off
+        // before: a backlog from before a mapping existed never drives it, and a message after it
+        // always can. Learn candidates come from the transport scan above (#160).
         // An audio device handover (#760) suspends matching, learning and capture until its
         // boundary; what the worker published before it took the suspension up is in the ring now.
         let suspend = self.shared.suspend.load(Ordering::Acquire);
@@ -949,21 +955,12 @@ impl Pump {
                 || self.maps.as_deref().is_some_and(|maps| !maps.is_empty())
                 || self.inputs.iter().any(|i| !i.buttons.is_empty() || i.mon.capture.pending() || i.mon.captured.iter().any(|bits| *bits != 0)));
         if pass_on {
-            let first = !self.map_pass_on;
-            for (index, input) in self.inputs.iter_mut().enumerate() {
+            for input in &mut self.inputs {
                 if input.routes.iter().any(|(permit, _)| permit.admits()) {
                     continue;
                 }
-                if first && index < known {
-                    let Input { consumer, mon, .. } = input;
-                    consumer.for_each_pending(|raw| mon.map_next = mon.map_next.max(raw.seq.saturating_add(1)));
-                }
                 map_pass(input, self.maps.as_deref(), &mut self.map_out, &self.shared);
             }
-        }
-        // A suspension is not the matcher turning off: its boundary decides what is skipped.
-        if !suspended {
-            self.map_pass_on = pass_on;
         }
         // A fixed amount of work even under continuous MIDI traffic. Round-robin
         // across ports prevents one input backlog from starving another release.
@@ -1048,10 +1045,10 @@ impl Pump {
                     } else if transport::mapped(&input.buttons, &raw) {
                         consumed = true;
                     } else {
-                        consumed = match_one(input.id, channel, message, self.maps.as_deref(), &mut self.map_out, &self.shared);
+                        consumed = match_one(input.id, channel, message, raw.seq, self.maps.as_deref(), &mut self.map_out, &self.shared);
                     }
                 } else if let Some(maps) = self.maps.as_deref() {
-                    consumed = transport::mapped(&input.buttons, &raw) || midi_map::consumes(maps, input.id, channel, message);
+                    consumed = transport::mapped(&input.buttons, &raw) || midi_map::consumes(maps, input.id, channel, message, raw.seq);
                 } else {
                     consumed = transport::mapped(&input.buttons, &raw);
                 }
@@ -1186,14 +1183,14 @@ fn map_pass(input: &mut Input, maps: Option<&Snapshot>, out: &mut rtrb::Producer
         mon.map_next = raw.seq.saturating_add(1);
         let Some((channel, message)) = decode(*raw) else { return };
         if mon.capture.consume(raw.seq).is_none() && !transport::mapped(buttons, raw) {
-            match_one(id, channel, message, maps, out, shared);
+            match_one(id, channel, message, raw.seq, maps, out, shared);
         }
     });
 }
 
-/// One message for the MIDI Learn matcher: the armed learn takes it as the candidate, otherwise it
-/// is matched against the snapshot. Returns whether a mapping or candidate consumes it.
-fn match_one(id: u64, channel: u8, message: Message, maps: Option<&Snapshot>, out: &mut rtrb::Producer<MapEvent>, shared: &Shared) -> bool {
+/// One message (input sequence number `seq`) against the snapshot: only mappings that existed when
+/// it arrived see it. Returns whether a mapping consumes it.
+fn match_one(id: u64, channel: u8, message: Message, seq: u64, maps: Option<&Snapshot>, out: &mut rtrb::Producer<MapEvent>, shared: &Shared) -> bool {
     let mut push = |event: MapEvent| {
         let sent = out.push(event).is_ok();
         if sent {
@@ -1203,7 +1200,7 @@ fn match_one(id: u64, channel: u8, message: Message, maps: Option<&Snapshot>, ou
         }
         sent
     };
-    maps.is_some_and(|maps| midi_map::handle(maps, id, channel, message, &mut push))
+    maps.is_some_and(|maps| midi_map::handle(maps, id, channel, message, seq, &mut push))
 }
 
 /// Pairs note-offs with consumed note-ons: a note-on is consumed when `mapped`, and its note-off is

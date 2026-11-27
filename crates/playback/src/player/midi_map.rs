@@ -169,12 +169,18 @@ pub struct Entry {
     button: bool,
     pass_through: bool,
     cell: Arc<Cell>,
+    /// The first input sequence number this mapping matches: the input's cutoff when the mapping
+    /// was first queued for it (#760). A message that arrived before the mapping existed never
+    /// drives or consumes through it.
+    from: u64,
 }
 
 impl Entry {
     /// `port` is the ingress input id the spec's port name resolved to, or `None` while it is closed.
+    /// It matches from the input's first message on ([`Entry::from_seq`] sets a later start).
     pub fn new(spec: &MapSpec, port: Option<u64>, cell: Arc<Cell>) -> Self {
         Entry {
+            from: 0,
             port: port.unwrap_or(NO_PORT),
             channel: spec.channel.unwrap_or(ANY),
             kind: spec.kind,
@@ -187,6 +193,12 @@ impl Entry {
             pass_through: spec.pass_through,
             cell,
         }
+    }
+
+    /// This entry, matching only messages at or after input sequence number `from`.
+    #[must_use]
+    pub fn from_seq(self, from: u64) -> Self {
+        Entry { from, ..self }
     }
 }
 
@@ -242,12 +254,14 @@ pub fn candidate(port: u64, channel: u8, message: Message) -> Option<MapEvent> {
 }
 
 /// Whether a CC or note-on is mapped by an entry that does not pass it through, so it must not
-/// reach the track's routes. Pure; note-offs are paired with their note-on by the caller.
-pub fn consumes(snap: &Snapshot, port: u64, channel: u8, message: Message) -> bool {
+/// reach the track's routes. Pure; note-offs are paired with their note-on by the caller. `seq`
+/// is the message's input sequence number: a mapping made after it arrived does not take it.
+pub fn consumes(snap: &Snapshot, port: u64, channel: u8, message: Message, seq: u64) -> bool {
     let Some(msg) = msg_of(message) else { return false };
     snap.entries.iter().any(|e| {
         !e.pass_through
             && e.port == port
+            && seq >= e.from
             && (e.channel == ANY || e.channel == channel)
             && match (msg, e.kind) {
                 (Msg::Cc(n, _), SourceKind::Cc) | (Msg::NoteOn(n, _), SourceKind::Note) | (Msg::NoteOff(n), SourceKind::Note) => n == e.number,
@@ -259,12 +273,13 @@ pub fn consumes(snap: &Snapshot, port: u64, channel: u8, message: Message) -> bo
 /// Match one message against the snapshot and publish what it does: a continuous control's value
 /// goes to its cell, a button press to `push` (which returns whether it was queued). Returns
 /// whether a mapping without pass-through matched, i.e. the message is consumed. No allocation,
-/// no lock.
-pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, push: &mut impl FnMut(MapEvent) -> bool) -> bool {
+/// no lock. `seq` is the message's input sequence number: only mappings that existed when it
+/// arrived ([`Entry::from_seq`]) see it.
+pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, seq: u64, push: &mut impl FnMut(MapEvent) -> bool) -> bool {
     let Some(msg) = msg_of(message) else { return false };
     let mut consumed = false;
     for (index, e) in snap.entries.iter().enumerate() {
-        if e.port != port || (e.channel != ANY && e.channel != channel) {
+        if e.port != port || seq < e.from || (e.channel != ANY && e.channel != channel) {
             continue;
         }
         let (number, value) = match (msg, e.kind) {
@@ -401,6 +416,13 @@ pub(super) struct Wanted {
     /// The worker holds a snapshot this side no longer stands for ([`Self::renew`]): the next
     /// rebuild hands it one even when the list is empty.
     force: bool,
+    /// Per wanted mapping: the input it was first queued for and that input's cutoff then, the
+    /// first message it matches (#760). Kept while the mapping and its input stay; a new or
+    /// changed mapping, or one whose input changed, takes the cutoff of the snapshot it first
+    /// appears in.
+    from: Vec<Option<(u64, u64)>>,
+    /// The mappings whose start the last rebuild set ([`Self::unsent`] undoes them).
+    fresh: Vec<usize>,
 }
 
 static GENERATIONS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
@@ -423,6 +445,8 @@ impl Wanted {
         self.cells = self.cells.iter().map(|cell| Arc::new(Cell::new(f32::from_bits(cell.main.load(Ordering::Relaxed))))).collect();
         self.force = self.sent.is_some();
         self.sent = None;
+        // A replacement's mappings start at its boundary.
+        self.from.iter_mut().for_each(|from| *from = None);
     }
 
     /// Total publishes of every mapping so far; a change since the last look means the controller
@@ -447,6 +471,9 @@ impl Wanted {
             return;
         }
         self.cells = specs.iter().map(|_| Arc::new(Cell::new(0.0))).collect();
+        // An unchanged mapping keeps where it starts matching; each old one is carried once.
+        let mut old: Vec<(MapSpec, Option<(u64, u64)>)> = std::mem::take(&mut self.specs).into_iter().zip(std::mem::take(&mut self.from)).collect();
+        self.from = specs.iter().map(|spec| old.iter().position(|(was, _)| was == spec).and_then(|i| old.swap_remove(i).1)).collect();
         self.specs = specs;
         self.epoch = self.epoch.wrapping_add(1);
     }
@@ -496,7 +523,8 @@ impl Wanted {
 
     /// The snapshot to hand the worker, when what it holds is out of date: the list changed, or a
     /// port opened or closed (`ids` are the ingress input ids, `None` for a closed port).
-    pub fn rebuild(&mut self, ids: Vec<Option<u64>>) -> Option<Arc<Snapshot>> {
+    /// `cutoff` gives an open input's cutoff now: a mapping new to its input matches from there.
+    pub fn rebuild(&mut self, ids: Vec<Option<u64>>, cutoff: impl Fn(u64) -> u64) -> Option<Arc<Snapshot>> {
         self.retired.retain(|old| Arc::strong_count(old) > 1);
         if self.sent.is_none() && self.specs.is_empty() && !self.force {
             return None;
@@ -505,7 +533,26 @@ impl Wanted {
         if self.sent.as_ref().is_some_and(|(epoch, sent)| *epoch == self.epoch && *sent == ids) {
             return None;
         }
-        let entries = self.specs.iter().zip(&ids).zip(&self.cells).map(|((spec, id), cell)| Entry::new(spec, *id, Arc::clone(cell))).collect();
+        self.from.resize(self.specs.len(), None);
+        self.fresh.clear();
+        for (i, (from, id)) in self.from.iter_mut().zip(&ids).enumerate() {
+            match (*id, *from) {
+                (Some(id), Some((was, _))) if was == id => {}
+                (Some(id), _) => {
+                    *from = Some((id, cutoff(id)));
+                    self.fresh.push(i);
+                }
+                (None, _) => *from = None,
+            }
+        }
+        let entries = self
+            .specs
+            .iter()
+            .zip(&ids)
+            .zip(&self.cells)
+            .zip(&self.from)
+            .map(|(((spec, id), cell), from)| Entry::new(spec, *id, Arc::clone(cell)).from_seq(from.map_or(0, |(_, seq)| seq)))
+            .collect();
         let snapshot = Arc::new(Snapshot::new(self.epoch, entries));
         if let Some(old) = self.current.replace(Arc::clone(&snapshot)) {
             self.retired.push(old);
@@ -514,9 +561,15 @@ impl Wanted {
         Some(snapshot)
     }
 
-    /// The worker did not take the snapshot: build it again next time.
+    /// The worker did not take the snapshot: build it again next time. The mappings it introduced
+    /// were not queued, so they take their cutoff when they are.
     pub fn unsent(&mut self) {
         self.sent = None;
+        for i in self.fresh.drain(..) {
+            if let Some(from) = self.from.get_mut(i) {
+                *from = None;
+            }
+        }
     }
 }
 
@@ -534,7 +587,7 @@ mod tests {
     }
     fn cc(snap: &Snapshot, value: u8) -> Vec<MapEvent> {
         let mut out = Vec::new();
-        handle(snap, 1, 0, Message::Control { cc: 7, value }, &mut |e| {
+        handle(snap, 1, 0, Message::Control { cc: 7, value }, 0, &mut |e| {
             out.push(e);
             true
         });
@@ -684,11 +737,11 @@ mod tests {
             out.push(e);
             true
         };
-        handle(&s, 1, 0, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE }, &mut push);
-        handle(&s, 1, 0, Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE }, &mut push);
-        handle(&s, 1, 0, Message::NoteOn { key: 61, velocity: 100, id: NoteId::NONE }, &mut push);
-        handle(&s, 2, 0, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE }, &mut push);
-        handle(&s, 1, 5, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE }, &mut push);
+        handle(&s, 1, 0, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE }, 0, &mut push);
+        handle(&s, 1, 0, Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE }, 0, &mut push);
+        handle(&s, 1, 0, Message::NoteOn { key: 61, velocity: 100, id: NoteId::NONE }, 0, &mut push);
+        handle(&s, 2, 0, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE }, 0, &mut push);
+        handle(&s, 1, 5, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE }, 0, &mut push);
         assert_eq!(out, vec![MapEvent::Press { epoch: 3, index: 0, set: None }], "other key, port and channel are ignored");
     }
 
@@ -734,19 +787,19 @@ mod tests {
     fn a_mapped_message_is_consumed_unless_the_mapping_passes_it_through() {
         let msg = Message::Control { cc: 7, value: 9 };
         let (s, _) = snap(&spec(SourceKind::Cc, 7, MapMode::Jump, false), 0.0);
-        assert!(consumes(&s, 1, 0, msg));
-        assert!(handle(&s, 1, 0, msg, &mut |_| true));
-        assert!(!consumes(&s, 1, 0, Message::Control { cc: 8, value: 9 }), "another CC is not ours");
-        assert!(!consumes(&s, 2, 0, msg) && !consumes(&s, 1, 3, msg), "another port or channel");
+        assert!(consumes(&s, 1, 0, msg, 0));
+        assert!(handle(&s, 1, 0, msg, 0, &mut |_| true));
+        assert!(!consumes(&s, 1, 0, Message::Control { cc: 8, value: 9 }, 0), "another CC is not ours");
+        assert!(!consumes(&s, 2, 0, msg, 0) && !consumes(&s, 1, 3, msg, 0), "another port or channel");
         let mut sp = spec(SourceKind::Cc, 7, MapMode::Jump, false);
         sp.pass_through = true;
         let (s, cell) = snap(&sp, 0.0);
-        assert!(!consumes(&s, 1, 0, msg));
-        assert!(!handle(&s, 1, 0, msg, &mut |_| true), "pass-through still drives the control");
+        assert!(!consumes(&s, 1, 0, msg, 0));
+        assert!(!handle(&s, 1, 0, msg, 0, &mut |_| true), "pass-through still drives the control");
         assert!(cell.take().is_some());
         // An engaged-or-not pickup mapping consumes too: the knob is the mapping's, not the track's.
         let (s, _) = snap(&spec(SourceKind::Cc, 7, MapMode::Pickup, false), 0.9);
-        assert!(handle(&s, 1, 0, msg, &mut |_| true));
+        assert!(handle(&s, 1, 0, msg, 0, &mut |_| true));
     }
 
     #[test]
