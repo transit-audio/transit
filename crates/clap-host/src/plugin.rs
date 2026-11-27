@@ -426,8 +426,8 @@ pub struct ClapPlugin {
     /// Every admitted note and MIDI event under ADR 0059: the ownership ledger, the ordinary
     /// allowance and the safety slots, kept through skipped calls.
     delivery: transit_dsp::plugins::instrument_queue::delivery::Delivery,
-    /// MIDI-dialect note-offs absorbed while another entry held their key.
-    deferred_midi_offs: u64,
+    /// Native events translation could not place (an invariant: always zero).
+    untranslated: u64,
     notes: NoteMode,
     /// The note port takes raw MIDI (controllers, pitch bend, program changes).
     midi_in: bool,
@@ -517,8 +517,8 @@ impl ClapPlugin {
             ids,
             values,
             queue: Vec::with_capacity(EVENT_CAP + NATIVE_EVENTS + info.params.len()),
-            delivery: transit_dsp::plugins::instrument_queue::delivery::Delivery::new(false),
-            deferred_midi_offs: 0,
+            delivery: transit_dsp::plugins::instrument_queue::delivery::Delivery::with_expansion(false, delivery::expansion),
+            untranslated: 0,
             notes: NoteMode::None,
             midi_in: false,
             channels: 2,

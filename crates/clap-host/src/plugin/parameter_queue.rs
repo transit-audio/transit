@@ -10,20 +10,18 @@ fn block_start(e: &Event) -> bool {
 /// Caller coalesces time-zero values by valid parameter id before admission, so there can be
 /// at most the parameter count. Timed points cannot consume that reserved storage.
 pub(super) fn push(queue: &mut Vec<Event>, event: Event) -> bool {
-    if !has_room(queue, &event) {
-        return false;
-    }
-    insert(queue, event);
-    true
+    has_room(queue, &event) && insert(queue, event)
 }
 
 /// Inserts `event` after every queued event at or before its time (no allocation within the
-/// capacity).
-pub(super) fn insert(queue: &mut Vec<Event>, event: Event) {
-    if queue.len() < queue.capacity() {
-        let pos = queue.iter().rposition(|q| q.time() <= event.time()).map_or(0, |i| i + 1);
-        queue.insert(pos, event);
+/// capacity); false when the queue is full.
+pub(super) fn insert(queue: &mut Vec<Event>, event: Event) -> bool {
+    if queue.len() >= queue.capacity() {
+        return false;
     }
+    let pos = queue.iter().rposition(|q| q.time() <= event.time()).map_or(0, |i| i + 1);
+    queue.insert(pos, event);
+    true
 }
 
 pub(super) fn has_room(queue: &Vec<Event>, event: &Event) -> bool {

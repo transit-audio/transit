@@ -191,26 +191,23 @@ impl Ledger {
             .map_or(PluginEvent::NO_ID, |(_, e)| e.native)
     }
 
-    /// Notes of `key` on `channel` the plug-in holds (start handed, release not yet handed), other
-    /// than entry `except`.
-    #[must_use]
-    pub fn holders(&self, channel: u8, key: u8, except: u16) -> usize {
-        self.iter()
-            .filter(|(i, e)| {
-                *i != except
-                    && e.channel == channel & 0x0F
-                    && e.start == Start::Handed
-                    && e.release != Release::Handed
-                    && matches!(e.owner, Owner::Note { key: k, .. } if k == key)
-            })
-            .count()
+    /// Test seam: the next native id the counter tries (to reach its wrap in a test).
+    #[cfg(test)]
+    pub(super) fn seed_native(&mut self, next: i32) {
+        self.native = next;
     }
 
     fn reserve(&mut self, channel: u8, owner: Owner) -> Option<u16> {
         let i = self.free.pop()?;
         self.seq = self.seq.wrapping_add(1);
-        let native = self.native;
-        self.native = if self.native == i32::MAX { 0 } else { self.native + 1 };
+        // The next id no outstanding entry holds (after the counter wraps, a long-held entry may
+        // still have the next one): at most `ENTRIES` ids are skipped.
+        let next = |n: i32| if n == i32::MAX { 0 } else { n + 1 };
+        let mut native = self.native;
+        while self.entries.iter().flatten().any(|e| e.native == native) {
+            native = next(native);
+        }
+        self.native = next(native);
         let entry = Entry { channel, owner, native, seq: self.seq, start: Start::Queued, release: Release::None };
         if let Some(slot) = self.entries.get_mut(usize::from(i)) {
             *slot = Some(entry);

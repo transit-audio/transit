@@ -622,3 +622,41 @@ fn the_ledger_matches_the_oldest_anonymous_entry() {
     assert_eq!(l.admit(&off(0, 60, -1)), super::ledger::Verdict::Release(b));
     assert_eq!(l.admit(&off(0, 60, -1)), super::ledger::Verdict::Nothing);
 }
+
+#[test]
+fn native_ids_skip_an_outstanding_entry_after_the_counter_wraps() {
+    let mut l = Ledger::new();
+    let start = |l: &mut Ledger, key| match l.admit(&on(0, key, -1)) {
+        super::ledger::Verdict::Start(i) => l.get(i).unwrap().native,
+        v => panic!("{v:?}"),
+    };
+    l.seed_native(0);
+    assert_eq!(start(&mut l, 60), 0, "a long-held note keeps id 0");
+    l.seed_native(i32::MAX - 1);
+    assert_eq!(start(&mut l, 61), i32::MAX - 1);
+    assert_eq!(start(&mut l, 62), i32::MAX);
+    assert_eq!(start(&mut l, 63), 1, "the counter wraps past the outstanding id 0");
+    assert_eq!(start(&mut l, 64), 2);
+}
+
+#[test]
+fn an_ordinary_event_reserves_its_whole_native_expansion() {
+    let two = |m: &Message| if matches!(m, Message::Control14 { .. }) { 2 } else { 1 };
+    let c14 = PluginEvent { channel: 0, note_id: PluginEvent::NO_ID, message: Message::Control14 { msb: 1, value: 9000 } };
+    let mut q = Delivery::with_expansion(false, two);
+    for _ in 0..ORDINARY / 2 {
+        assert!(q.admit(0, &c14));
+    }
+    assert_eq!(q.ordinary(), ORDINARY, "each takes two native slots");
+    assert!(!q.admit(0, &c14), "refused whole at a full allowance");
+    assert!(!q.admit(0, &cc(0, 1, 1)));
+    let mut q = Delivery::with_expansion(false, two);
+    for _ in 0..ORDINARY - 1 {
+        assert!(q.admit(0, &cc(0, 1, 1)));
+    }
+    assert!(!q.admit(0, &c14), "one slot left: neither half is admitted");
+    assert!(q.admit(0, &cc(0, 1, 1)), "the last slot takes a one-event controller");
+    let mut fake = Fake::default();
+    block(&mut q, &mut fake, 0, 4);
+    assert_eq!(q.ordinary(), 0, "delivery frees every slot");
+}

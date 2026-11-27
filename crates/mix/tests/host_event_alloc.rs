@@ -188,7 +188,7 @@ impl Plugin for OffObserver {
 }
 
 #[test]
-fn midi_dialect_source_revocation_keeps_the_other_source_sounding_without_allocating() {
+fn midi_dialect_source_revocation_sends_one_off_per_source_without_allocating() {
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -232,10 +232,13 @@ fn midi_dialect_source_revocation_keeps_the_other_source_sounding_without_alloca
         assert_eq!(offs.load(Ordering::Relaxed), 0);
         mix.revoke_source(1, 1);
         mix.render_active(2 * BLOCK as i64, BLOCK, &mut io);
-        assert_eq!(offs.load(Ordering::Relaxed), 0, "unplugging one source must not emit an off");
+        // ADR 0059, Decision 1 (ruled 2026-11-27): one note-off for each note-on at a MIDI-byte
+        // port, so a plug-in that stacks voices ends both; the other source's note may end with it
+        // at a plug-in that ends every voice of a key on one off.
+        assert_eq!(offs.load(Ordering::Relaxed), 1, "unplugging one source emits its own off");
         mix.revoke_source(2, 1);
         mix.render_active(3 * BLOCK as i64, BLOCK, &mut io);
-        assert_eq!(offs.load(Ordering::Relaxed), 1, "the final unplug must emit exactly one off");
+        assert_eq!(offs.load(Ordering::Relaxed), 2, "the final unplug emits the second off");
         assert!(!mix.has_pending_events());
     });
     assert_eq!(stats, AllocStats::default());

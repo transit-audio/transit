@@ -4,28 +4,17 @@
 use super::{ClapPlugin, NoteMode, parameter_queue};
 use crate::ffi::Event;
 use transit_dsp::event::{Message, NoteId, PluginEvent};
-use transit_dsp::plugins::instrument_queue::delivery::{Class, Refusals};
+use transit_dsp::plugins::instrument_queue::delivery::Refusals;
 
 impl ClapPlugin {
     /// Item `j` of the current batch in the port's dialect, inserted after the parameter events at
-    /// its time: CLAP note events carry the entry's native id. A MIDI-dialect port gets the bytes;
-    /// as before ADR 0059, a note-off whose key another entry still holds at the plug-in is absorbed
-    /// (counted), since MIDI bytes cannot say which voice it ends.
+    /// its time: CLAP note events carry the entry's native id; a MIDI-dialect port gets the bytes,
+    /// one note-off for each note-on (ADR 0059: the count is kept; MIDI bytes cannot say which
+    /// voice of a key an off ends). Translation changes no ownership: the call's outcome does
+    /// (`Delivery::finish`). Every buffer is sized for all admission permits, so nothing is dropped
+    /// here; a drop would be counted in `untranslated`.
     pub(super) fn translate(&mut self, j: usize) {
         let Some(it) = self.delivery.items().get(j).copied() else { return };
-        let off = matches!(it.event.message, Message::NoteOff { .. } | Message::NoteOn { velocity: 0, .. });
-        let absorb = match (it.class, it.event.message, self.notes) {
-            (Class::Release(i), Message::NoteOff { key, .. } | Message::NoteOn { key, .. }, NoteMode::Midi) if off => {
-                self.delivery.ledger().holders(it.event.channel, key, i) > 0
-            }
-            _ => false,
-        };
-        self.delivery.hand(j);
-        if absorb {
-            self.deferred_midi_offs = self.deferred_midi_offs.saturating_add(1);
-            return;
-        }
-        let it = &it;
         let ch = it.event.channel & 0x0F;
         let time = it.offset;
         let unit = |v: u8| f64::from(v.min(127)) / 127.0;
@@ -33,23 +22,33 @@ impl ClapPlugin {
             Message::NoteOn { key, velocity: 0, id } => Message::NoteOff { key, velocity: 0, id },
             m => m,
         };
+        let mut put = |queue: &mut Vec<Event>, e: Event| {
+            if !parameter_queue::insert(queue, e) {
+                self.untranslated = self.untranslated.saturating_add(1);
+            }
+        };
         match (message, self.notes) {
             (Message::NoteOn { key, velocity, .. }, NoteMode::Clap) => {
-                parameter_queue::insert(&mut self.queue, Event::NoteOn { time, key, velocity: unit(velocity), channel: ch, id: it.native });
+                put(&mut self.queue, Event::NoteOn { time, key, velocity: unit(velocity), channel: ch, id: it.native });
             }
             (Message::NoteOff { key, velocity, .. }, NoteMode::Clap) => {
-                parameter_queue::insert(&mut self.queue, Event::NoteOff { time, key, velocity: unit(velocity), channel: ch, id: it.native });
+                put(&mut self.queue, Event::NoteOff { time, key, velocity: unit(velocity), channel: ch, id: it.native });
             }
             (Message::PolyPressure { key, value, .. }, NoteMode::Clap) => {
-                parameter_queue::insert(&mut self.queue, Event::Pressure { time, key, value: unit(value), channel: ch, id: it.native });
+                put(&mut self.queue, Event::Pressure { time, key, value: unit(value), channel: ch, id: it.native });
             }
             (m, _) if self.midi_in => {
                 for data in m.midi1(ch).into_iter().flatten() {
-                    parameter_queue::insert(&mut self.queue, Event::Midi { time, data });
+                    put(&mut self.queue, Event::Midi { time, data });
                 }
             }
             _ => {}
         }
+    }
+
+    /// Native events translation could not place so far (an invariant: always zero).
+    pub fn untranslated(&self) -> u64 {
+        self.untranslated
     }
 
     /// Refusals at admission so far (ADR 0059: starts at a full ledger, ordinary events at a full
@@ -76,6 +75,12 @@ pub(super) fn from_midi1(msg: [u8; 3]) -> Option<PluginEvent> {
         _ => return None,
     };
     Some(PluginEvent { channel: status & 0x0F, note_id: PluginEvent::NO_ID, message })
+}
+
+/// Native events an ordinary host event becomes at a CLAP port: a 14-bit controller is two MIDI
+/// messages (MSB, then LSB); everything else one.
+pub(super) fn expansion(m: &Message) -> u8 {
+    if matches!(m, Message::Control14 { .. }) { 2 } else { 1 }
 }
 
 #[cfg(test)]

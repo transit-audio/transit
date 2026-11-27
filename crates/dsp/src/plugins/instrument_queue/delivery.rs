@@ -21,7 +21,8 @@
 use super::ledger::{ENTRIES, Ledger, Owner, Settle, Verdict};
 use crate::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_RESET_CONTROLLERS, Message, PluginEvent, is_pedal};
 
-/// Events that own nothing a queue admits (today's 1,024-event queues, kept).
+/// Native-event slots for events that own nothing (today's 1,024-event queues, kept): an ordinary
+/// host event takes as many as it becomes in the format.
 pub const ORDINARY: usize = 1024;
 /// One reserved slot per channel and safety controller (CC 120, 121, 123).
 pub const SAFETY_SLOTS: usize = 16 * 3;
@@ -53,6 +54,8 @@ pub struct Item {
     /// The entry's native id, or [`PluginEvent::NO_ID`] for events that own nothing.
     pub native: i32,
     pub class: Class,
+    /// Native events this host event becomes (an ordinary event reserves them all at admission).
+    pub slots: u8,
 }
 
 impl Item {
@@ -98,6 +101,8 @@ pub struct Delivery {
     /// Items of the current sub-call (a prefix of `items`).
     batch: usize,
     separate: bool,
+    /// Native events an ordinary host event becomes in this format (a CLAP `Control14`: two).
+    expand: fn(&Message) -> u8,
     pub refusals: Refusals,
 }
 
@@ -113,8 +118,17 @@ const fn slot_of(channel: u8, cc: u8) -> Option<usize> {
 
 impl Delivery {
     /// An empty queue, its storage allocated here (control thread). `separate`: VST3's rule of 3b.
+    /// Every host event becomes one native event.
     #[must_use]
     pub fn new(separate: bool) -> Self {
+        Self::with_expansion(separate, |_| 1)
+    }
+
+    /// [`Delivery::new`] for a format where an ordinary host event can become several native
+    /// events (`expand`, at least one): the ordinary allowance counts native slots, and an ordinary
+    /// event reserves its whole expansion at admission or is refused whole.
+    #[must_use]
+    pub fn with_expansion(separate: bool, expand: fn(&Message) -> u8) -> Self {
         Self {
             ledger: Ledger::new(),
             items: Vec::with_capacity(NATIVE_EVENTS),
@@ -123,6 +137,7 @@ impl Delivery {
             seq: 0,
             batch: 0,
             separate,
+            expand,
             refusals: Refusals::default(),
         }
     }
@@ -146,11 +161,15 @@ impl Delivery {
     }
 
     fn insert(items: &mut Vec<Item>, seq: &mut u64, offset: u32, event: PluginEvent, native: i32, class: Class) -> bool {
+        Self::insert_slots(items, seq, offset, event, native, class, 1)
+    }
+
+    fn insert_slots(items: &mut Vec<Item>, seq: &mut u64, offset: u32, event: PluginEvent, native: i32, class: Class, slots: u8) -> bool {
         if items.len() >= items.capacity() {
             return false;
         }
         *seq = seq.wrapping_add(1);
-        let item = Item { offset, seq: *seq, event, native, class };
+        let item = Item { offset, seq: *seq, event, native, class, slots };
         let pos = items.iter().rposition(|q| q.offset <= offset).map_or(0, |i| i + 1);
         items.insert(pos, item);
         true
@@ -190,8 +209,11 @@ impl Delivery {
                     Message::PolyPressure { key, .. } => self.ledger.native_of(ev.channel, key, ev.note_id),
                     _ => PluginEvent::NO_ID,
                 };
-                if self.ordinary < ORDINARY && Self::insert(&mut self.items, &mut self.seq, offset, *ev, native, Class::Ordinary) {
-                    self.ordinary += 1;
+                let n = (self.expand)(&ev.message).max(1);
+                if self.ordinary + usize::from(n) <= ORDINARY
+                    && Self::insert_slots(&mut self.items, &mut self.seq, offset, *ev, native, Class::Ordinary, n)
+                {
+                    self.ordinary += usize::from(n);
                     true
                 } else {
                     self.refusals.ordinary = self.refusals.ordinary.saturating_add(1);
@@ -222,8 +244,11 @@ impl Delivery {
                 Self::insert(&mut self.items, &mut self.seq, offset, *ev, PluginEvent::NO_ID, Class::Slot(s as u8));
             }
             _ => {
-                if self.ordinary < ORDINARY && Self::insert(&mut self.items, &mut self.seq, offset, *ev, PluginEvent::NO_ID, Class::Ordinary) {
-                    self.ordinary += 1;
+                let n = (self.expand)(&ev.message).max(1);
+                if self.ordinary + usize::from(n) <= ORDINARY
+                    && Self::insert_slots(&mut self.items, &mut self.seq, offset, *ev, PluginEvent::NO_ID, Class::Ordinary, n)
+                {
+                    self.ordinary += usize::from(n);
                 } else {
                     self.refusals.forwarding = self.refusals.forwarding.saturating_add(1);
                 }
@@ -283,17 +308,6 @@ impl Delivery {
         self.items.get(..k).unwrap_or(&[])
     }
 
-    /// Marks item `j` of the current batch handed now, before the call returns (what `finish`
-    /// does for the whole batch), so a translation can ask the ledger what the plug-in holds at
-    /// that item.
-    pub fn hand(&mut self, j: usize) {
-        match self.items.get(j).map(|it| it.class) {
-            Some(Class::Start(i)) => self.ledger.start_handed(i),
-            Some(Class::Release(i)) => self.ledger.release_handed(i),
-            _ => {}
-        }
-    }
-
     /// The sub-call that handed [`Delivery::batch`] returned: `ok` frees every entry whose release
     /// it delivered; a failed call is a processing error (ADR 0059, Decision 2): every entry whose
     /// start was handed, in this call or before, owes its release (queued at offset 0, including
@@ -310,7 +324,7 @@ impl Delivery {
                         *used = false;
                     }
                 }
-                Class::Ordinary => self.ordinary = self.ordinary.saturating_sub(1),
+                Class::Ordinary => self.ordinary = self.ordinary.saturating_sub(usize::from(it.slots)),
             }
         }
         self.items.drain(..k);
@@ -357,7 +371,7 @@ impl Delivery {
         let (ordinary, slots) = (&mut self.ordinary, &mut self.slots);
         self.items.retain(|it| match it.class {
             Class::Ordinary if !it.event.message.survives_reset() => {
-                *ordinary = ordinary.saturating_sub(1);
+                *ordinary = ordinary.saturating_sub(usize::from(it.slots));
                 false
             }
             Class::Slot(s) if !it.event.message.survives_reset() => {
