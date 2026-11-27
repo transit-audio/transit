@@ -35,6 +35,11 @@ struct Registry {
     /// One leaked `PluginInfo` per plugin type that was actually instantiated (bounded by the
     /// number of distinct installed plugins).
     infos: HashMap<String, &'static PluginInfo>,
+    /// The file entries of the last published listing, with the probe outcomes so far.
+    files: Vec<scan_cache::Entry<Vst3Descriptor>>,
+    /// Bumped at every publication of a listing: a probe pass started on an older listing stops
+    /// and never writes into a newer one.
+    generation: u64,
     /// Ids that failed to instantiate (not retried every UI frame).
     failed: HashMap<String, Vst3Error>,
 }
@@ -51,8 +56,18 @@ fn lock() -> MutexGuard<'static, Registry> {
 /// Held for a whole scan, so that scans run one at a time. The registry itself is not locked
 /// while plugin files load, so that the UI can ask for [`cached`] and plugin infos meanwhile.
 fn scan_lock() -> MutexGuard<'static, ()> {
-    static S: Mutex<()> = Mutex::new(());
-    S.lock().unwrap_or_else(PoisonError::into_inner)
+    SCAN_LOCK.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+static SCAN_LOCK: Mutex<()> = Mutex::new(());
+
+#[cfg(feature = "test-hooks")]
+fn scan_lock_try() -> bool {
+    match SCAN_LOCK.try_lock() {
+        Ok(_) => true,
+        Err(std::sync::TryLockError::Poisoned(_)) => true,
+        Err(std::sync::TryLockError::WouldBlock) => false,
+    }
 }
 
 /// The background scan thread: whether one runs, and whether an explicit full rescan was asked for
@@ -62,9 +77,21 @@ struct Background {
     running: bool,
     /// At most one: a full rescan waits for the running scan, repeated requests do not stack.
     pending: bool,
+    /// A probe pass is wanted (a listing was published since the last pass started).
+    probe: bool,
+    /// The thread is probing (ADR 0064, decision 2.4): background work after the listing, which
+    /// [`scanning`] does not count.
+    probing: bool,
 }
 
-static BACKGROUND: Mutex<Background> = Mutex::new(Background { running: false, pending: false });
+static BACKGROUND: Mutex<Background> = Mutex::new(Background { running: false, pending: false, probe: false, probing: false });
+
+/// Held while the cache file is written, so that a probe pass and a listing never interleave
+/// their writes.
+fn cache_write_lock() -> MutexGuard<'static, ()> {
+    static W: Mutex<()> = Mutex::new(());
+    W.lock().unwrap_or_else(PoisonError::into_inner)
+}
 
 /// Wakes [`wait_for_scans`] when the scan thread ends.
 static BACKGROUND_IDLE: std::sync::Condvar = std::sync::Condvar::new();
@@ -134,35 +161,79 @@ pub fn probe_problems() -> Vec<ProbeProblem> {
     probe::problems(lock().scanned.iter().flatten(), |d| (d.path.clone(), d.id.clone(), d.name.clone()))
 }
 
-/// Writes a probe outcome into the published list as it arrives.
-fn publish_probe(path: &Path, d: &Vst3Descriptor) {
+/// Writes a probe outcome into the published list and its file entry as it arrives, unless a newer
+/// listing was published meanwhile (its classes are probed by the pass that follows it).
+fn publish_probe(generation: u64, path: &Path, d: &Vst3Descriptor) {
     let mut r = lock();
+    if r.generation != generation {
+        return;
+    }
     if let Some(found) = r.scanned.iter_mut().flatten().find(|x| x.id == d.id && x.path == path) {
+        found.probe = d.probe.clone();
+    }
+    if let Some(found) = r.files.iter_mut().filter(|f| f.path == path).flat_map(|f| f.plugins.iter_mut()).find(|x| x.id == d.id) {
         found.probe = d.probe.clone();
     }
 }
 
-/// Phase two of a scan (ADR 0064, decision 2.4), after the listing is published: each listed class
-/// that needs it is probed in a child process of its own (`program`), and each outcome is
-/// published as it arrives. A skip stops it; the classes left are probed by the next scan. Without
-/// a scan program nothing is probed: a class is never created in this process to read its buses.
-/// Returns how many probes ran.
-fn probe_listed(files: &mut [scan_cache::Entry<Vst3Descriptor>], scanner: Option<&Path>, host: &str) -> usize {
-    let Some(program) = scanner else { return 0 };
-    probe::probe_files(
-        files,
-        host,
+/// Phase two of a scan (ADR 0064, decision 2.4): background work on the scan thread after the
+/// listing is published, never holding the scan lock. Each listed class that needs it is probed in
+/// a child process of its own, one child at a time, and each outcome is published as it arrives.
+/// The pass stops, killing its running child, at a skip, when a full rescan is waiting or when a
+/// newer listing was published (the pass that follows it probes that listing). Without a scan
+/// program nothing is probed: a class is never created in this process to read its ports.
+fn probe_pass() {
+    let (generation, mut files, scanner, cache_file) = {
+        let r = lock();
+        (r.generation, r.files.clone(), r.scanner.clone(), r.cache_file.clone())
+    };
+    let Some(program) = scanner else { return };
+    let stop = || SKIP.load(Ordering::Acquire) || background().pending || lock().generation != generation;
+    let host = scan_cache::this_host();
+    let ran = probe::probe_files(
+        &mut files,
+        &host,
         |path, d| {
-            if SKIP.load(Ordering::Acquire) {
+            if stop() {
                 return None;
             }
             #[cfg(feature = "test-hooks")]
             run_probe_hook(&d.class_id);
             let mut deadline = probe_deadline(&d.class_id);
-            scan_cache::probe_in_child(program, PROBE_FLAG, path, &d.class_id, || SKIP.load(Ordering::Acquire), &mut *deadline)
+            let answer = scan_cache::probe_in_child(&program, PROBE_FLAG, path, &d.class_id, stop, &mut *deadline);
+            #[cfg(feature = "test-hooks")]
+            if answer.is_some() {
+                run_probe_answered_hook(&d.class_id);
+            }
+            answer
         },
-        publish_probe,
-    )
+        |path, d| publish_probe(generation, path, d),
+    );
+    if ran == 0 {
+        return;
+    }
+    let _one_writer = cache_write_lock();
+    let files = {
+        let r = lock();
+        (r.generation == generation).then(|| r.files.clone())
+    };
+    if let (Some(f), Some(files)) = (cache_file, files) {
+        scan_cache::write(&f, &files);
+    }
+}
+
+/// Asks the scan thread for a probe pass over the listing just published, starting the thread
+/// when none runs. Nothing waits for it.
+fn request_probe() {
+    let mut b = background();
+    b.probe = true;
+    if b.running {
+        return;
+    }
+    b.running = true;
+    b.probing = true;
+    drop(b);
+    spawn_scan_thread(None);
 }
 
 /// A probe child's deadline: [`scan_cache::CHILD_TIMEOUT`] from its start.
@@ -190,6 +261,23 @@ static PROBE_HOOK: Mutex<Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>> = M
 #[cfg(feature = "test-hooks")]
 pub fn set_probe_hook(hook: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>) {
     *PROBE_HOOK.lock().unwrap_or_else(PoisonError::into_inner) = hook;
+}
+
+/// Test hook: runs after a probe child answered (or failed), before its outcome is published.
+#[cfg(feature = "test-hooks")]
+static PROBE_ANSWERED_HOOK: Mutex<Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>> = Mutex::new(None);
+
+#[cfg(feature = "test-hooks")]
+pub fn set_probe_answered_hook(hook: Option<std::sync::Arc<dyn Fn(&str) + Send + Sync>>) {
+    *PROBE_ANSWERED_HOOK.lock().unwrap_or_else(PoisonError::into_inner) = hook;
+}
+
+#[cfg(feature = "test-hooks")]
+fn run_probe_answered_hook(id: &str) {
+    let hook = PROBE_ANSWERED_HOOK.lock().unwrap_or_else(PoisonError::into_inner).clone();
+    if let Some(h) = hook {
+        h(id);
+    }
 }
 
 #[cfg(feature = "test-hooks")]
@@ -292,19 +380,20 @@ fn scan_now(reuse: bool) -> Vec<Vst3Descriptor> {
             r.scanned = Some(list.clone());
             r.problems = problems;
             r.summary = Some(summary);
+            r.files = files.clone();
+            r.generation += 1;
             // The check and publication share the registry lock: a later add merges into scanned.
             drop(r);
             if let Some(f) = &cache_file {
+                let _one_writer = cache_write_lock();
                 scan_cache::write(f, &files);
             }
-            // The listing is out; now each class is probed on its own (ADR 0064, decision 2.4).
-            if probe_listed(&mut files, scanner.as_deref(), &host) == 0 {
-                return list;
+            // The listing is out and the scan is over; each class is probed in the background
+            // (ADR 0064, decision 2.4), and nothing waits for it.
+            if scanner.is_some() {
+                request_probe();
             }
-            if let Some(f) = &cache_file {
-                scan_cache::write(f, &files);
-            }
-            return merge(files);
+            return list;
         }
         for dir in &late {
             r.refresh_dirs.remove(dir);
@@ -414,7 +503,8 @@ pub fn rescan_in_background(clear_cache: bool) {
     }
 }
 
-/// Runs `job` on a scan thread, unless one is running already; then a `full` request is queued.
+/// Runs `job` on a scan thread, unless one is running already; then a `full` request is queued
+/// (and stops a probe pass that runs).
 fn in_background(job: fn(), full: bool) {
     {
         let mut b = background();
@@ -423,29 +513,53 @@ fn in_background(job: fn(), full: bool) {
             return;
         }
         b.running = true;
+        b.probing = false;
     }
-    if let Err(e) = std::thread::Builder::new().name("vst3-scan".into()).spawn(move || {
-        let mut job: fn() = job;
-        loop {
-            // A job that panics must not lose the rescan that waits behind it.
-            if std::panic::catch_unwind(job).is_err() {
-                log::warn!("vst3: a scan failed");
-            }
-            let mut b = background();
-            if !b.pending {
-                b.running = false;
-                BACKGROUND_IDLE.notify_all();
-                return;
-            }
-            b.pending = false;
-            job = || drop(rescan_with(false));
-        }
-    }) {
+    spawn_scan_thread(Some(job));
+}
+
+fn spawn_scan_thread(first: Option<fn()>) {
+    if let Err(e) = std::thread::Builder::new().name("vst3-scan".into()).spawn(move || scan_thread(first)) {
         log::warn!("vst3: no scan thread: {e}");
         let mut b = background();
         b.running = false;
         b.pending = false;
+        b.probe = false;
+        b.probing = false;
         BACKGROUND_IDLE.notify_all();
+    }
+}
+
+/// The scan thread: `job` (a listing), then any full rescan that waits, then probe passes while
+/// one is wanted. A full rescan requested during a probe pass stops the pass and runs next.
+fn scan_thread(mut job: Option<fn()>) {
+    loop {
+        // A job that panics must not lose the rescan that waits behind it.
+        if let Some(j) = job.take()
+            && std::panic::catch_unwind(j).is_err()
+        {
+            log::warn!("vst3: a scan failed");
+        }
+        {
+            let mut b = background();
+            if b.pending {
+                b.pending = false;
+                b.probing = false;
+                job = Some(|| drop(rescan_with(false)));
+                continue;
+            }
+            if !b.probe {
+                b.running = false;
+                b.probing = false;
+                BACKGROUND_IDLE.notify_all();
+                return;
+            }
+            b.probe = false;
+            b.probing = true;
+        }
+        if std::panic::catch_unwind(probe_pass).is_err() {
+            log::warn!("vst3: a probe pass failed");
+        }
     }
 }
 
@@ -495,7 +609,19 @@ pub fn scan_summary() -> Option<scan_cache::ScanSummary> {
 }
 
 pub fn scanning() -> bool {
-    background().running
+    let b = background();
+    b.running && !b.probing
+}
+
+pub fn probing() -> bool {
+    let b = background();
+    b.running && (b.probing || b.probe)
+}
+
+/// Test hook: whether the scan lock is free right now (a probe pass never holds it).
+#[cfg(feature = "test-hooks")]
+pub fn scan_lock_is_free() -> bool {
+    scan_lock_try()
 }
 
 pub fn add_search_dir(dir: &Path) -> usize {

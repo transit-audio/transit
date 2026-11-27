@@ -24,6 +24,7 @@ fn main() {
     }
     listing_then_probing();
     probe_failures();
+    probing_runs_in_the_background();
     println!("probe_scan: ok");
 }
 
@@ -101,21 +102,25 @@ struct Probes {
     started: Arc<Mutex<Vec<String>>>,
     /// The published list at the first probe, before any probe answered.
     first: Arc<Mutex<Option<Vec<host::Vst3Descriptor>>>>,
+    /// (`scanning()`, `probing()`) when the first probe child was about to start.
+    state_at_first: Arc<Mutex<Option<(bool, bool)>>>,
 }
 
 impl Probes {
     fn watch() -> Self {
         let started = Arc::new(Mutex::new(Vec::new()));
         let first = Arc::new(Mutex::new(None));
-        let (s, f) = (Arc::clone(&started), Arc::clone(&first));
+        let state_at_first = Arc::new(Mutex::new(None));
+        let (s, f, g) = (Arc::clone(&started), Arc::clone(&first), Arc::clone(&state_at_first));
         host::set_probe_hook(Some(Arc::new(move |id: &str| {
             let mut started = s.lock().unwrap();
             if started.is_empty() {
                 *f.lock().unwrap() = host::cached();
+                *g.lock().unwrap() = Some((host::scanning(), host::probing()));
             }
             started.push(id.to_string());
         })));
-        Probes { started, first }
+        Probes { started, first, state_at_first }
     }
 
     fn take(&self) -> Vec<String> {
@@ -132,6 +137,7 @@ fn set_up(dir: &Path) {
 
 fn tear_down() {
     host::set_probe_hook(None);
+    host::set_probe_answered_hook(None);
     host::set_probe_deadline(None);
     host::set_scanner(None);
     host::set_cache_file(None);
@@ -168,6 +174,8 @@ fn listing_then_probing() {
     for (name, ..) in EXPECTED {
         assert_eq!(find(&first, name).probe, host::ProbeOutcome::default(), "{name} was not probed yet when the listing was published");
     }
+    // The listing scan was over (what the splash and the menus wait for) and probing had begun.
+    assert_eq!(*probes.state_at_first.lock().unwrap(), Some((false, true)), "(scanning, probing) at the first probe child");
     // One probe child per class.
     let started = probes.take();
     assert_eq!(started.len(), EXPECTED.len(), "{started:?}");
@@ -213,27 +221,66 @@ fn listing_then_probing() {
         again.iter().map(|d| (d.id.clone(), d.probe.clone())).collect::<Vec<_>>(),
         list.iter().map(|d| (d.id.clone(), d.probe.clone())).collect::<Vec<_>>()
     );
-    let rescanned = host::rescan();
+    let listed_again = host::rescan();
+    assert!(
+        listed_again.iter().all(|d| d.probe == host::ProbeOutcome::default()),
+        "the explicit rescan returns its listing without waiting for probes"
+    );
+    host::wait_for_scans();
+    let rescanned = host::cached().expect("published");
     assert_eq!(probes.take().len(), EXPECTED.len(), "the explicit rescan probes every class");
     assert_eq!(find(&rescanned, "Fixture Notes").probe.note_output, Some(true));
     tear_down();
 }
 
-/// The probe deadline of the failure bundle: it passes once the blocking class has written its
-/// mark (its probe child is inside the class's creation), never before, so no class's probe is cut
-/// short by the clock. Its budget, as the reason gives it, is the shortened 1 s.
-struct UntilBlocked {
+/// The probe deadline of the failure file. It passes once the blocking class has written its mark
+/// (its probe child is inside the class's creation), never before, so no probe is cut short by the
+/// clock; its budget, as the reason gives it, is the shortened 1 s. With `hold` set, the first
+/// blocking child it sees is held instead (its deadline passes only after `release`) and `held` is
+/// told.
+struct Held {
     mark: PathBuf,
-    seen: Arc<AtomicBool>,
+    seen: bool,
+    holding: bool,
+    gate: Arc<Gate>,
 }
 
-impl host::Deadline for UntilBlocked {
+#[derive(Default)]
+struct Gate {
+    /// Deadlines made (one per probe child).
+    made: AtomicUsize,
+    /// Blocking marks seen.
+    marks: AtomicUsize,
+    hold: AtomicBool,
+    release: AtomicBool,
+    held: Mutex<Option<std::sync::mpsc::Sender<()>>>,
+}
+
+impl Gate {
+    fn install(mark: PathBuf) -> Arc<Gate> {
+        let gate = Arc::new(Gate::default());
+        let g = Arc::clone(&gate);
+        host::set_probe_deadline(Some(Arc::new(move |_: &str| {
+            g.made.fetch_add(1, Ordering::SeqCst);
+            Box::new(Held { mark: mark.clone(), seen: false, holding: false, gate: Arc::clone(&g) }) as Box<dyn host::Deadline>
+        })));
+        gate
+    }
+}
+
+impl host::Deadline for Held {
     fn passed(&mut self) -> bool {
-        if std::fs::remove_file(&self.mark).is_ok() {
-            self.seen.store(true, Ordering::SeqCst);
-            return true;
+        if !self.seen && std::fs::remove_file(&self.mark).is_ok() {
+            self.seen = true;
+            self.gate.marks.fetch_add(1, Ordering::SeqCst);
+            self.holding = self.gate.hold.swap(false, Ordering::SeqCst);
+            if self.holding
+                && let Some(tx) = self.gate.held.lock().unwrap().take()
+            {
+                let _ = tx.send(());
+            }
         }
-        false
+        self.seen && (!self.holding || self.gate.release.load(Ordering::SeqCst))
     }
     fn limit(&self) -> Duration {
         Duration::from_secs(1)
@@ -251,21 +298,13 @@ fn probe_failures() {
     let bundle = common::install_named(&["--features", "probe-failures"], "vst3-probe-failures-fixture-target", &dir, "Probes");
     let vendor = dir.join("vendor");
     set_up(&dir);
-    let seen = Arc::new(AtomicBool::new(false));
-    let deadlines = Arc::new(AtomicUsize::new(0));
-    {
-        let (seen, deadlines, mark) = (Arc::clone(&seen), Arc::clone(&deadlines), vendor.join("blocking.mark"));
-        host::set_probe_deadline(Some(Arc::new(move |_: &str| {
-            deadlines.fetch_add(1, Ordering::SeqCst);
-            Box::new(UntilBlocked { mark: mark.clone(), seen: Arc::clone(&seen) }) as Box<dyn host::Deadline>
-        })));
-    }
+    let gate = Gate::install(vendor.join("blocking.mark"));
     let probes = Probes::watch();
 
     let list = reuse_scan();
 
     assert_eq!(probes.take().len(), 5, "one probe per class");
-    assert!(seen.load(Ordering::SeqCst), "the blocking class's child was inside its creation when its deadline passed");
+    assert_eq!(gate.marks.load(Ordering::SeqCst), 1, "the blocking class's child was inside its creation when its deadline passed");
     assert_eq!(list.len(), 5, "every class keeps its listing: {list:?}");
     assert_listing_unchanged(&list, std::slice::from_ref(&bundle));
     for (name, reason) in FAILING {
@@ -306,7 +345,76 @@ fn probe_failures() {
     assert_eq!(retried, failing, "another build probes the failed classes again, never the answered ones");
     // The explicit rescan probes every class again.
     host::rescan();
+    host::wait_for_scans();
     assert_eq!(probes.take().len(), 5);
-    assert!(deadlines.load(Ordering::SeqCst) >= 13, "each probe child had its own deadline");
+    assert_eq!(gate.made.load(Ordering::SeqCst), 13, "each probe child had its own deadline");
+    tear_down();
+}
+
+/// Probing is background work (ADR 0064, decision 2.4). While a probe child is held inside the
+/// blocking class's creation: the listing is published, `scanning()` is over, the scan lock is free
+/// and a scan returns at once. An explicit rescan request then stops the pass, and probing starts
+/// again on the new listing. A listing published while a child runs keeps that child's outcome out
+/// of the new list: the new listing's pass probes the class itself.
+fn probing_runs_in_the_background() {
+    let dir = transit_test_support::TestDir::created_in(Path::new(env!("CARGO_TARGET_TMPDIR")), "vst3-probe-background");
+    let bundle = common::install_named(&["--features", "probe-failures"], "vst3-probe-failures-fixture-target", &dir, "Probes");
+    let vendor = dir.join("vendor");
+    set_up(&dir);
+    let gate = Gate::install(vendor.join("blocking.mark"));
+    let (tx, rx) = std::sync::mpsc::channel();
+    *gate.held.lock().unwrap() = Some(tx);
+    gate.hold.store(true, Ordering::SeqCst);
+    let probes = Probes::watch();
+    // In file order: Notes, Error, Crash, Block, Notes Silent.
+    let ids: Vec<String> = host::load_bundle(&bundle).expect("listing").iter().map(|d| d.class_id.clone()).collect();
+    let block = ids[3].clone();
+    let up_to_block: Vec<String> = ids[..4].to_vec();
+
+    host::rescan_in_background(false);
+    rx.recv().expect("the blocking class's probe child is held inside its creation");
+    assert!(!host::scanning(), "the scan ended with the listing: the splash and \"Scanning...\" do not wait for probes");
+    assert!(host::probing());
+    assert!(host::scan_lock_is_free(), "a probe pass never holds the scan lock");
+    assert_eq!(host::scan().len(), 5, "a scan (as a plug-in creation does for an unknown id) returns the published listing at once");
+    let now = host::cached().expect("published");
+    assert_eq!(find(&now, "Fixture Notes").probe.note_output, Some(true), "outcomes are published while probing goes on");
+    assert_eq!(find(&now, "Fixture Probe Block").probe, host::ProbeOutcome::default(), "the held class has no outcome yet");
+
+    // An explicit rescan while probing: the pass stops at the held child, and the new listing is
+    // probed whole.
+    host::rescan_in_background(true);
+    gate.release.store(true, Ordering::SeqCst);
+    host::wait_for_scans();
+    assert_eq!(
+        probes.take(),
+        [up_to_block.clone(), ids.clone()].concat(),
+        "the stopped pass ended at the held class; the new listing's pass probed every class"
+    );
+    let after = host::cached().expect("published");
+    assert_eq!(find(&after, "Fixture Notes").probe.note_output, Some(true));
+    assert_eq!(find(&after, "Fixture Notes Silent").probe.note_output, Some(false));
+    assert!(find(&after, "Fixture Probe Block").probe.probe_error.as_deref().is_some_and(|e| e.contains("still loading")));
+
+    // A listing published (a rescan) right after the blocking class's child answered, before its
+    // outcome is published: that outcome stays out of the new list, the old pass stops, and the
+    // new listing's pass probes the blocking class again.
+    let once = Arc::new(AtomicBool::new(false));
+    {
+        let (once, block) = (Arc::clone(&once), block.clone());
+        host::set_probe_answered_hook(Some(Arc::new(move |id: &str| {
+            if id == block && !once.swap(true, Ordering::SeqCst) {
+                host::rescan();
+            }
+        })));
+    }
+    host::rescan_in_background(true);
+    host::wait_for_scans();
+    host::set_probe_answered_hook(None);
+    assert!(once.load(Ordering::SeqCst));
+    assert_eq!(probes.take(), [up_to_block, ids].concat(), "the old pass stopped after the blocking class; the new listing's pass probed it again");
+    let last = host::cached().expect("published");
+    assert_eq!(find(&last, "Fixture Notes Silent").probe.note_output, Some(false));
+    assert!(find(&last, "Fixture Probe Block").probe.probe_error.is_some());
     tear_down();
 }
