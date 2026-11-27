@@ -104,16 +104,16 @@ fn consecutive_edits_leave_no_generated_note_sounding_past_its_gate() {
             r.run_until(&before, 64, 64);
             r.run_until(&first, 128, 64);
             r.run_until(&second, 640, 64);
-            assert_eq!(
-                ccs_given(&r, 64),
-                [(64, "cc", 64, 0)],
-                "{ctx}: only the first edit's pedal-up; the lift at 140 and the press at 300 send nothing"
-            );
             let spans = r.m.spans(60);
             // Steps on the generator's clock (from its reset at 128) every 32 frames while it holds
             // 60: from 160 to 608.
             let expected: Vec<(u64, Option<u64>)> = (160..640).step_by(32).map(|on| (on, Some(on + 16))).collect();
             assert_eq!(spans, expected, "{ctx}: every generated note ends at its gate");
+            assert_eq!(
+                ccs_given(&r, 64),
+                [(64, "cc", 64, 0)],
+                "{ctx}: only the first edit's pedal-up; the lift at 140 and the press at 300 send nothing"
+            );
             assert_eq!(r.m.ctl[0][64], 0, "{ctx}");
         }
     }

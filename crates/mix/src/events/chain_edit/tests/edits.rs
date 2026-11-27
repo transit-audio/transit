@@ -10,7 +10,7 @@ fn notes_given(r: &Rig) -> Vec<(u64, &'static str, u8, u8)> {
 
 #[test]
 fn the_first_effect_added_ends_a_note_the_mix_gave_directly_and_its_release_sends_nothing() {
-    let added: [(&[(&str, f32)], &str); 2] = [(&[], OWN), (&[("semitones", 12.0)], TRANSPOSE)];
+    let added: [(&[(&str, f32)], &str); 2] = [(&[("semitones", 12.0)], TRANSPOSE), (&[], OWN)];
     for (params, id) in added {
         for mode in MODES {
             let ctx = format!("{id} {mode:?}");
@@ -22,7 +22,8 @@ fn the_first_effect_added_ends_a_note_the_mix_gave_directly_and_its_release_send
             assert!(!r.e.fx.active(), "{ctx}: no chain, the note went to the instrument directly");
             r.run_until(&after, 256, 64);
             // The note ends at the add, at offset 0, with the voice id it was given; its release at
-            // 100 sends nothing (through a chain, Transpose would have written an off of 72).
+            // 100 sends nothing (through the chain, Transpose would pass it as an unknown release
+            // and the owning fixture would consume it).
             assert_eq!(notes_given(&r), [(10, "on", 60, 100), (64, "off", 60, 0)], "{ctx}");
             let ids: Vec<i32> = r.m.given.iter().map(|(_, e)| e.note_id).collect();
             assert_eq!(ids[0], ids[1], "{ctx}: the off carries the voice id the on was given");
@@ -34,7 +35,7 @@ fn the_first_effect_added_ends_a_note_the_mix_gave_directly_and_its_release_send
 
 #[test]
 fn at_the_first_insertion_a_refused_note_off_is_given_directly_until_accepted() {
-    let added: [(&[(&str, f32)], &str); 2] = [(&[], OWN), (&[("semitones", 12.0)], TRANSPOSE)];
+    let added: [(&[(&str, f32)], &str); 2] = [(&[("semitones", 12.0)], TRANSPOSE), (&[], OWN)];
     for (params, id) in added {
         for mode in MODES {
             let ctx = format!("{id} {mode:?}");
@@ -45,10 +46,14 @@ fn at_the_first_insertion_a_refused_note_off_is_given_directly_until_accepted() 
             r.run_until(&before, 64, 64);
             // The instrument refuses every note-off in the edit's block and the next.
             r.m.refuse_offs = 1..3;
+            r.run_until(&after, 128, 64);
+            assert!(r.e.notes.iter().any(|n| n.used && n.direct && n.retry_release.is_some()), "{ctx}: the mix's entry retries it, directly");
             r.run_until(&after, 320, 64);
-            // Given again at offset 0 of each later block, directly (never through the chain:
-            // Transpose would write 72, the owning fixture would consume it), and accepted at 192.
+            // Given again at offset 0 of each later block, directly, and accepted at 192. Through
+            // the chain the owning fixture would consume it, and the chain's delivery would have
+            // met the refusals (counted there, retried from the host's buffer).
             assert_eq!(notes_given(&r), [(10, "on", 60, 100), (192, "off", 60, 0)], "{ctx}");
+            assert_eq!(r.e.fx.counts.refused, 0, "{ctx}: the chain never carried it");
             assert_eq!(r.m.spans(60), [(10, Some(192))], "{ctx}");
             assert_eq!(r.e.fx.counts.retry_overflow, 0, "{ctx}");
             assert!(!r.e.notes.iter().any(|n| n.used), "{ctx}: the mix's entry is freed once accepted");

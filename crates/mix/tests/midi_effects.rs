@@ -137,8 +137,8 @@ fn an_edit_while_a_note_sounds_leaves_nothing_hanging() {
 #[test]
 fn the_first_effect_added_ends_a_note_sounding_without_a_chain() {
     // ADR 0057, slice P3a, through the engine's block: the note the mix gave directly ends at the
-    // add, and its release, now that a chain is there, sends nothing (through Transpose it would
-    // have written an off of 72 and left 60 sounding).
+    // add, and its release, now that a chain is there, sends nothing (before, nothing ended at the
+    // add and the release, passed by Transpose as an unknown one, ended 60 only then).
     let mut rig = Rig::new();
     let now = rig.mix.next_frame().0;
     let src = port(1, 0);
