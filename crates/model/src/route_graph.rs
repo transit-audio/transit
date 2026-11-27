@@ -223,8 +223,9 @@ impl RouteScratch {
     /// Makes room for `s`'s graph (allocates when it is larger than any seen before).
     pub fn reserve(&mut self, s: &Session) {
         let n = s.tracks.len() + s.busses.len() + 1;
-        // Per track: its sends, its keys, its input, its output and its MIDI route.
-        let e: usize = s.tracks.iter().map(|t| t.mixer.sends.len().saturating_add(t.mixer.inserts.len()).saturating_add(3)).sum();
+        // Per track: its sends, its keys, its output, and either its input (an aux or a folder) or
+        // its MIDI route (an instrument track), never both.
+        let e: usize = s.tracks.iter().map(|t| t.mixer.sends.len().saturating_add(t.mixer.inserts.len()).saturating_add(2)).sum();
         hold(&mut self.bus_ids, s.busses.len());
         hold(&mut self.edges, e);
         hold(&mut self.from, e);

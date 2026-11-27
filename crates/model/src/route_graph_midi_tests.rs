@@ -61,21 +61,32 @@ fn a_route_in_force_is_an_edge_and_orders_its_destination_after_its_source() {
 
 #[test]
 fn layering_after_reserve_allocates_no_edge_storage_with_routes() {
-    let (mut s, keys, bass) = six();
-    route(&mut s, keys, bass);
-    let (a, b) = (s.tracks[0].id, s.tracks[1].id);
-    route(&mut s, a, b);
-    route(&mut s, b, keys);
-    let c = s.tracks[3].id;
-    for t in [a, b, keys, bass] {
-        key(&mut s, t, c);
+    // Every track at its most edges: each send to a bus, each insert keyed, its output to a bus
+    // and a route, so the edges fill the reserved storage exactly.
+    let (mut s, _, _) = six();
+    let ids: Vec<TrackId> = s.tracks.iter().map(|t| t.id).collect();
+    let bus = s.add_bus("Sum", ChannelFormat::Stereo);
+    for (k, &t) in ids.iter().enumerate() {
+        let other = ids[(k + 1) % ids.len()];
+        let tr = s.track_mut(t).unwrap();
+        tr.mixer.output = Route::Bus(bus);
+        for slot in tr.mixer.sends.iter_mut() {
+            *slot = Some(crate::SendSlot::new(Route::Bus(bus)));
+        }
+        for slot in tr.mixer.inserts.iter_mut() {
+            let mut i = Insert::new("compressor");
+            i.key = Some(KeySource { from: KeyFrom::Track(other), tap: Tap::Post });
+            *slot = Some(i);
+        }
+        tr.midi_from = Some(MidiFrom { track: other, listen: true });
     }
     let mut scratch = RouteScratch::new();
     scratch.reserve(&s);
     let cap = scratch.edges.capacity();
     scratch.layer(&s);
-    assert_eq!(scratch.edges.capacity(), cap, "every key and route fits the reserved storage");
-    assert_eq!(scratch.edges.iter().filter(|e| e.kind == EdgeKind::Midi).count(), 3);
+    assert_eq!(scratch.edges.len(), cap, "the session fills the reservation");
+    assert_eq!(scratch.edges.capacity(), cap, "every send, key, output and route fits the reserved storage");
+    assert_eq!(scratch.edges.iter().filter(|e| e.kind == EdgeKind::Midi).count(), ids.len());
 }
 
 #[test]
