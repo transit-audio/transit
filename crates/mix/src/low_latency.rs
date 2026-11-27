@@ -184,7 +184,8 @@ impl Paths {
         let edges: Vec<_> = route
             .edges()
             .iter()
-            .filter(|e| !matches!(e.kind, EdgeKind::Key { .. }) && !dropped.contains(e))
+            // Keys and MIDI routes (ADR 0065) carry no audio: neither is a live audio path.
+            .filter(|e| !matches!(e.kind, EdgeKind::Key { .. } | EdgeKind::Midi) && !dropped.contains(e))
             .filter(|e| {
                 [e.from, e.to].iter().all(|n| match n {
                     RouteNode::Track(i) => s.tracks.get(*i).is_some_and(|t| !t.inactive),
@@ -359,5 +360,27 @@ mod tests {
         let io = transit_model::IoMap::for_device("test", "duplex", 2, 2);
         let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 64, out_channels: 2, in_channels: 2 };
         assert_eq!(&Paths::new(&s, &io, target, true).seeds[..3], [false, false, false], "frozen: armed, monitored and instrument alike");
+    }
+
+    /// ADR 0065: a MIDI route is no audio path. Adding one (Listen off, the destination neither
+    /// armed nor monitored) leaves Low Latency's bypass selection as it was.
+    #[test]
+    fn a_midi_route_does_not_make_its_destination_a_live_audio_path() {
+        let mut s = Session::default();
+        let keys = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Keys"));
+        let bass = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Bass"));
+        s.track_mut(keys).unwrap().mixer.record_arm = true;
+        let on_keys = transit_model::Insert::new("gain");
+        let keys_uid = on_keys.uid.get();
+        s.track_mut(keys).unwrap().mixer.inserts[0] = Some(on_keys);
+        s.track_mut(bass).unwrap().mixer.inserts[0] = Some(transit_model::Insert::new("gain"));
+        let io = transit_model::IoMap::for_device("test", "duplex", 2, 2);
+        let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 64, out_channels: 2, in_channels: 2 };
+        let raw = SlotLatencies::from([((keys, 0), 300), ((bass, 0), 500)]);
+        let before = low_latency_bypass(&s, &io, target, &raw, 0.0, true);
+        assert_eq!(before, BTreeSet::from([keys_uid]), "only the armed track is a live path");
+        s.track_mut(bass).unwrap().midi_from = Some(transit_model::MidiFrom { track: keys, listen: false });
+        assert!(s.route_graph().edges().iter().any(|e| e.kind == EdgeKind::Midi), "the route is in force");
+        assert_eq!(low_latency_bypass(&s, &io, target, &raw, 0.0, true), before, "Bass's insert is not selected");
     }
 }
