@@ -30,20 +30,26 @@
 //! none again (its holders are marked stale). Expression is kept: nothing else is sent. A
 //! parameter change is not an edit: each effect pairs its own notes (Transpose remembers each
 //! note's shift). Stop and panic end the chain's notes the same way before the mix releases its
-//! sources, without the edit's pedal-ups.
+//! sources, without the edit's pedal-ups. Every edit, Stop and panic also clears the refused table
+//! (`delivery`); a plan adopted with the same chain changes none of the tables.
 //!
-//! **Capacity.** A block takes at most [`MIDI_FX_BLOCK`] events into the chain and each effect
-//! writes at most as many; each effect carries at most [`MIDI_FX_CARRY`] events to later blocks;
-//! the host tracks [`MIDI_FX_NOTES`] sounding notes. Past those limits events are refused and
-//! counted in [`MidiFxCounts`] (in the engine's [`EventStatus`](crate::EventStatus)). A release
-//! the chain could not take is retried by the mix at the next block; one the instrument's queue
-//! refuses is given again at offset 0 of the next block (up to [`MIDI_FX_RETRY`] at once); one a
-//! full carry cannot hold evicts its own carried note-on when there is one (both go, the note
-//! never sounded), otherwise the newest carried note-on, otherwise the first carried non-release;
-//! a carry of releases alone delivers it at the block's last offset (#281). Output and carry
-//! merging evict the newest pending note-on for a release. If only releases remain, channel
-//! safety releases represent them and the host ends its accepted notes explicitly before
-//! resetting the chain (ADR 0036, `output`).
+//! **Capacity and final acceptance (ADR 0057, slice P3b).** The chain's input buffer and each
+//! effect's output buffer hold at most [`MIDI_FX_BLOCK`] events a block, of which at most
+//! [`MIDI_FX_NON_RELEASE`] are not releases: a release is admitted while the buffer holds fewer
+//! than [`MIDI_FX_BLOCK`], anything else while it also holds fewer than [`MIDI_FX_NON_RELEASE`]
+//! non-releases, and an admitted event is never evicted later (`output`). An effect's events due
+//! in the block from its carry enter its buffer before it writes. Each effect carries at most
+//! [`MIDI_FX_CARRY`] events to later blocks; a release a full carry cannot hold evicts its own
+//! carried note-on when there is one (both go, the note never sounded), otherwise the newest
+//! carried note-on, otherwise the first carried non-release; a carry of releases alone delivers it
+//! at the block's last offset (#281). Refusals are counted in [`MidiFxCounts`] (in the engine's
+//! [`EventStatus`](crate::EventStatus)). A release the chain's input refuses is retried by the mix
+//! at the next block. After the last effect the host owns delivery (`delivery`): it tracks
+//! [`MIDI_FX_NOTES`] delivered notes and as many it did not deliver, consumes the note-off of a
+//! note it did not deliver and one that matches nothing it delivered, gives a release the
+//! instrument refuses again at offset 0 of the next block, directly (up to [`MIDI_FX_RETRY`] at
+//! once), and resets the whole chain once, after the block, when a release finds an effect's
+//! buffer full or a note-on finds the refused table full (the reset barrier).
 //! Nothing here allocates, locks or logs: the
 //! storage is made with the instrument's event state, off the audio thread, and a built-in effect
 //! is a value made in place ([`Builtin`]).
@@ -59,15 +65,17 @@ use crate::note_view::NoteView;
 mod delivery;
 mod edit;
 mod output;
-use delivery::{NO_NOTE, Note};
+use delivery::{NO_NOTE, Note, Trigger, oldest};
 use output::Output;
 
 /// Events one block takes into the chain, and each effect writes, at most.
 pub const MIDI_FX_BLOCK: usize = 512;
+/// Non-release events among them at most.
+pub const MIDI_FX_NON_RELEASE: usize = 384;
 /// Events each effect holds for later blocks at most.
 pub const MIDI_FX_CARRY: usize = 64;
-/// Notes the host tracks at once, both the ones it started on the instrument and the ones it was
-/// given (more than an instrument holds open, 224).
+/// Notes the host tracks at once in each of its tables: the ones it started on the instrument, the
+/// ones it did not deliver and the ones it was given (more than an instrument holds open, 224).
 pub const MIDI_FX_NOTES: usize = 256;
 /// Releases from the chain that the instrument's own queue refused, held for the next block.
 pub const MIDI_FX_RETRY: usize = 64;
@@ -77,15 +85,19 @@ pub const MIDI_FX_RETRY: usize = 64;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct MidiFxCounts {
     /// Events a full block buffer refused: the chain's input (the mix retries a refused release)
-    /// or an effect's output.
+    /// or an effect's output; and note-ons not delivered for a full table of delivered notes.
     pub overflow: u64,
-    /// Note-ons refused at admission to a full output or input buffer.
+    /// Note-ons refused at admission to a full output or input buffer, or not delivered for a full
+    /// table of delivered notes.
     pub refused_ons: u64,
-    /// Pending note-ons evicted by a release before they reached the next stage.
-    pub evicted_ons: u64,
-    /// Releases represented by channel safety releases after an output filled with releases alone.
-    pub coalesced_releases: u64,
-    /// Accepted notes ended explicitly when release-only overflow resets the chain.
+    /// Note-offs the delivery consumed: a note-on it did not deliver, or nothing it delivered.
+    pub consumed_releases: u64,
+    /// Reset barriers run: a release found an effect's buffer full, or a note-on the refused table.
+    pub safety_resets: u64,
+    /// Note-ons a reset barrier dropped with no record: the one that found the refused table full
+    /// and each later one of its block, or every note-on of a block whose effect refused a release.
+    pub dropped_ons: u64,
+    /// Delivered notes a reset barrier ended explicitly.
     pub released_on_overflow: u64,
     /// Events due in a later block that a full carry could not hold, or that a release displaced
     /// from it (a release is never dropped for room).
@@ -112,8 +124,9 @@ impl MidiFxCounts {
         let add = |a: &mut u64, b: u64| *a = a.saturating_add(b);
         add(&mut self.overflow, o.overflow);
         add(&mut self.refused_ons, o.refused_ons);
-        add(&mut self.evicted_ons, o.evicted_ons);
-        add(&mut self.coalesced_releases, o.coalesced_releases);
+        add(&mut self.consumed_releases, o.consumed_releases);
+        add(&mut self.safety_resets, o.safety_resets);
+        add(&mut self.dropped_ons, o.dropped_ons);
         add(&mut self.released_on_overflow, o.released_on_overflow);
         add(&mut self.carry_overflow, o.carry_overflow);
         add(&mut self.released_on_edit, o.released_on_edit);
@@ -167,10 +180,18 @@ pub(crate) struct MidiFxHost {
     clock: u64,
     a: [TimedEvent; MIDI_FX_BLOCK],
     a_len: usize,
+    /// Non-release events among the first `a_len` collected (the input's admission).
+    a_held: usize,
     b: Output,
     merged: Output,
     /// Notes the host started on the instrument.
     out: [Note; MIDI_FX_NOTES],
+    /// Note-ons the host did not deliver (the refused table): their note-offs are consumed.
+    refusals: [Note; MIDI_FX_NOTES],
+    /// The last sequence number given to an entry of `out`, `refusals` or `given`.
+    seq: u64,
+    /// Within a block's run: the reset barrier's trigger, if one came.
+    barrier: Option<Trigger>,
     /// Notes the chain was given and has not seen released.
     given: [Note; MIDI_FX_NOTES],
     /// Used entries of `given`.
@@ -245,9 +266,13 @@ impl MidiFxHost {
             clock: 0,
             a: [TimedEvent::EMPTY; MIDI_FX_BLOCK],
             a_len: 0,
+            a_held: 0,
             b: Output::new(),
             merged: Output::new(),
             out: [NO_NOTE; MIDI_FX_NOTES],
+            refusals: [NO_NOTE; MIDI_FX_NOTES],
+            seq: 0,
+            barrier: None,
             given: [NO_NOTE; MIDI_FX_NOTES],
             given_len: 0,
             retry: [TimedEvent::EMPTY.event; MIDI_FX_RETRY],
@@ -260,9 +285,10 @@ impl MidiFxHost {
     }
 
     /// Events go through the host: it has effects, carried events, releases to swallow, or notes
-    /// it started on the instrument (with no effects, too: their releases must reach the table).
+    /// it started on the instrument or did not deliver (with no effects, too: their releases must
+    /// reach the tables).
     pub(crate) fn active(&self) -> bool {
-        self.len > 0 || self.given_len > 0 || self.pending() || self.out.iter().any(|n| n.used)
+        self.len > 0 || self.given_len > 0 || self.pending() || self.out.iter().chain(&self.refusals).any(|n| n.used)
     }
 
     /// Carried events wait for a later block.
@@ -361,7 +387,7 @@ impl MidiFxHost {
         let off = matches!(ev.message, Message::NoteOff { .. });
         let known = key_of(&ev.message)
             .filter(|_| self.given_len > 0 && !matches!(ev.message, Message::NoteOn { .. }))
-            .and_then(|key| self.given.iter().position(|n| n.is(ev, key)));
+            .and_then(|key| oldest(&self.given, ev, key));
         if let Some(n) = known
             && self.given.get(n).is_some_and(|n| n.epoch != self.epoch)
         {
@@ -371,7 +397,11 @@ impl MidiFxHost {
             return true;
         }
         if self.capturing {
-            let Some(slot) = self.a.get_mut(self.a_len) else {
+            // The input's admission (P3b): a release while the buffer holds fewer than its
+            // capacity, anything else while it also holds fewer than the non-release limit.
+            let release = ev.is_release();
+            let room = release || self.a_held < MIDI_FX_NON_RELEASE;
+            let Some(slot) = self.a.get_mut(self.a_len).filter(|_| room) else {
                 self.counts.overflow = self.counts.overflow.saturating_add(1);
                 if matches!(ev.message, Message::NoteOn { .. }) {
                     self.counts.refused_ons = self.counts.refused_ons.saturating_add(1);
@@ -380,6 +410,7 @@ impl MidiFxHost {
             };
             *slot = TimedEvent { offset: offset.min(self.frames - 1), event: *ev };
             self.a_len += 1;
+            self.a_held += usize::from(!release);
         } else {
             let Some(slot) = self.a.first_mut() else { return false };
             *slot = TimedEvent { offset: 0, event: *ev };
@@ -392,8 +423,9 @@ impl MidiFxHost {
         if let Message::NoteOn { key, .. } = ev.message {
             match self.given.iter().position(|n| !n.used) {
                 Some(n) => {
+                    let seq = self.next_seq();
                     if let Some(n) = self.given.get_mut(n) {
-                        *n = Note { used: true, channel: ev.channel & 0x0F, key, voice: ev.note_id, epoch: self.epoch };
+                        *n = Note { used: true, channel: ev.channel & 0x0F, key, voice: ev.note_id, epoch: self.epoch, seq };
                         self.given_len += 1;
                     }
                 }
@@ -435,47 +467,25 @@ impl MidiFxHost {
     /// between blocks through each effect's no-time call, which only adds to the carries).
     fn run(&mut self, plugin: &mut dyn Plugin, frames: u32, block: bool) {
         if block {
-            // Last block's refused releases first, at offset 0. One refused again is held again,
-            // at or before the index being read, so nothing unread is overwritten.
-            let held = std::mem::take(&mut self.retry_len);
-            for i in 0..held {
-                let Some(e) = self.retry.get(i).copied() else { break };
-                self.deliver(plugin, 0, &e);
-            }
+            // Last block's refused releases first, at offset 0, directly (P3b).
+            self.give_retries(plugin);
         }
         let len = self.a_len.min(MIDI_FX_BLOCK);
         if let Some(a) = self.a.get_mut(..len) {
             sort_by_offset(a);
         }
         let end = self.clock.saturating_add(u64::from(frames));
-        let mut safety_reset = false;
         for stage in self.stages.iter_mut().take(self.len).flatten() {
             let Some(fx) = stage.fx.as_mut().filter(|_| !stage.bypass) else { continue };
-            // The effect's output, then this block's carried events ahead of it at their offset.
+            // The effect's buffer: this block's carried events first, then what the effect writes
+            // (P3b: they enter the buffer before it writes, ahead of its events at their offset).
             self.b.clear();
-            let mut sink = |e| self.b.push(e);
-            let mut out = MidiOut::with_sink(&mut sink);
-            let input = self.a.get(..self.a_len).unwrap_or_default();
-            if block {
-                fx.effect().process(input, &mut out, frames);
-            } else {
-                // Between blocks no time passes (ADR 0057, slice P2; #559, third item).
-                fx.effect().process_between(input, &mut out);
-            }
-            let (refused, refused_ons) = (out.refused(), out.refused_ons());
-            // MidiOut counts admission refusals, including the generator's own schedule;
-            // the sink additionally counts events evicted after admission.
-            self.counts.overflow = self.counts.overflow.saturating_add(u64::from(refused.saturating_sub(self.b.refused)));
-            self.counts.refused_ons = self.counts.refused_ons.saturating_add(u64::from(refused_ons).saturating_sub(self.b.counts.refused_ons));
-            self.counts.add(&self.b.counts);
-            safety_reset |= self.b.counts.coalesced_releases > 0;
-            self.merged.clear();
             if block {
                 let mut k = 0;
                 while k < stage.carry_len {
                     let Some(c) = stage.carry.get(k).copied() else { break };
                     if c.due < end {
-                        self.merged.push(TimedEvent {
+                        self.b.push(TimedEvent {
                             offset: u32::try_from(c.due.saturating_sub(self.clock)).unwrap_or(0).min(frames - 1),
                             event: c.event,
                         });
@@ -486,6 +496,26 @@ impl MidiFxHost {
                     }
                 }
             }
+            let mut sink = |e| self.b.push(e);
+            let mut out = MidiOut::with_sink(&mut sink);
+            let input = self.a.get(..self.a_len).unwrap_or_default();
+            if block {
+                fx.effect().process(input, &mut out, frames);
+            } else {
+                // Between blocks no time passes (ADR 0057, slice P2; #559, third item).
+                fx.effect().process_between(input, &mut out);
+            }
+            let (refused, refused_ons) = (out.refused(), out.refused_ons());
+            // MidiOut counts every refusal, the effect's own schedule's included; the buffer
+            // counts its own, which `counts.add` adds below.
+            self.counts.overflow = self.counts.overflow.saturating_add(u64::from(refused.saturating_sub(self.b.refused)));
+            self.counts.refused_ons = self.counts.refused_ons.saturating_add(u64::from(refused_ons).saturating_sub(self.b.counts.refused_ons));
+            self.counts.add(&self.b.counts);
+            if self.b.release_refused {
+                // The reset barrier: no note-on of this block is delivered (P3b).
+                self.barrier = Some(Trigger::Stage);
+            }
+            self.merged.clear();
             for mut e in self.b.events() {
                 if e.offset >= frames {
                     let due = self.clock.saturating_add(u64::from(e.offset));
@@ -528,7 +558,6 @@ impl MidiFxHost {
                 self.merged.push(e);
             }
             self.counts.add(&self.merged.counts);
-            safety_reset |= self.merged.counts.coalesced_releases > 0;
             let mut n = 0;
             for (slot, e) in self.a.iter_mut().zip(self.merged.events()) {
                 *slot = e;
@@ -541,14 +570,15 @@ impl MidiFxHost {
         }
         let n = self.a_len;
         self.a_len = 0;
+        self.a_held = 0;
         for i in 0..n {
             let Some(e) = self.a.get(i).copied() else { break };
             self.deliver(plugin, e.offset, &e.event);
         }
-        if safety_reset {
-            // CLAP note-only ports and VST3 instruments without CC mappings can ignore
-            // channel-mode messages. End the actual accepted voices with native note-offs,
-            // after this block's surviving events, and cancel future ons before restarting.
+        if self.barrier.take().is_some() {
+            // The reset barrier, once for the whole chain, after the block's last event: native
+            // note-offs end the accepted voices (CLAP note-only ports and VST3 instruments
+            // without CC mappings can ignore channel-mode messages), then the safety controllers.
             self.end_notes_at(plugin, frames - 1, true);
         }
     }
@@ -590,9 +620,13 @@ impl MidiFxHost {
             clock,
             a: _,
             a_len,
+            a_held,
             b: _,
             merged: _,
             out,
+            refusals,
+            seq,
+            barrier,
             given,
             given_len,
             retry,
@@ -602,7 +636,10 @@ impl MidiFxHost {
             notes,
             pedals,
         } = self;
-        assert!(!*capturing && *a_len == 0, "a MIDI effect host captured or held events at a block boundary (section 14 scope)");
+        assert!(
+            !*capturing && *a_len == 0 && *a_held == 0 && barrier.is_none(),
+            "a MIDI effect host captured or held events at a block boundary (section 14 scope)"
+        );
         w.usize(stages.len());
         for s in stages {
             w.present(s.as_ref(), |w, Stage { uid, plugin, bypass, fx, carry, carry_len }| {
@@ -625,16 +662,19 @@ impl MidiFxHost {
         w.u32(*frames);
         w.u64(*clock);
         let note = |w: &mut transit_state_record::Writer<'_>, n: &Note| {
-            let Note { used, channel, key, voice, epoch } = n;
+            let Note { used, channel, key, voice, epoch, seq } = n;
             w.bool(*used);
             if *used {
                 w.u8(*channel);
                 w.u8(*key);
                 w.i32(*voice);
                 w.u32(*epoch);
+                w.u64(*seq);
             }
         };
         out.iter().for_each(|n| note(w, n));
+        refusals.iter().for_each(|n| note(w, n));
+        w.u64(*seq);
         given.iter().for_each(|n| note(w, n));
         w.usize(*given_len);
         w.usize(*retry_len);

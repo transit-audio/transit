@@ -1,177 +1,67 @@
-//! Fixed output storage. Eviction walks two monotone cursors (pending Ons, then other non-releases); links preserve write order at equal offsets.
-use super::{MIDI_FX_BLOCK, Message, MidiFxCounts, PluginEvent, TimedEvent};
-
-const END: usize = MIDI_FX_BLOCK;
-
-#[derive(Clone, Copy)]
-struct Entry {
-    event: TimedEvent,
-    previous: usize,
-    next: usize,
-}
-
-const EMPTY: Entry = Entry { event: TimedEvent::EMPTY, previous: END, next: END };
+//! A stage's output buffer (ADR 0057, slice P3b): acceptance is final. `push` admits a non-release
+//! event while the buffer holds fewer than [`MIDI_FX_NON_RELEASE`] non-release events and fewer
+//! than [`MIDI_FX_BLOCK`] events in all, a release while it holds fewer than [`MIDI_FX_BLOCK`], so
+//! releases already admitted never use the non-release quota; nothing admitted is evicted later.
+//! A release it refuses marks the block for the host's reset barrier (`release_refused`).
+use super::{MIDI_FX_BLOCK, MIDI_FX_NON_RELEASE, Message, MidiFxCounts, TimedEvent};
 
 pub(super) struct Output {
-    entries: [Entry; MIDI_FX_BLOCK],
+    events: [TimedEvent; MIDI_FX_BLOCK],
     len: usize,
-    first: usize,
-    last: usize,
-    // After filling, these cursors only move backward. Each slot is examined at most once
-    // by each cursor, so finding victims costs O(1) amortized per event.
-    on_cursor: usize,
-    other_cursor: usize,
-    safety_channels: u16,
-    safety_offset: u32,
+    /// Non-release events among the first `len`.
+    held: usize,
     pub(super) refused: u32,
+    /// A release found the buffer full.
+    pub(super) release_refused: bool,
     pub(super) counts: MidiFxCounts,
 }
 
 impl Output {
     pub(super) fn new() -> Self {
-        Self {
-            entries: [EMPTY; MIDI_FX_BLOCK],
-            len: 0,
-            first: END,
-            last: END,
-            on_cursor: 0,
-            other_cursor: 0,
-            safety_channels: 0,
-            safety_offset: 0,
-            refused: 0,
-            counts: MidiFxCounts::default(),
-        }
+        Self { events: [TimedEvent::EMPTY; MIDI_FX_BLOCK], len: 0, held: 0, refused: 0, release_refused: false, counts: MidiFxCounts::default() }
     }
 
-    /// Test seam (feature `testing`, #742): every entry's event becomes `junk(k)`, links, length
-    /// and cursors unchanged. Returns the entries changed.
+    /// Test seam (feature `testing`, #742): every entry's event becomes `junk(k)`, length
+    /// unchanged. Returns the entries changed.
     #[cfg(feature = "testing")]
     pub(super) fn poison(&mut self, junk: impl Fn(usize) -> TimedEvent) -> usize {
         let mut n = 0;
-        for (k, e) in self.entries.iter_mut().enumerate() {
-            n += usize::from(e.event != junk(k));
-            e.event = junk(k);
+        for (k, e) in self.events.iter_mut().enumerate() {
+            n += usize::from(*e != junk(k));
+            *e = junk(k);
         }
         n
     }
 
     pub(super) fn clear(&mut self) {
         self.len = 0;
-        self.first = END;
-        self.last = END;
-        self.on_cursor = 0;
-        self.other_cursor = 0;
-        self.safety_channels = 0;
-        self.safety_offset = 0;
+        self.held = 0;
         self.refused = 0;
+        self.release_refused = false;
         self.counts = MidiFxCounts::default();
     }
 
-    fn victim(&mut self) -> Option<usize> {
-        while self.on_cursor > 0 {
-            self.on_cursor -= 1;
-            if matches!(self.entries[self.on_cursor].event.event.message, Message::NoteOn { .. }) {
-                self.counts.evicted_ons = self.counts.evicted_ons.saturating_add(1);
-                return Some(self.on_cursor);
-            }
-        }
-        while self.other_cursor > 0 {
-            self.other_cursor -= 1;
-            if !self.entries[self.other_cursor].event.event.is_release() {
-                return Some(self.other_cursor);
-            }
-        }
-        None
-    }
-
-    fn unlink(&mut self, i: usize) {
-        let e = self.entries[i];
-        if e.previous < END {
-            self.entries[e.previous].next = e.next;
-        } else {
-            self.first = e.next;
-        }
-        if e.next < END {
-            self.entries[e.next].previous = e.previous;
-        } else {
-            self.last = e.previous;
-        }
-    }
-
+    /// Admits `event` or refuses it (counted), finally.
     pub(super) fn push(&mut self, event: TimedEvent) -> bool {
-        if self.safety_channels != 0 {
-            if event.event.is_release() {
-                self.coalesce(event);
-                return true;
-            }
-            return self.refuse(event);
-        }
-        let i = if self.len < MIDI_FX_BLOCK {
-            let i = self.len;
-            self.len += 1;
-            self.on_cursor = self.len;
-            self.other_cursor = self.len;
-            i
-        } else if event.event.is_release() {
-            let Some(i) = self.victim() else {
-                return self.release_only_overflow(event);
-            };
+        let release = event.event.is_release();
+        let room = self.len < MIDI_FX_BLOCK && (release || self.held < MIDI_FX_NON_RELEASE);
+        let Some(slot) = self.events.get_mut(self.len).filter(|_| room) else {
+            self.refused = self.refused.saturating_add(1);
             self.counts.overflow = self.counts.overflow.saturating_add(1);
-            self.unlink(i);
-            i
-        } else {
-            return self.refuse(event);
+            if matches!(event.event.message, Message::NoteOn { .. }) {
+                self.counts.refused_ons = self.counts.refused_ons.saturating_add(1);
+            }
+            self.release_refused |= release;
+            return false;
         };
-        self.entries[i] = Entry { event, previous: self.last, next: END };
-        if self.last < END {
-            self.entries[self.last].next = i;
-        } else {
-            self.first = i;
-        }
-        self.last = i;
+        *slot = event;
+        self.len += 1;
+        self.held += usize::from(!release);
         true
     }
 
-    fn refuse(&mut self, event: TimedEvent) -> bool {
-        self.refused = self.refused.saturating_add(1);
-        self.counts.overflow = self.counts.overflow.saturating_add(1);
-        if matches!(event.event.message, Message::NoteOn { .. }) {
-            self.counts.refused_ons = self.counts.refused_ons.saturating_add(1);
-        }
-        false
-    }
-
-    fn coalesce(&mut self, event: TimedEvent) {
-        self.safety_channels |= 1 << (event.event.channel & 15);
-        self.safety_offset = self.safety_offset.max(event.offset);
-        self.counts.coalesced_releases = self.counts.coalesced_releases.saturating_add(1);
-    }
-
-    fn release_only_overflow(&mut self, event: TimedEvent) -> bool {
-        // All pending ons (and then other non-releases) have already been removed. No on
-        // can follow these safety releases in this buffer. Bound even an all-off flood to
-        // seven channel releases per affected channel, at the last release's offset.
-        for i in 0..self.len {
-            self.coalesce(self.entries[i].event);
-        }
-        self.len = 0;
-        self.coalesce(event);
-        true
-    }
-
+    /// The admitted events, in write order.
     pub(super) fn events(&self) -> impl Iterator<Item = TimedEvent> + '_ {
-        let mut next = self.first;
-        let normal = (0..self.len).map(move |_| {
-            let entry = self.entries[next];
-            next = entry.next;
-            entry.event
-        });
-        let safety = (0u8..16).filter(move |ch| self.safety_channels & (1 << ch) != 0).flat_map(move |channel| {
-            [64, 66, 67, 69, 120, 121, 123].map(|cc| TimedEvent {
-                offset: self.safety_offset,
-                event: PluginEvent { channel, note_id: PluginEvent::NO_ID, message: Message::Control { cc, value: 0 } },
-            })
-        });
-        normal.chain(safety)
+        self.events.iter().take(self.len).copied()
     }
 }

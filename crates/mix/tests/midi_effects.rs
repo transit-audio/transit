@@ -1,7 +1,8 @@
 //! The MIDI effect slot (#201, ADR 0036) through a realtime engine: clips and live input reach the
 //! instrument through the track's MIDI effects in chain order at their sample-accurate frames; a
 //! bypassed chain is transparent; events an effect moves past the block arrive in a later block;
-//! and none of it allocates on the audio thread.
+//! a plan adopted with the same chain keeps the host's tables (ADR 0057, slice P3b); and none of
+//! it allocates on the audio thread.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use transit_mix::{Due, EventOutcome, Message, MixEngine, PluginEvent, RenderFrame, mark_audio_thread};
@@ -151,6 +152,42 @@ fn the_first_effect_added_ends_a_note_sounding_without_a_chain() {
     let heard = summary(&rig.heard_by(1));
     assert_eq!(heard.iter().map(|(f, k, key, _)| (f - now, *k, *key)).collect::<Vec<_>>(), [(10, "on", 60), (256, "off", 60)]);
     assert!(!rig.mix.has_pending_events());
+}
+
+/// `summary` as (frame from `from`, kind, key).
+fn at(heard: &[(u64, &'static str, u8, u8)], from: u64) -> Vec<(u64, &'static str, u8)> {
+    heard.iter().map(|(f, k, key, _)| (f - from, *k, *key)).collect()
+}
+
+#[test]
+fn a_plan_adopted_with_the_same_chain_keeps_the_hosts_tables() {
+    // ADR 0057, slice P3b: an adoption with the same chain keeps the MIDI effect host's tables (the
+    // chain's note still ends at its own release, nothing is ended at the adoption); a chain edit
+    // after it still ends the note delivered before the adoption.
+    let mut rig = Rig::new();
+    with_chain(&mut rig, &[("midi_transpose", &[("semitones", 5.0)], false)]);
+    let now = rig.mix.next_frame().0;
+    let src = port(1, 0);
+    assert_eq!(rig.send(src, now + 10, on(60)), EventOutcome::Queued);
+    assert_eq!(rig.send(src, now + 20, on(62)), EventOutcome::Queued);
+    rig.render(1);
+    // The same chain in a new plan (the track renamed): an adoption, not an edit.
+    let mut s = rig.session.clone();
+    s.track_mut(rig.track).unwrap().name = "Keys, renamed".into();
+    rig.publish(&s);
+    rig.session = s;
+    assert_eq!(rig.send(src, now + 256 + 30, off(60)), EventOutcome::Queued);
+    rig.render(1);
+    assert_eq!(at(&summary(&rig.heard_by(1)), now), [(10, "on", 65), (20, "on", 67), (286, "off", 65)], "65 ends at its own release");
+    assert_eq!(rig.mix.event_status().midi_fx.released_on_edit, 0, "nothing ended at the adoption");
+    // A chain edit after it still ends the note the host delivered before the adoption.
+    let mut s = rig.session.clone();
+    s.track_mut(rig.track).unwrap().midi_effects[0].bypass = true;
+    rig.publish(&s);
+    rig.session = s;
+    rig.render(1);
+    assert_eq!(at(&summary(&rig.heard_by(1)), now)[3..], [(512, "off", 67)]);
+    assert_eq!(rig.mix.event_status().midi_fx.released_on_edit, 1);
 }
 
 #[test]

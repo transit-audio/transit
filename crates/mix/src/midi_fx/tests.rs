@@ -5,6 +5,7 @@ use transit_model::{ChannelFormat, TRACK_COLORS, TrackId, TrackKind};
 
 mod between;
 mod overflow;
+mod ownership;
 
 /// An instrument that writes down every event it is given, with its block number.
 #[derive(Default)]
@@ -147,6 +148,11 @@ fn events_for_a_later_block_are_carried_through_the_rest_of_the_chain() {
 fn a_full_carry_makes_room_for_a_release_and_counts() {
     let t = track(&[("midi_test_delay", &[("samples", 1000.0)])]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
+    // Voice 1 already sounds (delivered once the chain is in), so its note-off has a note to end
+    // (ADR 0057, slice P3b: a note-off that matches nothing delivered is consumed).
+    block(&mut host, &mut rec, &t, &[]);
+    host.deliver(&mut rec, 0, &on(1, 60, 100));
+    rec.heard.clear();
     let mut input: Vec<(u32, PluginEvent)> =
         (0..MIDI_FX_CARRY as i32).map(|i| (0, ev(-1, Message::Control { cc: 1, value: (i % 100) as u8 }))).collect();
     input.push((1, on(1, 60, 100)));
@@ -158,7 +164,7 @@ fn a_full_carry_makes_room_for_a_release_and_counts() {
     for _ in 0..3 {
         block(&mut host, &mut rec, &t, &[]);
     }
-    assert_eq!(notes(&rec).into_iter().filter(|n| n.2 != "other").collect::<Vec<_>>(), vec![(3, 1002 - 768, "off", 60, 0)]);
+    assert_eq!(notes(&rec).into_iter().filter(|n| n.2 != "other").collect::<Vec<_>>(), vec![(4, 1002 - 768, "off", 60, 0)]);
     assert_eq!(rec.heard.len(), MIDI_FX_CARRY, "63 controllers and the off");
 }
 
@@ -166,24 +172,36 @@ fn a_full_carry_makes_room_for_a_release_and_counts() {
 fn a_carry_of_releases_alone_delivers_one_more_at_the_last_offset() {
     let t = track(&[("midi_test_delay", &[("samples", 1000.0)])]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
+    // Their notes already sound (delivered once the chain is in), so each note-off has a note to
+    // end (P3b).
+    block(&mut host, &mut rec, &t, &[]);
+    for i in 0..=MIDI_FX_CARRY as i32 {
+        host.deliver(&mut rec, 0, &on(i, 60, 100));
+    }
+    rec.heard.clear();
     let input: Vec<(u32, PluginEvent)> = (0..=MIDI_FX_CARRY as i32).map(|i| (0, off(i, 60))).collect();
     block(&mut host, &mut rec, &t, &input);
-    assert_eq!(notes(&rec), vec![(0, FRAMES as u32 - 1, "off", 60, 0)], "the release is not lost");
+    assert_eq!(notes(&rec), vec![(1, FRAMES as u32 - 1, "off", 60, 0)], "the release is not lost");
     assert_eq!(host.counts.carry_overflow, 1);
 }
 
 #[test]
 fn a_full_block_refuses_and_counts() {
+    // ADR 0057, slice P3b: the chain's input admits 384 non-releases, then releases up to 512.
     let t = track(&[("midi_velocity", &[])]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
     host.begin(&mut rec, &t, None, 0, &Transport::default(), 48_000.0, 0, FRAMES);
-    for _ in 0..MIDI_FX_BLOCK {
+    for _ in 0..MIDI_FX_NON_RELEASE {
         assert!(host.take(&mut rec, 0, &ev(-1, Message::Control { cc: 1, value: 1 })));
+    }
+    assert!(!host.take(&mut rec, 0, &ev(-1, Message::Control { cc: 1, value: 2 })), "the non-release limit");
+    for _ in MIDI_FX_NON_RELEASE..MIDI_FX_BLOCK {
+        assert!(host.take(&mut rec, 0, &ev(-1, Message::Control { cc: 64, value: 0 })), "releases do not use the limit");
     }
     assert!(!host.take(&mut rec, 0, &off(1, 60)), "refused: the mix retries a release next block");
     host.flush(&mut rec);
     assert_eq!(rec.heard.len(), MIDI_FX_BLOCK);
-    assert_eq!(host.counts.overflow, 1);
+    assert_eq!((host.counts.overflow, host.counts.safety_resets), (2, 0), "a release the input refuses makes no reset");
 }
 
 #[test]
@@ -287,7 +305,7 @@ fn with_no_effects_the_host_stays_active_while_it_holds_a_note_it_started() {
     // later edit does not end the note a second time).
     let t = track(&[]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
-    host.out[0] = Note { used: true, channel: 0, key: 60, voice: 7, epoch: 0 };
+    host.out[0] = Note { used: true, channel: 0, key: 60, voice: 7, epoch: 0, seq: 1 };
     assert_eq!((host.len, host.given_len, host.retry_len), (0, 0, 0));
     assert!(host.active(), "a note it started keeps it active");
     host.begin(&mut rec, &t, None, 0, &Transport::default(), 48_000.0, 0, FRAMES);

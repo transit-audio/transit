@@ -41,7 +41,9 @@ fn sequencer_overflow(frames: usize, tempo: f64) {
     }
     assert!(starts > 0);
     assert!(host.counts.overflow > 0, "the row must exercise output overflow");
-    assert_eq!(host.counts.overflow, host.counts.refused_ons + host.counts.evicted_ons, "only ons are refused");
+    // ADR 0057, slice P3b: past 384 non-releases the output refuses note-ons, and a release that
+    // finds it full makes the reset barrier (the old sink evicted note-ons instead).
+    assert!(host.counts.refused_ons > 0 && host.counts.safety_resets > 0, "counts={:?}", host.counts);
     assert_eq!((repeated, sounding.iter().filter(|on| **on).count()), (0, 0), "frames={frames}, tempo={tempo}, counts={:?}", host.counts);
 }
 
@@ -63,60 +65,56 @@ fn sequencer_1000_bpm_16384() {
 }
 
 #[test]
-fn releases_evict_the_newest_on_and_keep_write_order() {
-    for release in [
-        off(900, 60),
-        ev(-1, Message::Control { cc: 120, value: 0 }),
-        ev(-1, Message::Control { cc: 123, value: 0 }),
-        ev(-1, Message::Control { cc: 64, value: 63 }),
-    ] {
+fn an_accepted_note_on_is_never_evicted() {
+    // ADR 0057, decision 13, P3b's first case: 512 note-ons offered to one stage buffer, 384
+    // accepted and reported, 128 refused and reported; 100 releases after them all accepted; none
+    // of the 384 lost (the old sink reported 512 accepted and then evicted 100). Each release kind.
+    let releases: [fn(i32) -> PluginEvent; 4] = [
+        |i| off(i, 60),
+        |_| ev(-1, Message::Control { cc: 120, value: 0 }),
+        |_| ev(-1, Message::Control { cc: 123, value: 0 }),
+        |_| ev(-1, Message::Control { cc: 64, value: 63 }),
+    ];
+    for release in releases {
         let mut out = Output::new();
-        for i in 0..MIDI_FX_BLOCK {
-            assert!(out.push(TimedEvent { offset: 10, event: on(i as i32, 60, 100) }));
+        let verdicts: Vec<bool> = (0..MIDI_FX_BLOCK).map(|i| out.push(TimedEvent { offset: 10, event: on(i as i32, 60, 100) })).collect();
+        assert_eq!(verdicts.iter().filter(|v| **v).count(), MIDI_FX_NON_RELEASE);
+        assert!(verdicts[..MIDI_FX_NON_RELEASE].iter().all(|v| *v), "the first 384 accepted, the rest refused");
+        for i in 0..100 {
+            assert!(out.push(TimedEvent { offset: 11, event: release(i) }), "release {i}");
         }
-        assert!(!out.push(TimedEvent { offset: 10, event: on(999, 61, 100) }));
-        assert!(out.push(TimedEvent { offset: 10, event: release }));
         let emitted: Vec<_> = out.events().collect();
-        assert_eq!(emitted.len(), MIDI_FX_BLOCK);
-        assert_eq!(emitted.last().unwrap().event, release);
-        assert!(emitted.iter().all(|e| e.event.note_id != 511 && e.event.note_id != 999));
-        assert_eq!((out.counts.overflow, out.counts.refused_ons, out.counts.evicted_ons), (2, 1, 1));
+        assert_eq!(emitted.len(), MIDI_FX_NON_RELEASE + 100);
+        let ons: Vec<i32> = emitted.iter().filter(|e| matches!(e.event.message, Message::NoteOn { .. })).map(|e| e.event.note_id).collect();
+        assert_eq!(ons, (0..MIDI_FX_NON_RELEASE as i32).collect::<Vec<_>>(), "none of the 384 lost, in write order");
+        assert!(emitted[MIDI_FX_NON_RELEASE..].iter().all(|e| e.event.is_release()));
+        assert_eq!((out.counts.overflow, out.counts.refused_ons, out.release_refused), (128, 128, false));
     }
 }
 
 #[test]
-fn eviction_keeps_same_offset_releases_after_the_surviving_events() {
+fn a_release_that_finds_the_buffer_full_is_refused_and_marks_the_reset() {
     let mut out = Output::new();
-    for i in 0..MIDI_FX_BLOCK {
-        let e = if i % 2 == 0 { on(i as i32, 60, 100) } else { off(i as i32, 60) };
-        out.push(TimedEvent { offset: 0, event: e });
+    for i in 0..MIDI_FX_NON_RELEASE {
+        assert!(out.push(TimedEvent { offset: 0, event: on(i as i32, 60, 100) }));
     }
-    out.push(TimedEvent { offset: 0, event: off(1000, 60) });
+    for i in MIDI_FX_NON_RELEASE..MIDI_FX_BLOCK {
+        assert!(out.push(TimedEvent { offset: 0, event: off(i as i32, 60) }));
+    }
+    assert!(!out.release_refused);
+    assert!(!out.push(TimedEvent { offset: 0, event: off(1000, 60) }));
+    assert!(out.release_refused, "the block's reset barrier");
     let ids: Vec<_> = out.events().map(|e| e.event.note_id).collect();
-    assert_eq!(&ids[MIDI_FX_BLOCK - 3..], &[509, 511, 1000]);
+    assert_eq!(ids, (0..MIDI_FX_BLOCK as i32).collect::<Vec<_>>(), "nothing evicted");
+    assert_eq!((out.counts.overflow, out.counts.refused_ons), (1, 0));
 }
 
 #[test]
-fn release_only_flood_has_bounded_channel_safety_releases() {
-    let mut out = Output::new();
-    for i in 0..4096u32 {
-        let mut e = off(i as i32, (i % 128) as u8);
-        e.channel = (i % 16) as u8;
-        assert!(out.push(TimedEvent { offset: i, event: e }));
-    }
-    assert!(!out.push(TimedEvent { offset: 4096, event: on(5000, 60, 100) }));
-    let events: Vec<_> = out.events().collect();
-    assert_eq!(events.len(), 16 * 7);
-    for channel in 0..16 {
-        for cc in [64, 66, 67, 69, 120, 121, 123] {
-            assert!(events.iter().any(|e| e.offset == 4095 && e.event.channel == channel && e.event.message == Message::Control { cc, value: 0 }));
-        }
-    }
-    assert_eq!((out.counts.coalesced_releases, out.counts.overflow, out.counts.refused_ons), (4096, 1, 1));
-}
-
-#[test]
-fn carried_ons_are_evicted_for_this_blocks_releases() {
+fn carried_events_enter_the_buffer_before_the_effect_writes() {
+    // ADR 0057, slice P3b: 64 carried note-ons due in the block, then the effect writes 384
+    // controllers and 64 note-offs of them. The note-ons take buffer room first, so they are
+    // delivered, the controllers are refused past the non-release limit (320 accepted) and every
+    // note-off ends its note.
     let t = track(&[("midi_velocity", &[])]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
     host.begin(&mut rec, &t, None, 0, &Transport::default(), 48_000.0, 0, FRAMES);
@@ -125,15 +123,18 @@ fn carried_ons_are_evicted_for_this_blocks_releases() {
         *c = Carried { due: 0, event: on(i as i32, 60, 100) };
     }
     stage.carry_len = MIDI_FX_CARRY;
-    for i in 0..MIDI_FX_BLOCK {
-        let e = if i < MIDI_FX_BLOCK - MIDI_FX_CARRY { ev(-1, Message::Control { cc: 1, value: 1 }) } else { off(i as i32, 60) };
+    for i in 0..MIDI_FX_BLOCK - MIDI_FX_CARRY {
+        let e = if i < MIDI_FX_NON_RELEASE { ev(-1, Message::Control { cc: 1, value: 1 }) } else { off((i - MIDI_FX_NON_RELEASE) as i32, 60) };
         assert!(host.take(&mut rec, 0, &e));
     }
     host.flush(&mut rec);
-    assert_eq!(rec.heard.iter().filter(|(_, _, e)| matches!(e.message, Message::NoteOff { .. })).count(), MIDI_FX_CARRY);
-    assert!(rec.heard.iter().all(|(_, _, e)| !matches!(e.message, Message::NoteOn { .. })));
-    assert_eq!(host.counts.evicted_ons, MIDI_FX_CARRY as u64);
-    assert_eq!(host.counts.overflow, MIDI_FX_CARRY as u64);
+    let kinds = |pick: fn(&Message) -> bool| rec.heard.iter().filter(|(_, _, e)| pick(&e.message)).count();
+    assert_eq!(kinds(|m| matches!(m, Message::NoteOn { .. })), MIDI_FX_CARRY, "the carried note-ons");
+    assert_eq!(kinds(|m| matches!(m, Message::NoteOff { .. })), MIDI_FX_CARRY);
+    assert_eq!(kinds(|m| matches!(m, Message::Control { .. })), MIDI_FX_NON_RELEASE - MIDI_FX_CARRY);
+    assert!(rec.heard.iter().take(MIDI_FX_CARRY).all(|(_, _, e)| matches!(e.message, Message::NoteOn { .. })), "ahead of the block's events");
+    assert!(host.out.iter().all(|n| !n.used), "every note ended");
+    assert_eq!((host.counts.overflow, host.counts.refused_ons, host.counts.safety_resets), (64, 0, 0));
 }
 
 #[test]
@@ -155,7 +156,6 @@ fn overflow_on_the_audio_thread_allocates_nothing() {
     });
     assert_eq!(stats, transit_rt::testing::AllocStats::default());
     assert!(host.counts.overflow > 0);
-    assert!(host.counts.coalesced_releases > 0);
 }
 
 #[test]
