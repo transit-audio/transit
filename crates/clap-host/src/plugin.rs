@@ -1050,8 +1050,9 @@ impl Plugin for ClapPlugin {
         self.shared.life_out.note_output()
     }
 
-    /// Off by default (the output events answered as before HM1, no event buffer); on, from the
-    /// next activation. Control thread, before `prepare`.
+    /// Off by default: never enabled, the output events are answered as before HM1 and no event
+    /// buffer is allocated. On, from the next activation. Turned off after it was on: from the
+    /// next activation, the buffer kept. Control thread, before `prepare`.
     fn collect_note_output(&mut self, on: bool) {
         if on {
             self.note_out.reserve();

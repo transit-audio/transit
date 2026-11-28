@@ -74,7 +74,9 @@ pub(crate) struct Instance {
     pub(super) context: sv::ProcessContext,
     pub(super) event_in: bool,
     /// Note output collection asked for (ADR 0064, decision 3): event output bus 0 is activated
-    /// and read from the next configuration on. Off, the output list behaves as before HM1.
+    /// and read from the next configuration on. Never asked, the output list behaves as before
+    /// HM1 and no event output bus is activated; asked and then turned off, the next
+    /// configuration stops activating the bus but does not explicitly deactivate it.
     pub(super) collect_notes: bool,
     /// Collection in force for the current configuration (asked for, and an event output bus).
     pub(super) notes_out: bool,

@@ -166,7 +166,10 @@ pub struct CallRun {
 /// What the native calls of the last block did (ADR 0064, decisions 3 and 6). Every call made is
 /// described: [`CallReport::runs`] holds them as runs of identical records, in call order, and
 /// [`CallReport::calls`] expands them one record per call. `made + skipped` is the number of
-/// native calls the block was due.
+/// native calls the block was due. A failed report (`error`, or any call record marked failed)
+/// takes precedence over the individual call records: the block's output is discarded whole
+/// (ADR 0064, 7.4), and no record of it authorizes output. That includes the synthetic failure
+/// [`CallReport::record`] marks when it runs out of runs and folds calls into the last one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CallReport {
     /// Native calls made.
@@ -242,7 +245,8 @@ impl CallReport {
 /// The block output buffer an adapter keeps: the events of the last block's native calls (at
 /// most [`HOSTED_OUT_CAP`], allocated by [`HostedOutBuffer::new`] or [`HostedOutBuffer::reserve`],
 /// never on the audio thread) and their report. [`HostedOutBuffer::empty`] holds no events: it
-/// refuses every push, and only reports calls.
+/// refuses every push, and only reports calls. Once reserved, the storage is kept for the
+/// buffer's life.
 pub struct HostedOutBuffer {
     events: Vec<HostedOut>,
     report: CallReport,

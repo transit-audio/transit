@@ -108,7 +108,7 @@ impl Instance {
     }
 
     /// Limits the next call's output list to `room` events (the block buffer's room left); without
-    /// collection the list takes up to its capacity in every call, as before HM1.
+    /// collection in force the list takes up to its capacity in every call, as before HM1.
     pub(crate) fn limit_output(&self, room: usize) {
         self.out_events.set_room(if self.notes_out { room } else { EVENT_CAP });
     }
@@ -133,9 +133,9 @@ impl Instance {
     }
 
     /// The stage reset (ADR 0064, decision 6): `setProcessing(false)` then `setProcessing(true)`,
-    /// except that the `false` is left out when the processor is not in the processing state (a
-    /// fresh activation, which has no inner state to reset). True when each result is
-    /// `kResultOk` or `kNotImplemented`.
+    /// except that the `false` is left out when the processor is not in the processing state
+    /// (the `true` is still sent before `process`). True when each result is `kResultOk` or
+    /// `kNotImplemented`.
     pub(crate) fn cycle_processing(&mut self) -> bool {
         let Some(p) = self.processor.clone() else { return false };
         let fine = |r: sb::tresult| r == sb::kResultOk || r == sb::kNotImplemented;

@@ -1225,8 +1225,10 @@ impl Plugin for Vst3Plugin {
         self.shared.note_output()
     }
 
-    /// Off by default (the output list as before HM1, no event output bus activated, no event
-    /// buffer); on, from the next activation. Control thread, before `prepare`.
+    /// Off by default: never enabled, the output list behaves as before HM1, no event output bus
+    /// is activated and no event buffer is allocated. On, from the next activation. Turned off
+    /// after it was on: from the next activation, the buffer kept, and event output bus 0 not
+    /// explicitly deactivated. Control thread, before `prepare`.
     fn collect_note_output(&mut self, on: bool) {
         if on {
             self.note_out.reserve();
