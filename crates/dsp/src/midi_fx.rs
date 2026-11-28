@@ -36,10 +36,16 @@ pub mod gated;
 /// A test-only generator and latch (feature `testing`): the host slices' fixture (ADR 0057, P2).
 #[cfg(feature = "testing")]
 pub mod generator;
-/// A test-only owning pass-through (feature `testing`): a host slices' fixture (ADR 0057, P3a).
+/// The test-only fixtures' input ledger (feature `testing`; ADR 0057, decision 11).
+#[cfg(feature = "testing")]
+mod ledger;
+/// A test-only owning pass-through (feature `testing`): a host slices' fixture (ADR 0057, P3a, P3b).
 #[cfg(feature = "testing")]
 pub mod owning;
 pub mod random_sequencer;
+/// A test-only owning stacker (feature `testing`): a host slices' fixture (ADR 0057, P3b).
+#[cfg(feature = "testing")]
+pub mod stacker;
 pub mod transpose;
 pub mod velocity;
 
@@ -223,6 +229,8 @@ pub enum Builtin {
     Owning(owning::Owning),
     #[cfg(feature = "testing")]
     Gated(gated::Gated),
+    #[cfg(feature = "testing")]
+    Stacker(stacker::Stacker),
 }
 
 impl Builtin {
@@ -252,6 +260,10 @@ impl Builtin {
             if id == gated::GATED_INFO.id {
                 return Some(Builtin::Gated(gated::Gated::default()));
             }
+            #[cfg(feature = "testing")]
+            if id == stacker::STACKER_INFO.id {
+                return Some(Builtin::Stacker(stacker::Stacker::default()));
+            }
             None
         }
     }
@@ -269,6 +281,8 @@ impl Builtin {
             Builtin::Owning(x) => x,
             #[cfg(feature = "testing")]
             Builtin::Gated(x) => x,
+            #[cfg(feature = "testing")]
+            Builtin::Stacker(x) => x,
         }
     }
 
@@ -286,6 +300,8 @@ impl Builtin {
             Builtin::Owning(x) => x,
             #[cfg(feature = "testing")]
             Builtin::Gated(x) => x,
+            #[cfg(feature = "testing")]
+            Builtin::Stacker(x) => x,
         }
     }
 }
