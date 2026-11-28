@@ -11,7 +11,9 @@
 //! and through the devices; the sparse case; a refused note-on older than a delivered one of its
 //! key; oldest-first `out` matching; the refused table cleared at a chain edit (the anonymous-key
 //! replay, with an old-epoch release swallowed); a block with an unchanged chain (what a plan
-//! adoption with the same chain gives the host) keeping every table.
+//! adoption with the same chain gives the host) keeping every table; the sequence counter's
+//! exhaustion (seeded just below 2^64 by writing the host's counter in the test): order kept
+//! across the renumbering, between the tables and within one.
 use super::*;
 use transit_dsp::midi_fx::{owning::Owning, stacker::Stacker};
 
@@ -436,4 +438,46 @@ fn a_block_with_an_unchanged_chain_keeps_every_table() {
     r.block(&adopted, 512, &[(5, note_off(0, 500, 60))]);
     assert_eq!(r.inst.heard.len(), n, "60 and the anonymous 72 consumed against their refusals");
     assert_eq!((r.host.counts.consumed_releases, Run::used(&r.host.refusals)), (2, 0));
+}
+
+#[test]
+fn order_between_the_tables_survives_the_sequence_counters_exhaustion() {
+    // Sequence numbers are never shared between live entries: when the 64-bit counter would run
+    // out, the live entries are renumbered 1..n in their order. Each note-on taken uses two
+    // numbers (its `given` entry, then its `out` or refused entry).
+    let t = track(&[VELOCITY]);
+    // Between the tables: a delivered anonymous 60 takes the last two numbers; a refused 60 of
+    // the same key comes after the renumbering. The first note-off still ends the delivered note.
+    let mut r = Run::new();
+    r.block(&t, 256, &[]);
+    r.host.seq = u64::MAX - 2;
+    r.block(&t, 256, &[(10, note_on(0, NO, 60))]);
+    assert_eq!(r.host.out[0].seq, u64::MAX);
+    r.inst.refuse_ons = true;
+    r.block(&t, 256, &[(10, note_on(0, NO, 60))]);
+    r.inst.refuse_ons = false;
+    let refusal = r.host.refusals.iter().find(|n| n.used).map(|n| n.seq);
+    let numbers = (r.host.out[0].seq, refusal, r.host.seq);
+    r.block(&t, 256, &[(10, note_off(0, NO, 60))]);
+    assert_eq!(r.inst.heard[1..], [(778, note_off(0, NO, 60))], "the first note-off ends the older, delivered note");
+    r.block(&t, 256, &[(10, note_off(0, NO, 60))]);
+    assert_eq!((r.inst.heard.len(), r.host.counts.consumed_releases), (2, 1), "the second is consumed against the refusal");
+    assert_eq!(sounding(&r.inst.heard), Ok(vec![]));
+    assert_eq!(numbers, (2, Some(4), 4), "renumbered in order (given 1, out 2, given 3), then continued");
+}
+
+#[test]
+fn order_within_one_table_survives_the_sequence_counters_exhaustion() {
+    // Within one table, across slot reuse: 61 in slot 0 and an older 60 in slot 1 take the last
+    // numbers; 61 ends and a newer 60 takes slot 0 after the renumbering. The anonymous note-off
+    // closes the older 60 in slot 1.
+    let t = track(&[VELOCITY]);
+    let mut r = Run::new();
+    r.block(&t, 256, &[]);
+    r.host.seq = u64::MAX - 4;
+    r.block(&t, 256, &[(1, note_on(0, NO, 61)), (2, note_on(0, NO, 60))]);
+    assert_eq!(r.host.out[1].seq, u64::MAX);
+    r.block(&t, 256, &[(1, note_off(0, NO, 61)), (2, note_on(0, NO, 60))]);
+    r.block(&t, 256, &[(1, note_off(0, NO, 60))]);
+    assert!(!r.host.out[1].used && r.host.out[0].used, "the anonymous note-off closed the older entry");
 }

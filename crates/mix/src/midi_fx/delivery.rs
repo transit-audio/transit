@@ -4,7 +4,8 @@
 //! - **Tables.** `out` holds every note-on the host delivered and has not seen released; the
 //!   refused table every note-on it did not deliver (the `out` table full, or the instrument
 //!   refusing it), [`MIDI_FX_NOTES`] each; `given` the notes the chain was given. Every entry
-//!   carries a 64-bit sequence number, never reused, so order is never by slot index.
+//!   carries a 64-bit sequence number, never shared between live entries, so order is never by
+//!   slot index; if the counter would run out, the live entries are renumbered in order.
 //! - **Matching.** A note-off closes the oldest matching entry of `out` and the refused table
 //!   together: one with a voice id the entry of its channel with that id only, one without the
 //!   oldest anonymous entry of its channel and key. Closing an `out` entry gives the note-off to
@@ -36,7 +37,7 @@ pub(super) struct Note {
     pub(super) voice: i32,
     /// For notes the chain was given: the chain edit it started under.
     pub(super) epoch: u32,
-    /// Its place in the order of the host's notes (never reused).
+    /// Its place in the order of the host's notes (never shared between live entries).
     pub(super) seq: u64,
 }
 
@@ -69,10 +70,35 @@ pub(super) fn oldest(table: &[Note], ev: &PluginEvent, key: u8) -> Option<usize>
 }
 
 impl MidiFxHost {
-    /// The next sequence number of the host's notes.
+    /// The next sequence number of the host's notes. No two live entries ever share one: when the
+    /// 64-bit counter would run out, the live entries are renumbered first (`renumber`).
     pub(super) fn next_seq(&mut self) -> u64 {
-        self.seq = self.seq.saturating_add(1);
+        if self.seq == u64::MAX {
+            self.renumber();
+        }
+        self.seq += 1;
         self.seq
+    }
+
+    /// Renumbers the live entries of `out`, the refused table and `given` (at most 768) to 1..n in
+    /// their existing order, in place, and continues the counter from n. Each step takes the
+    /// smallest old number above the last one taken; a renumbered entry's new number is at most
+    /// its old one, so it is never taken again. Allocation-free; quadratic in the live entries,
+    /// once in 2^64 numbers.
+    fn renumber(&mut self) {
+        let mut taken: Option<u64> = None;
+        let mut n = 0u64;
+        loop {
+            let next =
+                self.out.iter().chain(&self.refusals).chain(&self.given).filter(|e| e.used && taken.is_none_or(|t| e.seq > t)).map(|e| e.seq).min();
+            let Some(old) = next else { break };
+            n += 1;
+            for e in self.out.iter_mut().chain(self.refusals.iter_mut()).chain(self.given.iter_mut()).filter(|e| e.used && e.seq == old) {
+                e.seq = n;
+            }
+            taken = Some(old);
+        }
+        self.seq = n;
     }
 
     /// Holds a refused release for the next block (counted when there is no room).
