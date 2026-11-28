@@ -234,6 +234,8 @@ fn case(id: &str, script: Vec<(u64, transit_dsp::hosted_out::HostedOut)>, stop: 
         let got: Vec<(u64, &str, u8, u16, u16, i32)> = r.heard().into_iter().map(|(f, k, c, a, _, i)| (f, k, c, a, 0, i)).collect();
         assert_eq!(got, want, "{id} block {size}");
         assert_eq!(r.host.counts.unmatched_releases, unmatched, "{id} block {size}: releases consumed");
+        // 5.4: no note-off left the stage without an open entry (the delivery consumed none).
+        assert_eq!(r.host.counts.consumed_releases, 0, "{id} block {size}: no stray note-off left the stage");
         stop_and_settle(&mut r, &format!("{id} block {size}"));
     }
 }
@@ -443,7 +445,11 @@ fn with_the_record_table_full_a_rejections_release_shortens_a_note_and_never_wri
         r.run(1536, size, &[]);
         assert_eq!(r.host.counts.rejected_unrecorded, 1, "block {size}");
         let offs: Vec<_> = r.heard().into_iter().filter(|x| x.1 == "off").map(|x| (x.0, x.2, x.3, x.5)).collect();
-        assert_eq!(offs, vec![(1300, 0, 5, 5)], "block {size}: shortened once, never a second note-off");
+        assert_eq!(offs, vec![(1300, 0, 5, 5)], "block {size}: shortened once");
+        // Never a second note-off: the note's own release matched nothing at the stage, and no
+        // note-off left the stage for the delivery to consume.
+        assert_eq!(r.host.counts.unmatched_releases, 1, "block {size}");
+        assert_eq!(r.host.counts.consumed_releases, 0, "block {size}: no second note-off left the stage");
         stop_and_settle(&mut r, "saturation");
     }
 }
