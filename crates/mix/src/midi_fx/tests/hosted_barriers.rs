@@ -201,7 +201,7 @@ fn a_refused_reactivation_silences_the_stage_until_an_activation_succeeds() {
         let events = [(1100, input(65, 4, true)), (1150, input(65, 4, false)), (1600, input(67, 5, true)), (1700, input(67, 5, false))];
         r.run(1500, size, &events);
         ended_at_b(&r, true, &format!("refused, block {size}"));
-        assert!(r.fake.lock().heard.is_empty(), "block {size}: its input is consumed while it is silent");
+        assert_eq!(r.fake.lock().offered, 0, "block {size}: its input is consumed while it is silent, never handed to it");
         // An activation that succeeds: another barrier, and the stage runs again.
         r.fake.lock().bump(true);
         r.run(2048, size, &events);
@@ -332,7 +332,7 @@ fn each_state_the_user_did_not_ask_for_passes_nothing_and_consumes_its_input() {
         let mut r = Rig::new(CLAP, 512);
         r.fake.lock().bump(false);
         r.run(1024, size, &events);
-        assert!(r.heard().is_empty() && r.fake.lock().heard.is_empty(), "block {size}: inactive");
+        assert!(r.heard().is_empty() && r.fake.lock().offered == 0, "block {size}: inactive");
     }
 }
 

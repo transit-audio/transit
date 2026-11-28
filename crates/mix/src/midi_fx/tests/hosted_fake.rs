@@ -37,6 +37,8 @@ pub(super) struct Script {
     pub(super) heard: Vec<(u64, PluginEvent)>,
     /// Input for the next actual call: block offset and event.
     queue: Vec<(u32, PluginEvent)>,
+    /// Input events the host handed to it (`event` calls).
+    pub(super) offered: u64,
     /// Absolute frames at which a reset ran (before a call's processing).
     pub(super) resets: Vec<u64>,
     reset_pending: bool,
@@ -76,6 +78,7 @@ impl Script {
             retain: false,
             heard: Vec::new(),
             queue: Vec::new(),
+            offered: 0,
             resets: Vec::new(),
             reset_pending: false,
             restarts: 0,
@@ -167,7 +170,9 @@ impl Plugin for Fake {
         None
     }
     fn event(&mut self, offset: u32, ev: &PluginEvent) -> bool {
-        self.st().queue.push((offset, *ev));
+        let mut s = self.st();
+        s.offered += 1;
+        s.queue.push((offset, *ev));
         true
     }
     fn process(&mut self, _io: &mut [Vec<f32>], frames: usize) {
