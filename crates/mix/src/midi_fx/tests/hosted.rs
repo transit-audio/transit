@@ -472,24 +472,36 @@ fn with_the_record_table_full_a_rejections_release_shortens_a_note_and_never_wri
     }
 }
 
-/// Observed, not the card's expectation (5.7 stopped on, see the hand-back): a note-off that finds
-/// the stage's output full (512 events) is refused, which is ADR 0057 P3b's reset-barrier trigger,
-/// so the barrier ends the note at the block's last frame and drops the owed release with the
-/// ledger; nothing is written at offset 0 of the next block.
+/// 5.7 (ADR 0057 P3b's rule): a note-off that finds the stage's output full is refused, which
+/// triggers the chain's safety reset; accepted releases end their notes where they were written,
+/// and the host ends every remaining note of its `out` table at the refusing block's last frame.
+/// Nothing is retried in the next block.
 #[test]
 fn a_note_off_a_full_stage_output_refuses_is_ended_by_the_reset_barrier() {
     let mut r = Rig::new(VST3, 512);
-    // 300 notes in block 0; in block 1, 212 controller events (non-releases) and 300 note-offs: 384
-    // non-releases at most, 512 events in all, so the 301st event of the releases is refused.
+    // Block 0: 256 notes at 10 (k = 0..255 on channel k / 128, key k % 128, host id k). Block 1: 300
+    // controller events at 520 (non-releases, under the 384 limit) and the 256 note-offs at 530, in
+    // that order: 300 + 212 = 512 events, so the note-offs of k = 0..211 are accepted and those of
+    // k = 212..255 (44) are refused.
     let mut at: Vec<_> = (0..256).map(|k| (10, on(k / 128, k % 128, i32::from(k), 1.0))).collect();
     at.extend((0..300).map(|k| (520, midi(OutKind::Controller, [0xB0, 1, (k % 128) as u8]))));
     at.extend((0..256).map(|k| (530, off(k / 128, k % 128, i32::from(k)))));
     r.fake.lock().at = at;
     r.run(1024, 512, &[]);
-    let offs = r.heard().into_iter().filter(|x| x.1 == "off").count();
-    assert_eq!(offs, 256, "every note ended once");
+    let offs_at = |r: &Rig, f: u64| -> Vec<(u8, u16, i32)> {
+        let mut v: Vec<_> = r.heard().into_iter().filter(|x| x.1 == "off" && x.0 == f).map(|x| (x.2, x.3, x.5)).collect();
+        v.sort_unstable();
+        v
+    };
+    let want = |ks: std::ops::Range<i32>| -> Vec<(u8, u16, i32)> { ks.map(|k| ((k / 128) as u8, (k % 128) as u16, k)).collect() };
+    assert_eq!(offs_at(&r, 530), want(0..212), "the 212 accepted note-offs where they were written");
+    assert_eq!(offs_at(&r, 1023), want(212..256), "the 44 refused ones ended by the barrier at the block's last frame");
+    assert_eq!(r.heard().into_iter().filter(|x| x.1 == "off").count(), 256, "no note-off anywhere else");
     assert_eq!(r.host.counts.safety_resets, 1, "the reset barrier ran");
-    let late: Vec<_> = r.heard().into_iter().filter(|x| x.1 == "off" && x.0 != 530).map(|x| x.0).collect();
-    assert!(late.iter().all(|f| *f == 1023), "the refused ones ended by the barrier at the block's last frame: {late:?}");
+    // The next block: nothing is retried, no release repeated.
+    let before = r.inst.heard.len();
+    r.fake.lock().at.clear();
+    r.run(1536, 512, &[]);
+    assert!(r.inst.heard[before..].iter().all(|(_, e)| !matches!(e.message, Message::NoteOff { .. })), "no note-off in the next block");
     stop_and_settle(&mut r, "full output");
 }
