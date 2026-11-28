@@ -54,7 +54,9 @@
 //! storage is made with the instrument's event state, off the audio thread, and a built-in effect
 //! is a value made in place ([`Builtin`]).
 
-use transit_dsp::event::{Message, NoteId, PluginEvent};
+#[cfg(feature = "testing")]
+use transit_dsp::event::NoteId;
+use transit_dsp::event::{Message, PluginEvent};
 use transit_dsp::midi_fx::{Builtin, MidiOut, TimedEvent};
 use transit_dsp::{Plugin, Transport};
 use transit_model::{AutoParam, MAX_MIDI_EFFECTS, MidiEffectSlot, Track};
