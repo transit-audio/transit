@@ -19,9 +19,9 @@
 //!   matches records of its id, an anonymous one records without an id, by sequence among the
 //!   entries; a wildcard clears every matching record. A release that closes a record writes
 //!   nothing. With the table full a rejection is only counted (`unrecorded`).
-//! - **A refused note-off (5.7).** A note-off the stage's output refuses leaves its entry open,
-//!   owed: [`Ledger::owed`] writes it again at offset 0 ahead of the stage's next output, and an
-//!   owed entry matches no later release or pressure.
+//! - **A refused note-off (5.7).** A note-off the stage's output refuses closes its entry: the
+//!   refusal triggers ADR 0057 P3b's safety reset for the chain, which ends the note from the host's
+//!   `out` table at the block's last frame and clears the ledger. The stage does not retry it.
 //!
 //! The ledger is cleared at every host barrier (the stage's `clear_ledger`). Nothing here
 //! allocates.
@@ -42,11 +42,9 @@ pub(super) struct Entry {
     pub(super) pid: i32,
     pub(super) host: i32,
     pub(super) seq: u64,
-    /// The note-off the output refused, owed with its velocity (5.7).
-    pub(super) owed: Option<u8>,
 }
 
-const NO_ENTRY: Entry = Entry { used: false, channel: 0, key: 0, pid: -1, host: -1, seq: 0, owed: None };
+const NO_ENTRY: Entry = Entry { used: false, channel: 0, key: 0, pid: -1, host: -1, seq: 0 };
 
 /// A rejected note-on, so its release finds it in its place (5.6).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,7 +81,6 @@ pub(super) enum Sel {
 impl Sel {
     fn entry(self, e: &Entry) -> bool {
         e.used
-            && e.owed.is_none()
             && match self {
                 Sel::Identified { channel, key, pid } => e.channel == channel && e.key == key && e.pid == pid,
                 Sel::Anonymous { channel, key } => e.channel == channel && e.key == key,
@@ -129,12 +126,12 @@ impl Ledger {
         Ledger { open: [NO_ENTRY; MIDI_FX_NOTES], records: [NO_RECORD; MIDI_FX_NOTES], seq: 0 }
     }
 
-    /// A barrier: every entry, record and owed release is gone.
+    /// A barrier: every entry and record is gone.
     pub(super) fn clear(&mut self) {
         *self = Ledger::new();
     }
 
-    /// Open entries (owed ones included).
+    /// Open entries.
     #[cfg(test)]
     pub(super) fn open(&self) -> impl Iterator<Item = &Entry> + '_ {
         self.open.iter().filter(|e| e.used)
@@ -186,21 +183,6 @@ impl Ledger {
         }
     }
 
-    /// The owed note-offs, at offset 0, oldest first, ahead of the stage's output (5.7).
-    pub(super) fn owed(&mut self, out: &mut Output) {
-        loop {
-            let next = self.open.iter().enumerate().filter(|(_, e)| e.used && e.owed.is_some()).min_by_key(|(_, e)| e.seq).map(|(i, _)| i);
-            let Some(i) = next else { return };
-            let Some(e) = self.open.get(i).copied() else { return };
-            if !out.push(note_off(0, &e, e.owed.unwrap_or(0))) {
-                return;
-            }
-            if let Some(e) = self.open.get_mut(i) {
-                *e = NO_ENTRY;
-            }
-        }
-    }
-
     /// A note-on the plug-in wrote (`pid` -1: anonymous), at `offset`; `ids` the chain's host id
     /// counter.
     pub(super) fn on(&mut self, channel: u8, key: u8, pid: i32, velocity: u8, offset: u32, ids: &mut u32, out: &mut Output, tally: &mut Tally) {
@@ -217,7 +199,7 @@ impl Ledger {
         }
         let seq = self.next_seq();
         if let Some(e) = self.open.get_mut(free) {
-            *e = Entry { used: true, channel, key, pid, host, seq, owed: None };
+            *e = Entry { used: true, channel, key, pid, host, seq };
         }
     }
 
@@ -294,16 +276,13 @@ impl Ledger {
         self.open.iter().enumerate().filter(|(_, e)| sel.entry(e)).min_by_key(|(_, e)| e.seq).map(|(i, _)| i)
     }
 
-    /// Writes entry `i`'s note-off; a refused one leaves it owed.
+    /// Writes entry `i`'s note-off and closes the entry. A note-off the output refuses closes it
+    /// too: the refusal is P3b's reset trigger, and the reset ends the note (5.7).
     fn close(&mut self, i: usize, velocity: u8, offset: u32, out: &mut Output) {
         let Some(e) = self.open.get(i).copied() else { return };
-        let accepted = out.push(note_off(offset, &e, velocity));
+        out.push(note_off(offset, &e, velocity));
         if let Some(slot) = self.open.get_mut(i) {
-            if accepted {
-                *slot = NO_ENTRY;
-            } else {
-                slot.owed = Some(velocity);
-            }
+            *slot = NO_ENTRY;
         }
     }
 
@@ -318,7 +297,6 @@ impl Ledger {
                 w.i32(e.pid);
                 w.i32(e.host);
                 w.u64(e.seq);
-                w.present(e.owed, |w, v| w.u8(v));
             }
         }
         for r in &self.records {
@@ -345,40 +323,6 @@ fn note_off(offset: u32, e: &Entry, velocity: u8) -> TimedEvent {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-
-    fn fill(out: &mut Output, n: usize) {
-        for k in 0..n {
-            let ev = PluginEvent { channel: 9, note_id: -1, message: Message::NoteOff { key: (k % 128) as u8, velocity: 0, id: NoteId::NONE } };
-            assert!(out.push(TimedEvent { offset: 0, event: ev }));
-        }
-    }
-
-    /// 5.7 at the ledger: a note-off the output refuses leaves its entry owed; the owed note-off is
-    /// written at offset 0 ahead of the next output; an owed entry matches no later release; a
-    /// later note-on of its key opens its own entry.
-    #[test]
-    fn a_refused_note_off_is_owed_and_written_first_next_time() {
-        let (mut l, mut out, mut t, mut ids) = (Ledger::new(), Output::new(), Tally::default(), 0u32);
-        l.on(0, 60, 7, 100, 3, &mut ids, &mut out, &mut t);
-        out.clear();
-        fill(&mut out, crate::midi_fx::MIDI_FX_BLOCK);
-        l.release(Sel::Identified { channel: 0, key: 60, pid: 7 }, 0, 9, &mut out, &mut t);
-        assert_eq!(l.open().map(|e| (e.host, e.owed)).collect::<Vec<_>>(), vec![(0, Some(0))], "owed");
-        // An owed entry matches no later release, and a new note-on of its key opens its own entry.
-        out.clear();
-        l.release(Sel::Anonymous { channel: 0, key: 60 }, 0, 1, &mut out, &mut t);
-        assert_eq!((out.events().count(), t.unmatched), (0, 1));
-        l.on(0, 60, -1, 90, 2, &mut ids, &mut out, &mut t);
-        assert_eq!(l.open().count(), 2);
-        // The next block's output: the owed note-off first, at offset 0.
-        out.clear();
-        l.owed(&mut out);
-        l.release(Sel::Anonymous { channel: 0, key: 60 }, 0, 5, &mut out, &mut t);
-        let got: Vec<(u32, i32, bool)> =
-            out.events().map(|e| (e.offset, e.event.note_id, matches!(e.event.message, Message::NoteOff { .. }))).collect();
-        assert_eq!(got, vec![(0, 0, true), (5, 1, true)]);
-        assert_eq!(l.open().count(), 0);
-    }
 
     #[test]
     fn host_ids_skip_ids_still_open_and_the_counter_is_the_callers() {

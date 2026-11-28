@@ -252,7 +252,6 @@ pub(super) fn process_block(
     }
     // 5.2: event-time order, write order within an offset.
     store.outs.sort_unstable_by_key(|e| (e.offset, e.seq));
-    store.ledger.owed(out);
     let last = frames.max(1) - 1;
     for e in &store.outs {
         translate(e, h.vst3, e.offset.min(last), &mut store.ledger, ids, out, &mut o);
