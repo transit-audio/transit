@@ -76,6 +76,9 @@ fn index_of(p: &Value, key: &str, cmd: &str, len: usize) -> Result<usize> {
 fn add(e: &mut Engine, p: &Value) -> Result<Value> {
     const CMD: &str = "mix.midi_effect";
     let plugin = str_param(p, "plugin").ok_or_else(|| bad(CMD, "`plugin` required"))?;
+    if transit_mix::is_third_party(plugin) {
+        return add_hosted(e, p, plugin.to_string());
+    }
     let info = transit_dsp::midi_fx::info(plugin).ok_or_else(|| {
         let ids: Vec<&str> = transit_dsp::midi_fx::REGISTRY.iter().map(|i| i.id).collect();
         bad(CMD, format!("`{plugin}` is not a MIDI effect (built-ins: {})", ids.join(", ")))
@@ -95,6 +98,48 @@ fn add(e: &mut Engine, p: &Value) -> Result<Value> {
     let tr = track_of(e, CMD, p)?;
     let index = tr.add_midi_effect(fx, at).ok_or_else(|| bad(CMD, format!("the track has {MAX_MIDI_EFFECTS} MIDI effects, the most it holds")))?;
     Ok(json!({"track": tr.id, "index": index, "plugin": info.id}))
+}
+
+/// A hosted MIDI effect (ADR 0064, 2.6 and decision 12): accepted only when the scan's probe found
+/// a note output transit reads (`note_output == Some(true)` in its cached descriptor), never on a
+/// rack (10.2). Until the visibility slice this command, through the control channel and headless
+/// scripts, is the only way in: no menu or listing offers a hosted id (`engine.midi_effects` lists
+/// the built-ins only). Its parameters and state are a later slice's (HM3).
+fn add_hosted(e: &mut Engine, p: &Value, plugin: String) -> Result<Value> {
+    const CMD: &str = "mix.midi_effect";
+    if !hosted_qualifies(&plugin) {
+        return Err(bad(CMD, format!("`{plugin}` has no note output transit reads (or the plug-in scan has not probed it)")));
+    }
+    if p.get("params").is_some() {
+        return Err(bad(CMD, "a hosted MIDI effect takes no `params` here"));
+    }
+    let at = p.get("at").and_then(Value::as_u64).map(|i| usize::try_from(i).unwrap_or(usize::MAX));
+    let tr = track_of(e, CMD, p)?;
+    if tr.is_rack() {
+        return Err(bad(CMD, "Hosted MIDI effects go on an instrument track until racks run one chain for all members"));
+    }
+    let index =
+        tr.add_midi_effect(MidiEffectSlot::new(plugin.clone()), at).ok_or_else(|| bad(CMD, format!("the track has {MAX_MIDI_EFFECTS} MIDI effects, the most it holds")))?;
+    Ok(json!({"track": tr.id, "index": index, "plugin": plugin}))
+}
+
+/// Whether the scan's probe found a readable note output for the hosted id `id` (2.6).
+fn hosted_qualifies(id: &str) -> bool {
+    #[cfg(test)]
+    {
+        tests::QUALIFIED.with(|q| q.borrow().iter().any(|x| x == id))
+    }
+    #[cfg(not(test))]
+    {
+        qualifies(id, transit_vst3_host::cached().as_deref(), transit_clap_host::cached().as_deref())
+    }
+}
+
+/// [`hosted_qualifies`] over the scan's descriptors: the class with that id has a probe outcome
+/// that answered with a note output. A class whose probe failed, or that no scan listed, does not.
+fn qualifies(id: &str, vst3: Option<&[transit_vst3_host::Vst3Descriptor]>, clap: Option<&[transit_clap_host::ClapDescriptor]>) -> bool {
+    let yes = |o: &transit_clap_host::ProbeOutcome| o.note_output == Some(true);
+    vst3.is_some_and(|all| all.iter().any(|d| d.id == id && yes(&d.probe))) || clap.is_some_and(|all| all.iter().any(|d| d.id == id && yes(&d.probe)))
 }
 
 fn remove(e: &mut Engine, p: &Value) -> Result<Value> {
@@ -159,3 +204,7 @@ fn params(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     Ok(json!({"set": values.len()}))
 }
+
+#[cfg(test)]
+#[path = "midi_effect_tests.rs"]
+mod tests;
