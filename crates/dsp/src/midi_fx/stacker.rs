@@ -272,7 +272,7 @@ mod tests {
         let mut out = MidiOut::new(&mut buf);
         s.process(&[on(0, 1, 60, 100)], &mut out, 64);
         assert_eq!(out.events(), [on(0, 1, 60, 100)]);
-        assert_eq!((s.cancelled, s.written_ons), (1, 1));
+        assert_eq!((s.cancelled, s.written_ons, s.counted()), (1, 1, 1), "72 left the set: only 60 is counted");
         assert_eq!(run(&mut s, &[off(5, 1, 60)]), [off(5, 1, 60)], "72 never sounded");
         assert_eq!(s.counted(), 0);
     }
