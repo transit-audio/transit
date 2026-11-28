@@ -63,6 +63,14 @@ fn a_hosted_id_is_refused_on_a_rack() {
     e.execute("mix.midi_effect", &json!({"track": rack, "plugin": "midi_transpose"})).unwrap();
 }
 
+#[test]
+fn a_hosted_id_with_params_is_refused() {
+    let (mut e, t) = engine();
+    let err = e.execute("mix.midi_effect", &json!({"track": t, "plugin": NOTES, "params": {"gain": 0.5}})).unwrap_err().to_string();
+    assert!(err.contains("a hosted MIDI effect takes no `params` here"), "{err}");
+    assert!(e.session().tracks.iter().all(|x| x.midi_effects.is_empty()));
+}
+
 fn vst3(id: &str, probe: ProbeOutcome) -> Vst3Descriptor {
     Vst3Descriptor {
         id: id.into(),
