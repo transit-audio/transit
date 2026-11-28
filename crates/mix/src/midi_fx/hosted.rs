@@ -73,7 +73,13 @@ pub(crate) struct HostedStore {
 impl HostedStore {
     pub(crate) fn new(uid: u64, max_block: usize) -> Box<Self> {
         let max_block = max_block.max(1);
-        Box::new(HostedStore { uid, max_block, scratch: vec![vec![0.0; max_block]; 2], outs: Vec::with_capacity(HOSTED_OUT_CAP), ledger: Ledger::new() })
+        Box::new(HostedStore {
+            uid,
+            max_block,
+            scratch: vec![vec![0.0; max_block]; 2],
+            outs: Vec::with_capacity(HOSTED_OUT_CAP),
+            ledger: Ledger::new(),
+        })
     }
 
     /// Test seam (feature `testing`): the store's state record. The scratch audio and the output
@@ -194,7 +200,14 @@ pub(super) struct BlockOutcome {
 /// audio, takes the output and writes what the epoch accepts through the ledger into `out`
 /// (cleared first). On a failing block or a call under another generation nothing is written and
 /// the outcome says so: the caller runs the barrier.
-pub(super) fn process_block(h: &mut Hosted, p: &mut dyn Plugin, store: &mut HostedStore, ids: &mut u32, out: &mut Output, frames: u32) -> BlockOutcome {
+pub(super) fn process_block(
+    h: &mut Hosted,
+    p: &mut dyn Plugin,
+    store: &mut HostedStore,
+    ids: &mut u32,
+    out: &mut Output,
+    frames: u32,
+) -> BlockOutcome {
     let mut o = BlockOutcome::default();
     let n = (frames as usize).min(store.max_block);
     for c in &mut store.scratch {
@@ -349,7 +362,14 @@ impl super::MidiFxHost {
     /// with what waited, the block is processed, and the stage's output replaces `a`.
     /// True when a barrier ran in the block: an edit (decision 6's table), whose pedal-ups this has
     /// given and whose remaining step (the mix presses nothing again) the caller takes.
-    pub(super) fn run_hosted(&mut self, instrument: &mut dyn Plugin, cells: &mut [Option<crate::PluginSlot>], i: usize, frames: u32, block: bool) -> bool {
+    pub(super) fn run_hosted(
+        &mut self,
+        instrument: &mut dyn Plugin,
+        cells: &mut [Option<crate::PluginSlot>],
+        i: usize,
+        frames: u32,
+        block: bool,
+    ) -> bool {
         let len = self.a_len.min(super::MIDI_FX_BLOCK);
         let (n_rack, clock) = (self.n_rack, self.clock);
         let Some(super::Stage { uid, hosted: Some(h), carry, carry_len, .. }) = self.stages.get_mut(i).and_then(Option::as_mut) else { return false };

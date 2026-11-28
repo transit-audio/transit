@@ -63,10 +63,21 @@ const NO_RECORD: Record = Record { used: false, channel: 0, key: 0, pid: -1, seq
 /// Which open notes a release or a pressure addresses (5.3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Sel {
-    Identified { channel: u8, key: u8, pid: i32 },
-    Anonymous { channel: u8, key: u8 },
+    Identified {
+        channel: u8,
+        key: u8,
+        pid: i32,
+    },
+    Anonymous {
+        channel: u8,
+        key: u8,
+    },
     /// `None`: that field is a wildcard.
-    Wildcard { channel: Option<u8>, key: Option<u8>, pid: Option<i32> },
+    Wildcard {
+        channel: Option<u8>,
+        key: Option<u8>,
+        pid: Option<i32>,
+    },
 }
 
 impl Sel {
@@ -260,14 +271,16 @@ impl Ledger {
             Sel::Wildcard { .. } => {
                 for e in self.open.iter().filter(|e| sel.entry(e)) {
                     any = true;
-                    let ev = PluginEvent { channel: e.channel, note_id: e.host, message: Message::PolyPressure { key: e.key, value, id: NoteId::NONE } };
+                    let ev =
+                        PluginEvent { channel: e.channel, note_id: e.host, message: Message::PolyPressure { key: e.key, value, id: NoteId::NONE } };
                     out.push(TimedEvent { offset, event: ev });
                 }
             }
             _ => {
                 if let Some(e) = self.oldest_entry(sel).and_then(|i| self.open.get(i)) {
                     any = true;
-                    let ev = PluginEvent { channel: e.channel, note_id: e.host, message: Message::PolyPressure { key: e.key, value, id: NoteId::NONE } };
+                    let ev =
+                        PluginEvent { channel: e.channel, note_id: e.host, message: Message::PolyPressure { key: e.key, value, id: NoteId::NONE } };
                     out.push(TimedEvent { offset, event: ev });
                 }
             }
@@ -322,7 +335,10 @@ impl Ledger {
 }
 
 fn note_off(offset: u32, e: &Entry, velocity: u8) -> TimedEvent {
-    TimedEvent { offset, event: PluginEvent { channel: e.channel, note_id: e.host, message: Message::NoteOff { key: e.key, velocity, id: NoteId::NONE } } }
+    TimedEvent {
+        offset,
+        event: PluginEvent { channel: e.channel, note_id: e.host, message: Message::NoteOff { key: e.key, velocity, id: NoteId::NONE } },
+    }
 }
 
 #[cfg(test)]
@@ -358,7 +374,8 @@ mod tests {
         out.clear();
         l.owed(&mut out);
         l.release(Sel::Anonymous { channel: 0, key: 60 }, 0, 5, &mut out, &mut t);
-        let got: Vec<(u32, i32, bool)> = out.events().map(|e| (e.offset, e.event.note_id, matches!(e.event.message, Message::NoteOff { .. }))).collect();
+        let got: Vec<(u32, i32, bool)> =
+            out.events().map(|e| (e.offset, e.event.note_id, matches!(e.event.message, Message::NoteOff { .. }))).collect();
         assert_eq!(got, vec![(0, 0, true), (5, 1, true)]);
         assert_eq!(l.open().count(), 0);
     }

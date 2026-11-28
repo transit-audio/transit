@@ -56,7 +56,13 @@ fn ids(format: Format, feature: &str) -> Vec<(String, String)> {
     let _ = std::fs::remove_dir_all(&dir);
     let found: Vec<(String, String)> = match format {
         Format::Vst3 => {
-            transit_test_support::fixtures::install_vst3_named(tmp(), &["--features", feature], &format!("hm2-vst3-{feature}-target"), &dir, "Fixture");
+            transit_test_support::fixtures::install_vst3_named(
+                tmp(),
+                &["--features", feature],
+                &format!("hm2-vst3-{feature}-target"),
+                &dir,
+                "Fixture",
+            );
             // Registered first: an id the registry does not know would make `create` scan the machine.
             assert!(transit_vst3_host::add_search_dir(&dir) > 0);
             transit_vst3_host::scan_paths(&[dir]).into_iter().map(|d| (d.name, d.id)).collect()
@@ -282,7 +288,14 @@ fn a_fixture_generator_drives_the_instrument_at_every_scripted_frame_identically
         let (script, want) = match format {
             Format::Vst3 => (
                 "CLEAR;AT 10 on 0 0 60 7 0.5;AT 100 on 0 1 64 -1 1.0;AT 300 off 0 0 60 7 0;AT 700 off 0 1 64 -1 0;AT 1000 on 0 3 72 9 1.0;AT 1020 off 0 3 72 9 0.25",
-                vec![(10, "on", 0, 60, 64, 0), (100, "on", 1, 64, 127, 1), (300, "off", 0, 60, 0, 0), (700, "off", 1, 64, 0, 1), (1000, "on", 3, 72, 127, 2), (1020, "off", 3, 72, 32, 2)],
+                vec![
+                    (10, "on", 0, 60, 64, 0),
+                    (100, "on", 1, 64, 127, 1),
+                    (300, "off", 0, 60, 0, 0),
+                    (700, "off", 1, 64, 0, 1),
+                    (1000, "on", 3, 72, 127, 2),
+                    (1020, "off", 3, 72, 32, 2),
+                ],
             ),
             // The CLAP generator's readable output is port 1. A MIDI-byte 9n of velocity 0 is a
             // release before the ledger matches it (5.3).
@@ -368,7 +381,11 @@ fn a_processing_error_in_the_second_of_four_calls_fails_the_block_whole_until_st
         r.live(70, Message::NoteOn { key: 50, velocity: 100, id: NoteId::NONE });
         r.live(200, Message::NoteOn { key: 51, velocity: 100, id: NoteId::NONE });
         r.run_until(512, 64);
-        assert_eq!(r.heard(), vec![(10, "on", 0, 60, 127, 0), (64, "off", 0, 60, 0, 0)], "{format:?}: the block discarded whole, the barrier at its offset 0");
+        assert_eq!(
+            r.heard(),
+            vec![(10, "on", 0, 60, 127, 0), (64, "off", 0, 60, 0, 0)],
+            "{format:?}: the block discarded whole, the barrier at its offset 0"
+        );
         let log = r.log();
         assert!(log.iter().any(|l| l == "fail 5"), "{format:?}: the fixture failed call 5: {log:?}");
         assert!(log.iter().any(|l| l.starts_with("wrote emit") || l.starts_with("wrote on 2")), "{format:?}: call 4 wrote its note-on: {log:?}");
@@ -380,7 +397,11 @@ fn a_processing_error_in_the_second_of_four_calls_fails_the_block_whole_until_st
         // before the first call.
         r.mix.reset();
         r.run_until(1024, 64);
-        assert_eq!(r.heard().into_iter().filter(|h| h.0 >= 512).collect::<Vec<_>>(), vec![(544, "on", 0, 65, 127, 1), (574, "off", 0, 65, 0, 1)], "{format:?}");
+        assert_eq!(
+            r.heard().into_iter().filter(|h| h.0 >= 512).collect::<Vec<_>>(),
+            vec![(544, "on", 0, 65, 127, 1), (574, "off", 0, 65, 0, 1)],
+            "{format:?}"
+        );
         let log = r.log();
         let first = log.iter().position(|l| l.starts_with("process")).unwrap();
         let reset = match format {
@@ -434,4 +455,3 @@ fn a_state_load_is_a_barrier_at_offset_0_and_the_next_call_runs_the_reset_first(
         }
     }
 }
-

@@ -10,7 +10,9 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 use transit_dsp::Plugin;
 use transit_dsp::event::{Message, PluginEvent};
-use transit_dsp::hosted_out::{CallRecord, CallReport, HostedOut, HostedOutBuffer, Lifecycle, NoteOutputInfo, OutForm, OutKind, OutValues, calls_due};
+use transit_dsp::hosted_out::{
+    CallRecord, CallReport, HostedOut, HostedOutBuffer, Lifecycle, NoteOutputInfo, OutForm, OutKind, OutValues, calls_due,
+};
 
 /// What a test scripts and reads.
 pub(super) struct Script {
@@ -139,7 +141,17 @@ pub(super) fn out(kind: OutKind, channel: i16, key: i16, id: i32, value: f64) ->
 /// A MIDI-byte event (a CLAP MIDI event).
 pub(super) fn midi(kind: OutKind, bytes: [u8; 3]) -> HostedOut {
     let key = if matches!(kind, OutKind::NoteOn | OutKind::NoteOff | OutKind::PolyPressure) { i16::from(bytes[1]) } else { -1 };
-    HostedOut { offset: 0, seq: 0, kind, port: 0, channel: i16::from(bytes[0] & 0x0F), key, note_id: -1, form: OutForm::MidiBytes, values: OutValues::Midi(bytes) }
+    HostedOut {
+        offset: 0,
+        seq: 0,
+        kind,
+        port: 0,
+        channel: i16::from(bytes[0] & 0x0F),
+        key,
+        note_id: -1,
+        form: OutForm::MidiBytes,
+        values: OutValues::Midi(bytes),
+    }
 }
 
 fn echo_of(ev: &PluginEvent, shift: i16) -> Option<HostedOut> {

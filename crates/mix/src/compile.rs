@@ -887,12 +887,9 @@ impl PlanCompiler {
         let old_key = match self.active.slots.get(&p.key) {
             Some(o) if o.spec.uid == p.spec.uid => p.key,
             // So does a hosted MIDI effect stage's (ADR 0064, 8.2: its uid is the slot's).
-            _ if matches!(p.kind, CellKind::Insert | CellKind::MidiFx) && p.spec.uid != 0 => self
-                .active
-                .slots
-                .iter()
-                .find(|(k, o)| k.0 == p.key.0 && o.kind == p.kind && o.spec.uid == p.spec.uid)
-                .map_or(p.key, |(k, _)| *k),
+            _ if matches!(p.kind, CellKind::Insert | CellKind::MidiFx) && p.spec.uid != 0 => {
+                self.active.slots.iter().find(|(k, o)| k.0 == p.key.0 && o.kind == p.kind && o.spec.uid == p.spec.uid).map_or(p.key, |(k, _)| *k)
+            }
             _ => p.key,
         };
         if let Some(old) = self.active.slots.get(&old_key)
@@ -1021,7 +1018,9 @@ impl PlanCompiler {
                     kind,
                     index: u16::try_from(index).unwrap_or(u16::MAX),
                     spec: spec.clone(),
-                    params: ins.filter(|_| kind != CellKind::MidiFx).map_or(0, |i| crate::automation::applied_len(t, crate::automation::lane_slot(key.1), i)),
+                    params: ins
+                        .filter(|_| kind != CellKind::MidiFx)
+                        .map_or(0, |i| crate::automation::applied_len(t, crate::automation::lane_slot(key.1), i)),
                     plan: SlotPlan::Absent,
                     latency: 0,
                 };

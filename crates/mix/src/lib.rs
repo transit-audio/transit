@@ -188,7 +188,8 @@ pub use fingerprint::{AudioFact, MidiFact, Nudge, Poison, PrintHasher, StripFact
 pub use graph::TailWhy;
 pub use hardware::{HardwareReport, HardwareState, hardware_report};
 pub use instance::{
-    InstanceSpec, NewInstance, create_instance, create_instance_for, create_instance_with, creating_instance, creation_line, instance_specs, realtime_instance_specs,
+    InstanceSpec, NewInstance, create_instance, create_instance_for, create_instance_with, creating_instance, creation_line, instance_specs,
+    realtime_instance_specs,
 };
 use key::{KeyBank, KeyEnd, KeyIn, KeySpec};
 use matrix::{PanSpec, apply_matrix, apply_matrix_span, build_matrix, identity_matrix};

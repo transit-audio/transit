@@ -118,8 +118,9 @@ fn add_hosted(e: &mut Engine, p: &Value, plugin: String) -> Result<Value> {
     if tr.is_rack() {
         return Err(bad(CMD, "Hosted MIDI effects go on an instrument track until racks run one chain for all members"));
     }
-    let index =
-        tr.add_midi_effect(MidiEffectSlot::new(plugin.clone()), at).ok_or_else(|| bad(CMD, format!("the track has {MAX_MIDI_EFFECTS} MIDI effects, the most it holds")))?;
+    let index = tr
+        .add_midi_effect(MidiEffectSlot::new(plugin.clone()), at)
+        .ok_or_else(|| bad(CMD, format!("the track has {MAX_MIDI_EFFECTS} MIDI effects, the most it holds")))?;
     Ok(json!({"track": tr.id, "index": index, "plugin": plugin}))
 }
 

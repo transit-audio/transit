@@ -65,7 +65,15 @@ impl Rig {
         let (mut fake, h) = Fake::new(native);
         fake.prepare(48_000.0, native, 2);
         let uid = track.midi_effects[0].uid.get();
-        Rig { host: MidiFxHost::new(), inst: Inst::default(), track, cells: vec![Some(cell(Box::new(fake), id, uid, 7))], fake: h, frame: 0, edits: Vec::new() }
+        Rig {
+            host: MidiFxHost::new(),
+            inst: Inst::default(),
+            track,
+            cells: vec![Some(cell(Box::new(fake), id, uid, 7))],
+            fake: h,
+            frame: 0,
+            edits: Vec::new(),
+        }
     }
 
     /// One block of `n` frames with the input events of `events` that fall in it (absolute frames).
@@ -219,7 +227,13 @@ fn every_note_carries_a_host_id_and_overlapping_identified_notes_on_one_key_pair
 
 /// One case of 5.5: the script, then Stop at `stop` (with the plug-in's later script), and the
 /// instrument's notes expected by the record.
-fn case(id: &str, script: Vec<(u64, transit_dsp::hosted_out::HostedOut)>, stop: Option<u64>, want: &[(u64, &str, u8, u16, u16, i32)], unmatched: u64) {
+fn case(
+    id: &str,
+    script: Vec<(u64, transit_dsp::hosted_out::HostedOut)>,
+    stop: Option<u64>,
+    want: &[(u64, &str, u8, u16, u16, i32)],
+    unmatched: u64,
+) {
     for size in SIZES {
         let mut r = Rig::new(id, 512);
         r.fake.lock().at = script.clone();
@@ -334,7 +348,11 @@ fn every_wildcard_combination_closes_exactly_the_entries_it_matches() {
     // port as dropped, and it closes nothing.
     wildcard_case(transit_dsp::hosted_out::HostedOut { port: -1, ..rel(0, 62, 3) }, &[2], "port");
     wildcard_case(transit_dsp::hosted_out::HostedOut { port: -1, ..rel(-1, -1, -1) }, &[0, 1, 2, 3, 4], "port with all");
-    wildcard_case(transit_dsp::hosted_out::HostedOut { port: 0, kind: OutKind::Dropped(OutDrop::OtherOutput), ..rel(-1, -1, -1) }, &[], "another port");
+    wildcard_case(
+        transit_dsp::hosted_out::HostedOut { port: 0, kind: OutKind::Dropped(OutDrop::OtherOutput), ..rel(-1, -1, -1) },
+        &[],
+        "another port",
+    );
     // A choke is a release like a note-off.
     wildcard_case(transit_dsp::hosted_out::HostedOut { kind: OutKind::Choke, ..rel(0, 60, -1) }, &[0, 1, 4], "choke");
 }

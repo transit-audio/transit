@@ -53,7 +53,17 @@ impl Echo {
 }
 
 fn note(kind: OutKind, key: u8, id: i32, v: f64) -> HostedOut {
-    HostedOut { offset: 0, seq: 0, kind, port: 0, channel: 0, key: i16::from(key), note_id: id, form: OutForm::Native, values: OutValues::Velocity(v) }
+    HostedOut {
+        offset: 0,
+        seq: 0,
+        kind,
+        port: 0,
+        channel: 0,
+        key: i16::from(key),
+        note_id: id,
+        form: OutForm::Native,
+        values: OutValues::Velocity(v),
+    }
 }
 
 impl Plugin for Echo {
@@ -102,7 +112,11 @@ impl Plugin for Echo {
             }
         }
         let error = self.ctl.fail_next.swap(false, Ordering::Relaxed);
-        self.buf.record_call(CallRecord { generation: self.ctl.generation.load(Ordering::Relaxed), reset_before: std::mem::take(&mut self.reset_pending), error });
+        self.buf.record_call(CallRecord {
+            generation: self.ctl.generation.load(Ordering::Relaxed),
+            reset_before: std::mem::take(&mut self.reset_pending),
+            error,
+        });
         self.frame = to;
     }
     fn note_output(&self) -> Option<NoteOutputInfo> {

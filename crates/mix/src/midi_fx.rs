@@ -70,8 +70,8 @@ mod hosted;
 mod ledger;
 mod output;
 use delivery::{NO_NOTE, Note, Trigger, oldest};
-pub(crate) use hosted::{HostedStore, hosts_stages};
 use hosted::Hosted;
+pub(crate) use hosted::{HostedStore, hosts_stages};
 use output::Output;
 
 /// Events one block takes into the chain, and each effect writes, at most.

@@ -197,7 +197,15 @@ pub fn create_instance_with(
 }
 
 /// The one creation path: `collect` enables note-output collection before `prepare`.
-fn create(id: &str, state: Option<&[u8]>, sample_rate: f32, max_block: usize, ch: usize, collect: bool, restoring: impl FnOnce()) -> Option<NewInstance> {
+fn create(
+    id: &str,
+    state: Option<&[u8]>,
+    sample_rate: f32,
+    max_block: usize,
+    ch: usize,
+    collect: bool,
+    restoring: impl FnOnce(),
+) -> Option<NewInstance> {
     let _creating = CreatingGuard::enter();
     let started = std::time::Instant::now();
     let Some(mut plugin) = create_plugin(id) else {

@@ -374,4 +374,3 @@ fn a_skipped_call_extends_the_wait_and_a_barrier_discards_what_waits() {
         assert_eq!(r.fake.lock().heard.len(), 1, "block {size}: the waiting event was discarded");
     }
 }
-
