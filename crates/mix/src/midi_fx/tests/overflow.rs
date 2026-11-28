@@ -2,7 +2,11 @@
 use super::*;
 
 // 8 kHz makes even the 4096-frame row exceed 512 events with the 1/64 divider's
-// eight-times gate. At 48 kHz the same tempo and block size need not overflow.
+// eight-times gate. At 48 kHz the same tempo and block size need not overflow. These rows are
+// overload-policy evidence (ADR 0057, slice P3b: final admission, the reset barrier, every note
+// still ended and none repeated), far above the capacity bound and above the app's own block
+// sizes; they do not show that the stream stays musically useful (most blocks reset and drop
+// their note-ons).
 
 fn sequencer_overflow(frames: usize, tempo: f64) {
     let t = track(&[("random_sequencer", &[("rate", 20.0), ("play", 4.0), ("model", 4.0), ("gate_bias", 100.0)])]);
@@ -302,6 +306,23 @@ fn the_fuzz_seed_71271_through_two_delays_never_delivers_an_off_before_its_on() 
     }
     assert!(!host.pending());
     assert!(rec.heard.iter().any(|(_, _, e)| matches!(e.message, Message::NoteOn { .. })));
+    // Nothing is left outstanding: every voice the instrument started got its note-off, and the
+    // host holds no delivered or refused note (P3b consumes a note-off that matches nothing, so
+    // the order check above alone could not see a release lost upstream).
+    let mut outstanding = std::collections::HashSet::new();
+    for (_, _, e) in &rec.heard {
+        match e.message {
+            Message::NoteOn { .. } => {
+                assert!(outstanding.insert(e.note_id), "voice {} started twice", e.note_id);
+            }
+            Message::NoteOff { .. } => {
+                outstanding.remove(&e.note_id);
+            }
+            _ => {}
+        }
+    }
+    assert!(outstanding.is_empty(), "voices left sounding: {outstanding:?}");
+    assert!(host.out.iter().chain(&host.refusals).all(|n| !n.used), "the host's tables are empty");
 }
 
 #[test]

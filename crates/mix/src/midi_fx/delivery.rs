@@ -208,7 +208,8 @@ impl MidiFxHost {
 
     /// [`Self::end_notes`] at `offset`; `barrier`: the block's reset barrier, which also gives the
     /// safety controllers (CC 64, 66, 67, 69, 120, 121 and 123 on every channel) after the note-offs.
-    /// The stage buffers need no emptying: each is cleared before it is written.
+    /// The stage buffers are emptied logically: whatever they held is discarded, since each is
+    /// cleared before it is written again and nothing reads it before that.
     pub(super) fn end_notes_at(&mut self, plugin: &mut dyn Plugin, offset: u32, barrier: bool) {
         for i in 0..MIDI_FX_NOTES {
             let Some(n) = self.out.get_mut(i).filter(|n| n.used) else { continue };
