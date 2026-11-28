@@ -56,8 +56,10 @@ use transit_time::Samples;
 
 use crate::note_view::NoteView;
 
+mod delivery;
 mod edit;
 mod output;
+use delivery::{NO_NOTE, Note};
 use output::Output;
 
 /// Events one block takes into the chain, and each effect writes, at most.
@@ -140,25 +142,6 @@ struct Stage {
     fx: Option<Builtin>,
     carry: [Carried; MIDI_FX_CARRY],
     carry_len: usize,
-}
-
-/// A note the host knows by its voice id (else by channel and key).
-#[derive(Clone, Copy, Debug)]
-struct Note {
-    used: bool,
-    channel: u8,
-    key: u8,
-    voice: i32,
-    /// For notes the chain was given: the chain edit it started under.
-    epoch: u32,
-}
-
-const NO_NOTE: Note = Note { used: false, channel: 0, key: 0, voice: PluginEvent::NO_ID, epoch: 0 };
-
-impl Note {
-    fn is(&self, ev: &PluginEvent, key: u8) -> bool {
-        self.used && self.channel == ev.channel & 0x0F && if ev.note_id != PluginEvent::NO_ID { self.voice == ev.note_id } else { self.key == key }
-    }
 }
 
 /// The MIDI effect chain of one instrument slot. See the module documentation.
@@ -570,17 +553,6 @@ impl MidiFxHost {
         }
     }
 
-    /// Holds a refused release for the next block (counted when there is no room).
-    fn hold_for_retry(&mut self, ev: &PluginEvent) {
-        match self.retry.get_mut(self.retry_len) {
-            Some(slot) => {
-                *slot = *ev;
-                self.retry_len += 1;
-            }
-            None => self.counts.retry_overflow = self.counts.retry_overflow.saturating_add(1),
-        }
-    }
-
     /// Gives one event to the instrument and, when it accepts it, keeps it in the note view (#242).
     /// Every event the mix gives an instrument goes through here: the chain's deliveries and
     /// releases, and the note table's own when the track has no MIDI effects.
@@ -598,88 +570,6 @@ impl MidiFxHost {
         self.counts.note_view_dropped = self.counts.note_view_dropped.saturating_add(lost);
         if lost > 0 {
             NOTE_VIEW_DROPPED.fetch_add(lost, std::sync::atomic::Ordering::Relaxed);
-        }
-    }
-
-    /// Gives one event to the instrument, keeping the table of the notes the chain started.
-    fn deliver(&mut self, plugin: &mut dyn Plugin, offset: u32, ev: &PluginEvent) {
-        // Never emit an on we could not end explicitly after a release-only overflow or edit.
-        if matches!(ev.message, Message::NoteOn { .. }) && self.out.iter().all(|n| n.used) {
-            self.counts.overflow = self.counts.overflow.saturating_add(1);
-            // `take` already counted the untracked note when the given table was full too.
-            self.counts.refused_ons = self.counts.refused_ons.saturating_add(1);
-            return;
-        }
-        if !self.give(plugin, offset, ev) {
-            self.counts.refused = self.counts.refused.saturating_add(1);
-            if ev.is_release() {
-                self.hold_for_retry(ev);
-            }
-            return;
-        }
-        match ev.message {
-            Message::NoteOn { key, .. } => match self.out.iter().position(|n| !n.used) {
-                Some(n) => {
-                    if let Some(n) = self.out.get_mut(n) {
-                        *n = Note { used: true, channel: ev.channel & 0x0F, key, voice: ev.note_id, epoch: 0 };
-                    }
-                }
-                None => self.counts.untracked = self.counts.untracked.saturating_add(1),
-            },
-            Message::NoteOff { key, .. } => {
-                if let Some(n) = self.out.iter_mut().find(|n| n.is(ev, key)) {
-                    *n = NO_NOTE;
-                }
-            }
-            _ => {}
-        }
-    }
-
-    /// Ends the chain's notes at the instrument, forgets the carries and the effects' state, and
-    /// starts a new edit epoch: the given notes' later releases are swallowed.
-    fn end_notes(&mut self, plugin: &mut dyn Plugin) {
-        self.end_notes_at(plugin, 0, false);
-    }
-
-    fn end_notes_at(&mut self, plugin: &mut dyn Plugin, offset: u32, overflow: bool) {
-        for i in 0..MIDI_FX_NOTES {
-            let Some(n) = self.out.get_mut(i).filter(|n| n.used) else { continue };
-            let off = PluginEvent { channel: n.channel, note_id: n.voice, message: Message::NoteOff { key: n.key, velocity: 0, id: NoteId::NONE } };
-            *n = NO_NOTE;
-            let count = if overflow { &mut self.counts.released_on_overflow } else { &mut self.counts.released_on_edit };
-            *count = count.saturating_add(1);
-            if !self.give(plugin, offset, &off) {
-                self.counts.refused = self.counts.refused.saturating_add(1);
-                self.hold_for_retry(&off);
-            }
-        }
-        if overflow {
-            // A downstream effect may have carried the coalesced pedal-ups beyond this
-            // block. Recovery cancels that carry, so deliver its safety controllers directly
-            // as well: native offs alone do not end sustained MIDI voices.
-            for channel in 0..16 {
-                for cc in [64, 66, 67, 69, 120, 121, 123] {
-                    let ev = PluginEvent { channel, note_id: PluginEvent::NO_ID, message: Message::Control { cc, value: 0 } };
-                    if !self.give(plugin, offset, &ev) {
-                        self.counts.refused = self.counts.refused.saturating_add(1);
-                        self.hold_for_retry(&ev);
-                    }
-                }
-            }
-        }
-        for s in self.stages.iter_mut().flatten() {
-            self.counts.carry_dropped = self.counts.carry_dropped.saturating_add(s.carry_len as u64);
-            s.carry_len = 0;
-            if let Some(fx) = s.fx.as_mut() {
-                fx.effect().reset();
-            }
-        }
-        // Every note given so far is now from an earlier epoch: its release is swallowed. (Each
-        // is set to the epoch just left, so a wrap of the counter cannot make one current again.)
-        let previous = self.epoch;
-        self.epoch = self.epoch.wrapping_add(1);
-        for n in self.given.iter_mut().filter(|n| n.used) {
-            n.epoch = previous;
         }
     }
 
