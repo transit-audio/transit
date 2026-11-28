@@ -296,7 +296,7 @@ fn the_fuzz_seed_71271_through_two_delays_never_delivers_an_off_before_its_on() 
         match e.message {
             Message::NoteOn { .. } => {
                 assert!(!off_first.contains(&e.note_id), "voice {} got its off before its on", e.note_id);
-                sounded.insert(e.note_id);
+                assert!(sounded.insert(e.note_id), "voice {} started twice", e.note_id);
             }
             Message::NoteOff { .. } if !sounded.contains(&e.note_id) => {
                 off_first.insert(e.note_id);
