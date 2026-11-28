@@ -143,6 +143,8 @@ effects (its notes are ended by the host); its next playing block restarts it on
 
 ## Amendment 2026-11-01: release priority (#278)
 
+**Superseded by ADR 0057, slice P3b.** The admission, eviction, coalescing, counters and 944-event queue-bound claims below describe the pre-P3b implementation. P3b uses final admission: each chain-input and stage buffer admits a non-release while it holds fewer than 384 non-releases and fewer than 512 total events, and a release while it holds fewer than 512 total events. No admitted buffer event is evicted or coalesced. Due carries enter a stage's buffer before the effect writes. A stage-buffer release refusal or a full delivery-refusal table triggers the single whole-chain reset barrier specified by P3b; a chain-input release refusal retains the mix's retry. The delivery filter, refusal accounting and direct retries follow P3b. Instrument traffic from edits, retries, between-block releases and barriers can exceed an instrument queue; ADR 0057 §2.13 states the applicable limits and examples. The separate carry policy remains as amended for #281.
+
 The slot uses option (b): a full 512-event output, including the merge with due carried events,
 admits a release by evicting the newest pending note-on, counted as `evicted_ons` and never emitted;
 a new note-on is refused and counted as `refused_ons`. The existing `overflow` total counts both,
