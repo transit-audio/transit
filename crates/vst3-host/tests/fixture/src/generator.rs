@@ -20,6 +20,11 @@
 //! - `LATENCY <n>`: report `n` samples after the next `setActive(true)`, and ask for a restart
 //!   (`kLatencyChanged`); `RESTART`: ask for one with the latency unchanged.
 //! - `REFUSE`: `setActive(true)` fails from now on.
+//! - `AT <frame> <type> <bus> <a> <b> <c> <d>`: as `EMIT`, written in the call that holds frame
+//!   `frame` of this instance's own time (the frames of its calls since the last `CLEAR`), at that
+//!   frame's offset (ADR 0064 HM2: a script independent of how the host splits its blocks).
+//! - `ECHO <semitones>`: every input note-on and note-off is written again on bus 0 at its offset,
+//!   `semitones` up, with its channel, note id and velocity (a note effect, ADR 0064 HM2).
 //!
 //! Its component state is the log since the last read, one line per record:
 //! `activateBus <media> <direction> <index> <state>`, `setActive <s> -> <0|1>`,
@@ -58,6 +63,10 @@ struct State {
     calls: u64,
     frame: u64,
     fail: Option<u64>,
+    /// AT lines: (frame, event).
+    ats: Vec<(u64, Emit)>,
+    /// ECHO: the transposition, when set.
+    echo: Option<i32>,
     setproc_err: bool,
     retain: bool,
     latency: u32,
@@ -156,6 +165,13 @@ impl Gen {
                 let d = w.get(8).and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
                 st.emits.push(Emit { call, ty, offset: int(3) as i32, bus: int(4) as i32, a: int(5) as i32, b: int(6) as i32, c: int(7) as i32, d });
             }
+            Some("AT") => {
+                let Some(ty) = w.get(2).and_then(|n| type_of(n)) else { return };
+                let d = w.get(7).and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
+                let e = Emit { call: None, ty, offset: 0, bus: int(3) as i32, a: int(4) as i32, b: int(5) as i32, c: int(6) as i32, d };
+                st.ats.push((int(1) as u64, e));
+            }
+            Some("ECHO") => st.echo = Some(int(1) as i32),
             Some("HOLD") => st.holds.push((int(1) as u64, int(2) as i32, int(3) as i16, int(4) as i16, int(5) as i32, int(6) as u64)),
             Some("FLOOD") => st.floods.push((int(1) as u64, int(2) as u32)),
             Some("RETAIN") => st.retain = true,
@@ -296,6 +312,7 @@ impl IAudioProcessorTrait for Gen {
             u8::from(!d.inputs.is_null()),
             u8::from(!d.outputs.is_null())
         ));
+        let mut echoes: Vec<Emit> = Vec::new();
         // SAFETY: inputEvents is null or a borrowed IEventList valid for this process call.
         if let Some(list) = unsafe { ComRef::from_raw(d.inputEvents) } {
             // SAFETY: the live list borrowed above.
@@ -321,6 +338,13 @@ impl IAudioProcessorTrait for Gen {
                 };
                 if let Some((what, ch, pitch, id)) = rec {
                     st.log.push(format!("in {what} {} {ch} {pitch} {id}", e.sampleOffset));
+                    if let (Some(shift), "on" | "off") = (st.echo, what) {
+                        // SAFETY: each union read matches the event's tag (checked above).
+                        let velocity = unsafe { if what == "on" { e.__field0.noteOn.velocity } else { e.__field0.noteOff.velocity } };
+                        let ty = if what == "on" { T::kNoteOnEvent as u16 } else { T::kNoteOffEvent as u16 };
+                        let a = i32::from(ch);
+                        echoes.push(Emit { call: None, ty, offset: e.sampleOffset, bus: 0, a, b: i32::from(pitch) + shift, c: id, d: f64::from(velocity) });
+                    }
                 }
             }
         }
@@ -354,6 +378,14 @@ impl IAudioProcessorTrait for Gen {
         let emits: Vec<Emit> = st.emits.iter().filter(|e| e.call.is_none_or(|c| c == call)).copied().collect();
         for e in &emits {
             Self::write(&mut st, out.as_ref(), e, "emit");
+        }
+        for e in &echoes {
+            Self::write(&mut st, out.as_ref(), e, "echo");
+        }
+        let (start, end) = (st.frame, st.frame + frames as u64);
+        let ats: Vec<Emit> = st.ats.iter().filter(|(f, _)| *f >= start && *f < end).map(|(f, e)| Emit { offset: (f - start) as i32, ..*e }).collect();
+        for e in &ats {
+            Self::write(&mut st, out.as_ref(), e, "at");
         }
         use Event_::EventTypes_ as T;
         let holds: Vec<_> = st.holds.iter().filter(|h| h.0 == call).copied().collect();

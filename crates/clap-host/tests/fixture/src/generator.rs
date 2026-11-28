@@ -18,6 +18,13 @@
 //! - `DIALECT_MIDI_ONLY`: from the next activation, input note port 0 offers only the MIDI
 //!   dialect (it offers CLAP and MIDI before).
 //! - `REFUSE_START_ONCE`: the next `start_processing` returns false.
+//! - `AT <frame> <type> <port> <channel> <key> <id> <value>`: as `EMIT`, pushed in the call that
+//!   holds frame `frame` of this instance's own time (the frames of its calls since the last
+//!   `CLEAR`), at that frame's time (ADR 0064 HM2: a script independent of how the host splits its
+//!   blocks).
+//! - `ECHO <semitones>`: every input note-on and note-off (CLAP dialect) is pushed again on the read
+//!   port at its time, `semitones` up, with its channel, note id and velocity (a note effect, ADR
+//!   0064 HM2).
 //!
 //! It declares one parameter, id 3 "Probe" (0..1), so a parameter value it pushes as output is
 //! one the host knows.
@@ -66,6 +73,12 @@ pub(crate) struct State {
     midi_only_next: bool,
     midi_only: bool,
     refuse_start_once: bool,
+    /// Frames of this instance's calls since the last `CLEAR`.
+    frame: u64,
+    /// AT lines: (frame, event).
+    ats: Vec<(u64, Emit)>,
+    /// ECHO: the transposition, when set.
+    echo: Option<i16>,
 }
 
 fn st(n: &Note) -> std::sync::MutexGuard<'_, State> {
@@ -138,6 +151,13 @@ fn command(n: &Note, line: &str) {
                 value,
             });
         }
+        Some("AT") => {
+            let Some(what) = w.get(2).and_then(|x| what_of(x)) else { return };
+            let value = w.get(7).and_then(|x| x.parse::<f64>().ok()).unwrap_or(0.0);
+            let e = Emit { call: None, what, time: 0, port: int(3) as i16, channel: int(4) as i16, key: int(5) as i16, id: int(6) as i32, value };
+            s.ats.push((int(1) as u64, e));
+        }
+        Some("ECHO") => s.echo = Some(int(1) as i16),
         Some("FLOOD") => s.floods.push((int(1) as u64, int(2) as u32)),
         Some("FAIL") => s.fail = Some(int(1) as u64),
         Some("REFUSE") => s.refuse = true,
@@ -304,6 +324,7 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
     // SAFETY: the transport is null or valid for this call.
     let (beats, secs) = unsafe { pr.transport.as_ref() }.map_or((0, 0), |t| (t.song_pos_beats, t.song_pos_seconds));
     s.log.push(format!("process {call} n={} ain={} aout={} beats={beats} secs={secs}", pr.frames_count, pr.audio_inputs_count, pr.audio_outputs_count));
+    let mut echoes: Vec<Emit> = Vec::new();
     // SAFETY: the host's input list, valid for this call.
     if let Some(list) = unsafe { pr.in_events.as_ref() } {
         // SAFETY: the list's own functions, called with the list.
@@ -314,6 +335,16 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
             // SAFETY: null or a valid header.
             if let Some(h) = unsafe { h.as_ref() } {
                 log_input(&mut s, h);
+                if let Some(shift) = s.echo
+                    && h.space_id == CLAP_CORE_EVENT_SPACE_ID
+                    && matches!(h.type_, CLAP_EVENT_NOTE_ON | CLAP_EVENT_NOTE_OFF)
+                {
+                    // SAFETY: the header's type says this is a complete note event.
+                    let e = unsafe { &*(h as *const clap_event_header).cast::<clap_event_note>() };
+                    let what = if h.type_ == CLAP_EVENT_NOTE_ON { ON } else { OFF };
+                    let port = if n.shape == Shape::Generator { 1 } else { 0 };
+                    echoes.push(Emit { call: None, what, time: h.time, port, channel: e.channel, key: e.key + shift, id: e.note_id, value: e.velocity });
+                }
             }
         }
     }
@@ -334,6 +365,16 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
             let ok = push(out, e);
             s.log.push(format!("wrote {} {} -> {ok}", WHAT[e.what as usize], e.time));
         }
+        for e in &echoes {
+            let ok = push(out, e);
+            s.log.push(format!("wrote echo {} -> {ok}", e.time));
+        }
+        let (start, end) = (s.frame, s.frame + u64::from(pr.frames_count));
+        let ats: Vec<Emit> = s.ats.iter().filter(|(f, _)| *f >= start && *f < end).map(|(f, e)| Emit { time: (f - start) as u32, ..*e }).collect();
+        for e in &ats {
+            let ok = push(out, e);
+            s.log.push(format!("wrote at {} -> {ok}", e.time));
+        }
         let floods: Vec<_> = s.floods.iter().filter(|f| f.0 == call).copied().collect();
         for (_, count) in floods {
             let (mut yes, mut no) = (0, 0);
@@ -348,6 +389,7 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
             s.log.push(format!("flood {yes} {no}"));
         }
     }
+    s.frame += u64::from(pr.frames_count);
     if s.fail == Some(call) {
         s.log.push(format!("fail {call}"));
         return CLAP_PROCESS_ERROR;
