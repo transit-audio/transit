@@ -7,6 +7,7 @@ mod between;
 mod hosted;
 mod hosted_barriers;
 mod hosted_fake;
+mod hosted_offline;
 mod overflow;
 mod ownership;
 
