@@ -2,7 +2,6 @@
 //! and installs them in temp folders.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
 
 /// Builds the fixture once and returns a folder containing `Fixture.clap` (gain and synth).
@@ -68,38 +67,8 @@ fn install(features: &[&str], target_dir: &str, install_dir: &str, name: &str, p
 /// `<dir>/vendor/<name>.clap` (a bundle on macOS), which it returns.
 #[allow(dead_code)]
 pub fn install_named(features: &[&str], target_dir: &str, dir: &Path, name: &str) -> PathBuf {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture/Cargo.toml");
-    let target = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp"))).join(target_dir);
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let st = Command::new(cargo)
-        .args(["build", "--quiet", "--manifest-path"])
-        .arg(&manifest)
-        .args(features)
-        .arg("--target-dir")
-        .arg(&target)
-        .env_remove("RUSTFLAGS")
-        .status()
-        .expect("run cargo");
-    assert!(st.success(), "building the CLAP fixture failed");
-    let lib = if cfg!(target_os = "macos") {
-        "libclap_fixture.dylib"
-    } else if cfg!(windows) {
-        "clap_fixture.dll"
-    } else {
-        "libclap_fixture.so"
-    };
-    let built = target.join("debug").join(lib);
-    let bundle = dir.join(format!("vendor/{name}.clap"));
-    if cfg!(target_os = "macos") {
-        // Install as a real macOS bundle to exercise bundle resolution.
-        let exe = bundle.join("Contents/MacOS");
-        std::fs::create_dir_all(&exe).unwrap();
-        std::fs::copy(&built, exe.join(name)).unwrap();
-    } else {
-        std::fs::create_dir_all(dir.join("vendor")).unwrap();
-        std::fs::copy(&built, &bundle).unwrap();
-    }
-    bundle
+    let tmp = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp")));
+    transit_test_support::fixtures::install_clap_named(tmp, features, target_dir, dir, name)
 }
 
 /// Private-FFI unit tests load through their own crate instance, avoiding a second module entry.

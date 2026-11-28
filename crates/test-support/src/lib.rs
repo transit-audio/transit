@@ -11,7 +11,10 @@
 //! This is a dev-dependency only (`cargo xtask layers` rejects any other kind).
 //!
 //! [`xvfb::PrivateXvfb`] (Linux): a private X server for tests that must own their display (#697).
+//!
+//! [`fixtures`]: the VST3 and CLAP hosts' fixture plug-ins, built and installed for any crate's tests.
 
+pub mod fixtures;
 #[cfg(target_os = "linux")]
 pub mod xvfb;
 

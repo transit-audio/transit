@@ -2,7 +2,6 @@
 //! and installs it as a `.vst3` bundle in a temp folder.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::OnceLock;
 
 /// Builds the fixture once and returns a folder containing `Fixture.vst3`.
@@ -63,32 +62,8 @@ fn install(features: &[&str], target_dir: &str, install_dir: &str, plugins: usiz
 /// bundle `<dir>/vendor/<name>.vst3`, which it returns.
 #[allow(dead_code)]
 pub fn install_named(features: &[&str], target_dir: &str, dir: &Path, name: &str) -> PathBuf {
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture/Cargo.toml");
-    let target = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp"))).join(target_dir);
-    let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
-    let st = Command::new(cargo)
-        .args(["build", "--quiet", "--manifest-path"])
-        .arg(&manifest)
-        .args(features)
-        .arg("--target-dir")
-        .arg(&target)
-        .env_remove("RUSTFLAGS")
-        .status()
-        .expect("run cargo");
-    assert!(st.success(), "building the VST3 fixture failed");
-    let (lib, folder, exe) = if cfg!(target_os = "macos") {
-        ("libvst3_fixture.dylib", "MacOS", name.to_string())
-    } else if cfg!(windows) {
-        ("vst3_fixture.dll", "x86_64-win", format!("{name}.vst3"))
-    } else {
-        ("libvst3_fixture.so", if cfg!(target_arch = "aarch64") { "aarch64-linux" } else { "x86_64-linux" }, format!("{name}.so"))
-    };
-    let built = target.join("debug").join(lib);
-    let bundle = dir.join(format!("vendor/{name}.vst3"));
-    let bin = bundle.join("Contents").join(folder);
-    std::fs::create_dir_all(&bin).unwrap();
-    std::fs::copy(&built, bin.join(exe)).unwrap();
-    bundle
+    let tmp = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp")));
+    transit_test_support::fixtures::install_vst3_named(tmp, features, target_dir, dir, name)
 }
 
 /// Private-FFI unit tests load through their own crate instance, avoiding a second module entry.
