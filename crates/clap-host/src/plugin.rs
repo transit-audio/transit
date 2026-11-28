@@ -44,6 +44,8 @@ mod delivery;
 mod echoes;
 mod editor;
 mod note_out;
+#[cfg(feature = "test-hooks")]
+pub(crate) use note_out::queued_edits;
 mod parameter_queue;
 use echoes::{Echoes, Reported};
 
@@ -447,6 +449,9 @@ pub struct ClapPlugin {
     tail: usize,
     /// A `reset` waiting for the next block the plug-in is called for (audio side).
     reset_pending: bool,
+    /// A `reset` that ran before a call that never processed (its start was refused): the next
+    /// call that processes reports it as run before it (ADR 0064, decision 6).
+    reset_done: bool,
     /// Silence with fades for blocks the plug-in is not called for.
     gate: Gate,
     /// Timed parameter points refused by a full queue (the value went onto the parameter's
@@ -540,12 +545,13 @@ impl ClapPlugin {
             status: ProcessStatus::Continue,
             tail: 0,
             reset_pending: false,
+            reset_done: false,
             gate: Gate::new(),
             params_dropped: 0,
             process_errors: 0,
             loads_seen: 0,
             echoes,
-            note_out: transit_dsp::hosted_out::HostedOutBuffer::new(),
+            note_out: transit_dsp::hosted_out::HostedOutBuffer::empty(),
             block: 0,
         };
         #[cfg(test)]
@@ -817,6 +823,7 @@ impl ClapPlugin {
         if reset_before {
             core.inst.reset();
         }
+        reset_before |= std::mem::take(&mut self.reset_done);
         // This block answers a pending `request_process` or `params.request_flush` (one made
         // during it asks again).
         self.host.process.store(false, Ordering::Relaxed);
@@ -870,19 +877,12 @@ impl ClapPlugin {
             let offset = u32::try_from(start).unwrap_or(u32::MAX);
             let events = self.queue.get(..k).unwrap_or(&[]);
             let read = shared.life_out.read_port();
-            let r = core.inst.process(
-                n,
-                self.steady,
-                &mut core.inputs,
-                &mut core.outputs,
-                events,
-                offset,
-                self.transport.as_ref(),
-                &mut self.note_out,
-                read,
-            );
+            let notes = if shared.life_out.collecting() { Some(&mut self.note_out) } else { None };
+            let r = core.inst.process(n, self.steady, &mut core.inputs, &mut core.outputs, events, offset, self.transport.as_ref(), notes, read);
             if r == Err(crate::ffi::ProcessError::BeforeCall) {
                 self.skip_calls(frames - start);
+                // A reset that ran before this call is reported by the first call that processes.
+                self.reset_done = reset_before;
                 // A refused start or missing process entry never consumed these values, nor the
                 // call's events: they stay queued for the next call (ADR 0059, 3a).
                 self.queue.retain(|e| matches!(e, Event::Param { .. }));
@@ -905,6 +905,8 @@ impl ClapPlugin {
             // the caller's dry input (#284): on a wet-only insert or a bus that would be a burst
             // of unprocessed signal. Counted for the mixer to report; never log from this callback.
             if r.is_err() {
+                // The calls after it are not made: counted skipped.
+                self.skip_calls(frames - start - n);
                 // ADR 0059, Decision 2: every start the call handed owes its release (`finish`)
                 // and the rest of the block is silent too; the mix contains an instrument until
                 // Stop.
@@ -961,6 +963,7 @@ impl Plugin for ClapPlugin {
         self.gate.set_rate(sr);
         // A (re)activation starts from a clean state anyway.
         self.reset_pending = false;
+        self.reset_done = false;
         self.block = mb;
         self.status = ProcessStatus::Continue;
         // A full (re)activation answers any restart request, including one left half done.
@@ -1045,6 +1048,15 @@ impl Plugin for ClapPlugin {
 
     fn note_output(&self) -> Option<transit_dsp::hosted_out::NoteOutputInfo> {
         self.shared.life_out.note_output()
+    }
+
+    /// Off by default (the output events answered as before HM1, no event buffer); on, from the
+    /// next activation. Control thread, before `prepare`.
+    fn collect_note_output(&mut self, on: bool) {
+        if on {
+            self.note_out.reserve();
+        }
+        self.shared.life_out.ask_collection(on);
     }
 
     fn take_note_output(&mut self, out: &mut dyn FnMut(transit_dsp::hosted_out::HostedOut) -> bool) -> transit_dsp::hosted_out::CallReport {

@@ -336,6 +336,15 @@ pub fn while_instances_held<R>(f: impl FnOnce() -> R) -> R {
     plugin::while_held(f)
 }
 
+/// The parameter values live instances' plug-ins reported through their output events and the
+/// host queued for the session's edit path (ADR 0064 HM1), without taking them. Only for host
+/// tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn queued_edits() -> Vec<(u32, f64)> {
+    plugin::queued_edits()
+}
+
 /// How many host call trace records were made so far (#651). Only for host tests.
 #[cfg(feature = "test-hooks")]
 #[doc(hidden)]

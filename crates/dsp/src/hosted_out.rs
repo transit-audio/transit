@@ -12,9 +12,11 @@
 /// Events one block's buffer holds: the native output list's capacity (ADR 0064, decision 3).
 pub const HOSTED_OUT_CAP: usize = 1024;
 
-/// Native calls a [`CallReport`] records one by one; a block that makes more counts them in
-/// [`CallReport::made`].
-pub const REPORT_CALLS: usize = 64;
+/// Runs of identical calls a [`CallReport`] holds. A block needs at most three: the instance's
+/// core is held across all its calls, so they share one generation; only the first can follow the
+/// stage's reset; and the first call that reports an error ends the block. Every call of a block,
+/// however many it makes, is described by its run.
+pub const REPORT_RUNS: usize = 4;
 
 /// What an output event is, in the format's own terms (ADR 0064, decision 3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -153,13 +155,26 @@ pub struct CallRecord {
     pub error: bool,
 }
 
-/// What the native calls of the last block did (ADR 0064, decisions 3 and 6).
+/// A run of consecutive native calls of one block with the same record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct CallRun {
+    pub record: CallRecord,
+    /// How many consecutive calls (at least one).
+    pub calls: u32,
+}
+
+/// What the native calls of the last block did (ADR 0064, decisions 3 and 6). Every call made is
+/// described: [`CallReport::runs`] holds them as runs of identical records, in call order, and
+/// [`CallReport::calls`] expands them one record per call. `made + skipped` is the number of
+/// native calls the block was due.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CallReport {
     /// Native calls made.
     pub made: u32,
-    /// Native calls the block was due and did not make (the instance held by its main thread,
-    /// parked, inactive or never prepared); a block of no frames is due none.
+    /// Native calls the block was due and did not make: all of them when the block was skipped
+    /// (the instance held by its main thread, parked, inactive, never prepared, or its processing
+    /// refused to start), and those after a call that reported a processing error (the block ends
+    /// there). A block of no frames is due none.
     pub skipped: u32,
     /// Any call of the block reported a processing error.
     pub error: bool,
@@ -169,7 +184,8 @@ pub struct CallReport {
     pub overflow: u32,
     /// Dropped events by reason ([`OutDrop::index`]).
     pub dropped: [u32; OutDrop::COUNT],
-    calls: [CallRecord; REPORT_CALLS],
+    runs: [CallRun; REPORT_RUNS],
+    run_count: usize,
 }
 
 impl Default for CallReport {
@@ -181,40 +197,52 @@ impl Default for CallReport {
             offset_clamped: 0,
             overflow: 0,
             dropped: [0; OutDrop::COUNT],
-            calls: [CallRecord::default(); REPORT_CALLS],
+            runs: [CallRun::default(); REPORT_RUNS],
+            run_count: 0,
         }
     }
 }
 
 impl CallReport {
-    /// The calls recorded one by one (the first [`REPORT_CALLS`] of the block).
+    /// The block's calls as runs of identical records, in call order.
     #[must_use]
-    pub fn calls(&self) -> &[CallRecord] {
-        let n = usize::try_from(self.made).unwrap_or(usize::MAX).min(REPORT_CALLS);
-        self.calls.get(..n).unwrap_or(&[])
+    pub fn runs(&self) -> &[CallRun] {
+        self.runs.get(..self.run_count).unwrap_or(&[])
     }
 
-    /// Records a native call.
+    /// Every call made, one record per call, in call order.
+    pub fn calls(&self) -> impl Iterator<Item = CallRecord> + '_ {
+        self.runs().iter().flat_map(|r| std::iter::repeat_n(r.record, usize::try_from(r.calls).unwrap_or(0)))
+    }
+
+    /// Records a native call: it extends the last run when its record is the same, else starts a
+    /// run. A block cannot need more than [`REPORT_RUNS`] runs (see there); were it to, the call
+    /// is folded into the last run with that run marked failed, so the report never claims a
+    /// clean call it cannot describe.
     pub fn record(&mut self, call: CallRecord) {
-        if let Some(slot) = usize::try_from(self.made).ok().and_then(|i| self.calls.get_mut(i)) {
-            *slot = call;
-        }
         self.made = self.made.saturating_add(1);
         self.error |= call.error;
-    }
-
-    /// Marks the last recorded call as failed.
-    pub fn fail_last(&mut self) {
-        let last = usize::try_from(self.made).unwrap_or(0).checked_sub(1);
-        if let Some(c) = last.and_then(|i| self.calls.get_mut(i)) {
-            c.error = true;
+        if let Some(last) = self.run_count.checked_sub(1).and_then(|i| self.runs.get_mut(i))
+            && last.record == call
+        {
+            last.calls = last.calls.saturating_add(1);
+            return;
         }
-        self.error = true;
+        if let Some(slot) = self.runs.get_mut(self.run_count) {
+            *slot = CallRun { record: call, calls: 1 };
+            self.run_count += 1;
+        } else if let Some(last) = self.runs.last_mut() {
+            last.calls = last.calls.saturating_add(1);
+            last.record.error = true;
+            self.error = true;
+        }
     }
 }
 
-/// The block output buffer an adapter keeps (capacity [`HOSTED_OUT_CAP`], allocated once): the
-/// events of the last block's native calls and their report. No allocation after `new`.
+/// The block output buffer an adapter keeps: the events of the last block's native calls (at
+/// most [`HOSTED_OUT_CAP`], allocated by [`HostedOutBuffer::new`] or [`HostedOutBuffer::reserve`],
+/// never on the audio thread) and their report. [`HostedOutBuffer::empty`] holds no events: it
+/// refuses every push, and only reports calls.
 pub struct HostedOutBuffer {
     events: Vec<HostedOut>,
     report: CallReport,
@@ -232,6 +260,19 @@ impl HostedOutBuffer {
         HostedOutBuffer { events: Vec::with_capacity(HOSTED_OUT_CAP), report: CallReport::default() }
     }
 
+    /// A buffer with no event storage (nothing allocated): it reports calls only.
+    #[must_use]
+    pub fn empty() -> Self {
+        HostedOutBuffer { events: Vec::new(), report: CallReport::default() }
+    }
+
+    /// Allocates the event storage if it is not there (control thread only: it allocates).
+    pub fn reserve(&mut self) {
+        if self.events.capacity() < HOSTED_OUT_CAP {
+            self.events.reserve_exact(HOSTED_OUT_CAP - self.events.len());
+        }
+    }
+
     /// The buffer's allocated capacity (storage accounting).
     #[must_use]
     pub fn capacity(&self) -> usize {
@@ -245,10 +286,15 @@ impl HostedOutBuffer {
         self.report = CallReport::default();
     }
 
+    /// The most events the buffer takes: [`HOSTED_OUT_CAP`], or 0 without storage.
+    fn cap(&self) -> usize {
+        HOSTED_OUT_CAP.min(self.events.capacity())
+    }
+
     /// Room left in the block.
     #[must_use]
     pub fn room(&self) -> usize {
-        HOSTED_OUT_CAP.saturating_sub(self.events.len())
+        self.cap().saturating_sub(self.events.len())
     }
 
     /// Appends an event the plug-in wrote at `local` (its offset in the call, as written) in the
@@ -256,7 +302,7 @@ impl HostedOutBuffer {
     /// below 0 becomes 0 and one at or past `frames` the call's last frame, both counted. False
     /// (counted) when the block's buffer is full. `ev.offset` and `ev.seq` are set here.
     pub fn push(&mut self, local: i64, start: u32, frames: u32, mut ev: HostedOut) -> bool {
-        if self.events.len() >= HOSTED_OUT_CAP {
+        if self.events.len() >= self.cap() {
             self.report.overflow = self.report.overflow.saturating_add(1);
             return false;
         }
@@ -284,11 +330,6 @@ impl HostedOutBuffer {
     /// Records a native call.
     pub fn record_call(&mut self, call: CallRecord) {
         self.report.record(call);
-    }
-
-    /// Marks the last recorded call as failed.
-    pub fn fail_last(&mut self) {
-        self.report.fail_last();
     }
 
     /// Counts native calls the block was due and did not make.
@@ -377,21 +418,51 @@ mod tests {
         let mut b = HostedOutBuffer::new();
         b.begin_block();
         b.record_call(CallRecord { generation: 4, reset_before: true, error: false });
-        b.record_call(CallRecord { generation: 4, reset_before: false, error: false });
-        b.fail_last();
+        b.record_call(CallRecord { generation: 4, reset_before: false, error: true });
         let mut dropped = on(1);
         dropped.kind = OutKind::Dropped(OutDrop::Sysex);
         assert!(b.push(0, 0, 16, dropped));
         let r = b.take(&mut |_| true);
         assert_eq!(r.made, 2);
         assert_eq!(
-            r.calls(),
-            &[CallRecord { generation: 4, reset_before: true, error: false }, CallRecord { generation: 4, reset_before: false, error: true }]
+            r.calls().collect::<Vec<_>>(),
+            [CallRecord { generation: 4, reset_before: true, error: false }, CallRecord { generation: 4, reset_before: false, error: true }]
         );
         assert!(r.error);
         assert_eq!(r.dropped[OutDrop::Sysex.index()], 1);
         assert_eq!(calls_due(64, 16), 4);
         assert_eq!(calls_due(0, 16), 0);
         assert_eq!(calls_due(65, 16), 5);
+    }
+
+    /// Every call of a block of any length is described: a reset call, 200 ordinary calls and a
+    /// failing one are three runs, and the expansion has 202 records in call order.
+    #[test]
+    fn every_call_of_a_long_block_is_described() {
+        let mut r = CallReport::default();
+        r.record(CallRecord { generation: 7, reset_before: true, error: false });
+        for _ in 0..200 {
+            r.record(CallRecord { generation: 7, reset_before: false, error: false });
+        }
+        r.record(CallRecord { generation: 7, reset_before: false, error: true });
+        assert_eq!(r.made, 202);
+        assert_eq!(r.runs().iter().map(|x| x.calls).collect::<Vec<_>>(), [1, 200, 1]);
+        let all: Vec<CallRecord> = r.calls().collect();
+        assert_eq!(all.len(), 202);
+        assert!(all[0].reset_before && !all[1].reset_before && !all[200].error && all[201].error);
+        assert!(r.error);
+    }
+
+    #[test]
+    fn an_empty_buffer_reports_calls_and_refuses_events_until_reserved() {
+        let mut b = HostedOutBuffer::empty();
+        assert_eq!((b.capacity(), b.room()), (0, 0));
+        b.begin_block();
+        assert!(!b.push(0, 0, 16, on(60)));
+        b.record_call(CallRecord::default());
+        let r = b.take(&mut |_| true);
+        assert_eq!((r.made, r.overflow), (1, 1));
+        b.reserve();
+        assert_eq!(b.room(), HOSTED_OUT_CAP);
     }
 }

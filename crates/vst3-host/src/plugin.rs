@@ -637,7 +637,7 @@ impl Vst3Plugin {
             seq: 0,
             points_dropped: 0,
             process_errors: 0,
-            note_out: transit_dsp::hosted_out::HostedOutBuffer::new(),
+            note_out: transit_dsp::hosted_out::HostedOutBuffer::empty(),
             cycle_pending: false,
             block: 0,
             untranslated: 0,
@@ -1007,6 +1007,8 @@ impl Vst3Plugin {
                     // of the block silent, every start it handed owed its release (`finish`); the
                     // mix contains the instrument until Stop.
                     self.process_errors = self.process_errors.saturating_add(1);
+                    // The calls after it are not made: counted skipped.
+                    self.note_out.skipped(transit_dsp::hosted_out::calls_due(frames - start - n, core.max_block));
                     for dst in io.iter_mut().take(ch) {
                         if let Some(dst) = dst.get_mut(start..frames) {
                             dst.fill(0.0);
@@ -1223,6 +1225,15 @@ impl Plugin for Vst3Plugin {
         self.shared.note_output()
     }
 
+    /// Off by default (the output list as before HM1, no event output bus activated, no event
+    /// buffer); on, from the next activation. Control thread, before `prepare`.
+    fn collect_note_output(&mut self, on: bool) {
+        if on {
+            self.note_out.reserve();
+        }
+        lock(&self.shared.core).inst.collect_notes(on);
+    }
+
     fn take_note_output(&mut self, out: &mut dyn FnMut(transit_dsp::hosted_out::HostedOut) -> bool) -> transit_dsp::hosted_out::CallReport {
         self.note_out.take(out)
     }
@@ -1232,7 +1243,8 @@ impl Plugin for Vst3Plugin {
     }
 
     /// The stage reset (ADR 0064, decision 6): today's `reset` of the queues, then the
-    /// `setProcessing` cycle at the next actual call, before its `process`.
+    /// `setProcessing` cycle at the next actual call, before its `process`: `false` then `true`,
+    /// the `false` left out when the processor is not in the processing state.
     fn restart_processing(&mut self) {
         self.reset();
         self.cycle_pending = true;

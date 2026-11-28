@@ -33,8 +33,8 @@ pub(crate) fn decode(e: &sv::Event) -> (i64, HostedOut) {
     };
     let ty = e.r#type;
     if ty == T::kNoteOnEvent as u16 {
-        // SAFETY: the union holds plain numbers only (any bit pattern is a valid value), and the
-        // plug-in tagged this event a note-on.
+        // SAFETY: the plug-in tagged this event a note-on, and that member holds plain numbers
+        // only (any bit pattern is a valid value); no pointer-bearing member is read.
         let n = unsafe { e.__field0.noteOn };
         (out.kind, out.channel, out.key, out.note_id) = (OutKind::NoteOn, n.channel, n.pitch, n.noteId);
         out.values = OutValues::Velocity(f64::from(n.velocity));
@@ -97,9 +97,26 @@ impl Instance {
         unsafe { self.component.activateBus(event as sv::MediaType, dout as sv::BusDirection, READ_BUS, 1) };
     }
 
-    /// Limits the next call's output list to `room` events (the block buffer's room left).
+    /// Asks for note output collection from the next configuration on (control thread).
+    pub(crate) fn collect_notes(&mut self, on: bool) {
+        self.collect_notes = on;
+    }
+
+    /// Collection is in force for this configuration.
+    pub(crate) fn collecting(&self) -> bool {
+        self.notes_out
+    }
+
+    /// Limits the next call's output list to `room` events (the block buffer's room left); without
+    /// collection the list takes up to its capacity in every call, as before HM1.
     pub(crate) fn limit_output(&self, room: usize) {
-        self.out_events.set_room(room);
+        self.out_events.set_room(if self.notes_out { room } else { EVENT_CAP });
+    }
+
+    /// Without collection: the last call's output is left unread (the next call clears it, as
+    /// before HM1), and the refusal count is dropped.
+    pub(crate) fn forget_output(&self) {
+        self.out_events.take_refused();
     }
 
     /// Moves the last call's output events into `sink` (the call of `frames` frames starting at
@@ -115,9 +132,10 @@ impl Instance {
         });
     }
 
-    /// The stage reset (ADR 0064, decision 6): `setProcessing(false)` then `setProcessing(true)`
-    /// (only `true` when the processor is not processing yet: a fresh activation). True when each
-    /// result is `kResultOk` or `kNotImplemented`.
+    /// The stage reset (ADR 0064, decision 6): `setProcessing(false)` then `setProcessing(true)`,
+    /// except that the `false` is left out when the processor is not in the processing state (a
+    /// fresh activation, which has no inner state to reset). True when each result is
+    /// `kResultOk` or `kNotImplemented`.
     pub(crate) fn cycle_processing(&mut self) -> bool {
         let Some(p) = self.processor.clone() else { return false };
         let fine = |r: sb::tresult| r == sb::kResultOk || r == sb::kNotImplemented;

@@ -702,16 +702,28 @@ pub trait Plugin: Send {
     fn take_note_output(&mut self, _out: &mut dyn FnMut(hosted_out::HostedOut) -> bool) -> hosted_out::CallReport {
         hosted_out::CallReport::default()
     }
-    /// The instance's lifecycle generation and whether it is active (ADR 0064, decision 6): one
-    /// atomic read. The default: generation 0, inactive.
+    /// The instance's lifecycle generation and whether it is active (ADR 0064, decision 6). Two
+    /// atomic reads, not one snapshot: the generation can be an activation older than the flag.
+    /// The generation each native call ran under is in [`Plugin::take_note_output`]'s report,
+    /// read under the instance's lock: that report is authoritative. The default: generation 0,
+    /// inactive.
     fn lifecycle(&self) -> hosted_out::Lifecycle {
         hosted_out::Lifecycle::default()
     }
     /// A hosted MIDI effect stage's reset before its next actual processing call (ADR 0064,
-    /// decision 6). The default calls [`Plugin::reset`].
+    /// decision 6). The default calls [`Plugin::reset`]. VST3 overrides it: today's `reset`, then
+    /// `setProcessing(false)` and `setProcessing(true)` before the next `process`, the `false`
+    /// left out when the processor is not in the processing state (a fresh activation).
     fn restart_processing(&mut self) {
         self.reset();
     }
+    /// Hosted plug-ins: collect the note output for [`Plugin::take_note_output`] (ADR 0064,
+    /// decision 3) from the next activation (`prepare` or a restart) on. Off by default, and off
+    /// the native-visible behavior is what it was before note output was read: the hosts activate
+    /// no event output bus and answer the plug-in's output events as before. Only a host that
+    /// will run the plug-in as a MIDI effect stage turns it on, on the control thread, before
+    /// `prepare` (it allocates the event buffer). The default does nothing.
+    fn collect_note_output(&mut self, _on: bool) {}
 }
 
 /// A plugin's editor (GUI), driven from the main (UI) thread. Obtained from

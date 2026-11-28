@@ -15,7 +15,8 @@ use transit_dsp::hosted_out::{HostedOut, HostedOutBuffer, OutDrop, OutForm, OutK
 /// the block.
 pub(crate) struct OutSink<'a> {
     pub params: &'a mut Vec<(u32, f64)>,
-    pub notes: &'a mut HostedOutBuffer,
+    /// The block's note output; `None` without collection (note output answered as before).
+    pub notes: Option<&'a mut HostedOutBuffer>,
     /// The first readable output note port (`None`: the plug-in has none).
     pub read: Option<u32>,
     pub start: u32,
@@ -51,7 +52,10 @@ impl Instance {
 /// voices).
 ///
 /// # Safety
-/// `h` points to a valid event header of at least `h.size` bytes, for the duration of the call.
+/// `h` points to a correctly aligned, valid instance of the native event type its header
+/// advertises (by space, type and a size of at least that type's), live for the call. The size
+/// and type checks below select the type; they do not establish alignment, which the caller's
+/// contract supplies (the CLAP ABI: plug-ins push their own typed event structs).
 unsafe fn decode(h: *const clap_event_header, read: Option<u32>) -> Option<(i64, HostedOut)> {
     // SAFETY: caller contract.
     let hd = unsafe { &*h };
@@ -141,9 +145,16 @@ unsafe fn decode(h: *const clap_event_header, read: Option<u32>) -> Option<(i64,
 }
 
 /// The output list's `try_push`: parameter values (typically edits in the plug-in's GUI) are
-/// kept while there is room, so the UI can write them into the session, as before; note output
-/// goes into the block's buffer, `false` when it is full (the plug-in is told). Everything else
-/// is accepted and ignored.
+/// kept while there is room, so the UI can write them into the session, as before; with
+/// collection, note output goes into the block's buffer, `false` when it is full (the plug-in is
+/// told). Everything else, and all note output without collection, is accepted and ignored.
+///
+/// # Safety
+/// Called by the plug-in only during the `process` call whose output list `list` is, serialized
+/// (never concurrently with itself) and never after that call returns: `list.ctx` then points to
+/// that call's live `OutSink`. `event` is null or points to a correctly aligned, valid instance of
+/// the native event type its header advertises, live for this call. A plug-in that breaks these
+/// rules can cause undefined behavior; the host does not isolate it.
 pub(super) unsafe extern "C" fn out_events_try_push(list: *const clap_output_events, event: *const clap_event_header) -> bool {
     if list.is_null() || event.is_null() {
         return true;
@@ -161,9 +172,10 @@ pub(super) unsafe extern "C" fn out_events_try_push(list: *const clap_output_eve
         }
         return true;
     }
-    // SAFETY: as above: a valid header for the duration of the call, of `size` bytes.
+    let Some(notes) = sink.notes.as_deref_mut() else { return true };
+    // SAFETY: as above: a correctly aligned, valid event of its advertised type for this call.
     match unsafe { decode(event, sink.read) } {
-        Some((local, ev)) => sink.notes.push(local, sink.start, sink.frames, ev),
+        Some((local, ev)) => notes.push(local, sink.start, sink.frames, ev),
         None => true,
     }
 }

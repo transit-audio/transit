@@ -307,8 +307,9 @@ impl Instance {
     }
 
     /// Runs one `clap_process` call over `frames` frames. Events must be sorted by time; their
-    /// times are made relative to `offset`. The plug-in's note output on port `read` goes into
-    /// `notes` (ADR 0064, decision 3). Returns the CLAP process status.
+    /// times are made relative to `offset`. With `notes`, the plug-in's note output on port
+    /// `read` goes there (ADR 0064, decision 3); without, note output is answered as before HM1.
+    /// Returns the CLAP process status.
     pub fn process(
         &mut self,
         frames: usize,
@@ -318,7 +319,7 @@ impl Instance {
         events: &[Event],
         offset: u32,
         transport: Option<&Transport>,
-        notes: &mut transit_dsp::hosted_out::HostedOutBuffer,
+        notes: Option<&mut transit_dsp::hosted_out::HostedOutBuffer>,
         read: Option<u32>,
     ) -> Result<i32, ProcessError> {
         if !self.active {

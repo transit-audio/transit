@@ -17,9 +17,13 @@
 //!   `RESTART`: ask for one with the latency unchanged; `REFUSE`: `activate` fails from now on.
 //! - `DIALECT_MIDI_ONLY`: from the next activation, input note port 0 offers only the MIDI
 //!   dialect (it offers CLAP and MIDI before).
+//! - `REFUSE_START_ONCE`: the next `start_processing` returns false.
+//!
+//! It declares one parameter, id 3 "Probe" (0..1), so a parameter value it pushes as output is
+//! one the host knows.
 //!
 //! Its state is the log since the last read, one line per record: `activate -> <0|1>`,
-//! `deactivate`, `start`, `stop`, `reset`, `process <call> n=<frames> ain=<count> aout=<count>
+//! `deactivate`, `start -> <0|1>`, `stop`, `reset`, `process <call> n=<frames> ain=<count> aout=<count>
 //! beats=<song_pos_beats> secs=<song_pos_seconds>`, `in <on|off|choke|midi|expr|param> <time> ...`,
 //! `wrote <what> <time> -> <true|false>`, `flood <accepted> <refused>`, `fail <call>`.
 
@@ -61,6 +65,7 @@ pub(crate) struct State {
     refuse: bool,
     midi_only_next: bool,
     midi_only: bool,
+    refuse_start_once: bool,
 }
 
 fn st(n: &Note) -> std::sync::MutexGuard<'_, State> {
@@ -137,6 +142,7 @@ fn command(n: &Note, line: &str) {
         Some("FAIL") => s.fail = Some(int(1) as u64),
         Some("REFUSE") => s.refuse = true,
         Some("DIALECT_MIDI_ONLY") => s.midi_only_next = true,
+        Some("REFUSE_START_ONCE") => s.refuse_start_once = true,
         Some("LATENCY") => {
             s.next_latency = Some(int(1) as u32);
             drop(s);
@@ -172,8 +178,10 @@ unsafe extern "C" fn deactivate(p: *const clap_plugin) {
 }
 unsafe extern "C" fn start_processing(p: *const clap_plugin) -> bool {
     // SAFETY: as above.
-    st(unsafe { note(p) }).log.push("start".into());
-    true
+    let mut s = st(unsafe { note(p) });
+    let ok = !std::mem::take(&mut s.refuse_start_once);
+    s.log.push(format!("start -> {}", u8::from(ok)));
+    ok
 }
 unsafe extern "C" fn stop_processing(p: *const clap_plugin) {
     // SAFETY: as above.
@@ -387,6 +395,51 @@ unsafe extern "C" fn latency_get(p: *const clap_plugin) -> u32 {
 
 static LATENCY: clap_plugin_latency = clap_plugin_latency { get: Some(latency_get) };
 
+/// The one declared parameter.
+const PROBE: clap_id = 3;
+
+unsafe extern "C" fn params_count(_p: *const clap_plugin) -> u32 {
+    1
+}
+unsafe extern "C" fn params_info(_p: *const clap_plugin, index: u32, info: *mut clap_param_info) -> bool {
+    if index != 0 {
+        return false;
+    }
+    // SAFETY: the host passes a writable clap_param_info.
+    let info = unsafe { &mut *info };
+    info.id = PROBE;
+    info.flags = CLAP_PARAM_IS_AUTOMATABLE;
+    info.cookie = std::ptr::null_mut();
+    write_name(&mut info.name, c"Probe");
+    write_name(&mut info.module, c"");
+    (info.min_value, info.max_value, info.default_value) = (0.0, 1.0, 0.0);
+    true
+}
+unsafe extern "C" fn params_value(_p: *const clap_plugin, id: clap_id, out: *mut f64) -> bool {
+    if id != PROBE {
+        return false;
+    }
+    // SAFETY: the host passes a writable f64.
+    unsafe { *out = 0.0 };
+    true
+}
+unsafe extern "C" fn params_to_text(_p: *const clap_plugin, _id: clap_id, _v: f64, _out: *mut c_char, _cap: u32) -> bool {
+    false
+}
+unsafe extern "C" fn params_from_text(_p: *const clap_plugin, _id: clap_id, _t: *const c_char, _out: *mut f64) -> bool {
+    false
+}
+unsafe extern "C" fn params_flush(_p: *const clap_plugin, _in: *const clap_input_events, _out: *const clap_output_events) {}
+
+static PARAMS: clap_plugin_params = clap_plugin_params {
+    count: Some(params_count),
+    get_info: Some(params_info),
+    get_value: Some(params_value),
+    value_to_text: Some(params_to_text),
+    text_to_value: Some(params_from_text),
+    flush: Some(params_flush),
+};
+
 unsafe extern "C" fn get_extension(_p: *const clap_plugin, id: *const c_char) -> *const c_void {
     // SAFETY: the host passes a NUL-terminated extension id.
     let id = unsafe { CStr::from_ptr(id) };
@@ -398,6 +451,8 @@ unsafe extern "C" fn get_extension(_p: *const clap_plugin, id: *const c_char) ->
         &STATE as *const _ as *const c_void
     } else if id == CLAP_EXT_LATENCY {
         &LATENCY as *const _ as *const c_void
+    } else if id == CLAP_EXT_PARAMS {
+        &PARAMS as *const _ as *const c_void
     } else {
         std::ptr::null()
     }

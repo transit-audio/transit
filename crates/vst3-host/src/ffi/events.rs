@@ -315,7 +315,9 @@ impl IEventListTrait for EventList {
         }) {
             Some(true) => sb::kResultOk,
             _ => {
-                self.refused.fetch_add(1, Ordering::Relaxed);
+                // Saturating; the plug-in pushes from the one thread running its `process`.
+                let n = self.refused.load(Ordering::Relaxed);
+                self.refused.store(n.saturating_add(1), Ordering::Relaxed);
                 sb::kResultFalse
             }
         }

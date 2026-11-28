@@ -28,6 +28,7 @@ fn id_of(dir: &Path, name: &str) -> String {
 
 fn make(dir: &Path, name: &str) -> Box<dyn Plugin> {
     let mut p = transit_clap_host::create(&id_of(dir, name)).unwrap();
+    p.collect_note_output(true);
     p.prepare(48_000.0, NATIVE, 2);
     p
 }
@@ -197,6 +198,7 @@ fn every_row_of_the_table_comes_out_as_the_record_says_and_each_drop_is_counted(
     assert_eq!(got, want);
     let count = |d: OutDrop| report.dropped[d.index()];
     assert_eq!([OutDrop::NoteExpression, OutDrop::Sysex, OutDrop::Midi2].map(count), [1, 1, 1], "each drop counted");
+    assert_eq!(transit_clap_host::queued_edits(), [(3, 0.5)], "the parameter value reached the edit path, as before");
 }
 
 #[test]
@@ -344,7 +346,7 @@ fn the_lifecycle_generation_increases_at_every_activation_attempt_and_prepare() 
     block(&mut p);
     let (_, report) = take(&mut p);
     assert_eq!(report.made, 4);
-    assert!(report.calls().iter().all(|c| c.generation == g + 1), "each call ran under the current generation: {:?}", report.calls());
+    assert!(report.calls().all(|c| c.generation == g + 1), "each call ran under the current generation: {:?}", report.runs());
     cmd(&mut p, "REFUSE;RESTART");
     let g = p.lifecycle().generation;
     assert_eq!(restart(&mut p), (0, 1));
@@ -376,7 +378,7 @@ fn the_lifecycle_generation_increases_at_each_state_load_on_both_paths_also_whil
         let (_, report) = take(&mut p);
         assert_eq!(report.skipped, if skipped { 4 } else { 0 });
         if !skipped {
-            assert!(report.calls().iter().all(|c| c.generation == g + 2), "the calls after the load ran under it");
+            assert!(report.calls().all(|c| c.generation == g + 2), "the calls after the load ran under it");
         }
     }
 }
@@ -394,7 +396,7 @@ fn the_stage_reset_requests_the_plug_ins_reset_before_the_next_call() {
     let process = rec.iter().position(|l| l.starts_with("process")).unwrap();
     assert!(reset < process, "before the next call's process: {rec:?}");
     let (_, report) = take(&mut p);
-    let resets: Vec<bool> = report.calls().iter().map(|c| c.reset_before).collect();
+    let resets: Vec<bool> = report.calls().map(|c| c.reset_before).collect();
     assert_eq!(resets, [true, false, false, false]);
     block(&mut p);
     assert!(!log(&mut p).iter().any(|l| l == "reset"), "once");
@@ -408,6 +410,66 @@ fn a_processing_error_is_reported_in_the_block_it_happened() {
     block(&mut p);
     let (_, report) = take(&mut p);
     assert!(report.error);
-    let errors: Vec<bool> = report.calls().iter().map(|c| c.error).collect();
+    let errors: Vec<bool> = report.calls().map(|c| c.error).collect();
     assert_eq!(errors, [false, true], "the second call failed and the block stopped there");
+    assert_eq!(report.skipped, 2, "the two calls after it, not made, are counted skipped");
+}
+
+#[test]
+fn every_call_of_a_block_of_more_than_64_native_calls_is_reported() {
+    let _serial = serial();
+    let mut p = generator();
+    p.prepare(48_000.0, 1, 2);
+    cmd(&mut p, "CLEAR;FAIL 80");
+    p.restart_processing();
+    let mut io = vec![vec![0.0f32; 100]; 2];
+    p.process(&mut io, 100);
+    let (_, report) = take(&mut p);
+    let rec = log(&mut p);
+    assert_eq!(rec.iter().filter(|l| l.starts_with("process ")).count(), 81, "the fixture saw 81 calls");
+    let calls: Vec<(bool, bool)> = report.calls().map(|c| (c.reset_before, c.error)).collect();
+    let mut want = vec![(true, false)];
+    want.extend(std::iter::repeat_n((false, false), 79));
+    want.push((false, true));
+    assert_eq!(calls, want, "one record per call, the reset before the first and the error at the 81st");
+    assert_eq!((report.made, report.skipped), (81, 19));
+    let g = p.lifecycle().generation;
+    assert!(report.calls().all(|c| c.generation == g));
+}
+
+#[test]
+fn a_reset_before_a_refused_start_is_reported_by_the_first_call_that_processes() {
+    let _serial = serial();
+    let mut p = generator();
+    cmd(&mut p, "CLEAR;REFUSE_START_ONCE");
+    log(&mut p);
+    p.restart_processing();
+    block(&mut p);
+    let rec = log(&mut p);
+    assert_eq!(rec, ["reset", "start -> 0"], "the reset ran, then the start was refused");
+    let (_, report) = take(&mut p);
+    assert_eq!((report.made, report.skipped), (0, 4));
+    block(&mut p);
+    let rec = log(&mut p);
+    assert_eq!(rec.first().map(String::as_str), Some("start -> 1"), "{rec:?}");
+    assert!(!rec.iter().any(|l| l == "reset"), "the reset is not repeated: {rec:?}");
+    let (_, report) = take(&mut p);
+    let resets: Vec<bool> = report.calls().map(|c| c.reset_before).collect();
+    assert_eq!(resets, [true, false, false, false], "the first call that processes reports the reset");
+}
+
+#[test]
+fn with_collection_off_output_events_are_answered_as_before() {
+    let _serial = serial();
+    let mut p = transit_clap_host::create(&id_of(common::notes_fixture_dir(), "Fixture Notes")).unwrap();
+    p.prepare(48_000.0, NATIVE, 2);
+    assert_eq!(p.note_output(), Some(NoteOutputInfo { read: 1, declared: 2 }), "the capability is still reported");
+    cmd(&mut p, "CLEAR;FLOOD 0 1000;FLOOD 1 100");
+    log(&mut p);
+    block(&mut p);
+    let floods: Vec<String> = log(&mut p).into_iter().filter(|l| l.starts_with("flood")).collect();
+    assert_eq!(floods, ["flood 1000 0", "flood 100 0"], "try_push accepts every event, as before");
+    let (got, report) = take(&mut p);
+    assert!(got.is_empty(), "nothing collected");
+    assert_eq!((report.made, report.overflow), (4, 0));
 }

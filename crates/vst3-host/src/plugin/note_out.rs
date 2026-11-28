@@ -47,7 +47,11 @@ impl Vst3Plugin {
     /// (the generation it ran under, the reset before it, an error). A failed reset is the call's
     /// processing error: returned as an error, so the call is counted and contained as one.
     pub(super) fn note_call(&mut self, core: &Core, r: Result<u32, i32>, reset: Reset, start: u32, frames: usize) -> Result<u32, i32> {
-        core.inst.drain_output(&mut self.note_out, start, u32::try_from(frames).unwrap_or(u32::MAX));
+        if core.inst.collecting() {
+            core.inst.drain_output(&mut self.note_out, start, u32::try_from(frames).unwrap_or(u32::MAX));
+        } else {
+            core.inst.forget_output();
+        }
         let r = if reset.ok { r } else { r.and(Err(vst3::Steinberg::kResultFalse)) };
         let generation = self.shared.generation.load(Ordering::Acquire);
         self.note_out.record_call(CallRecord { generation, reset_before: reset.ran, error: r.is_err() });

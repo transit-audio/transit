@@ -309,6 +309,11 @@ impl Plugin for Hosted {
             p.restart_processing();
         }
     }
+    fn collect_note_output(&mut self, on: bool) {
+        if let Some(p) = &mut self.inner {
+            p.collect_note_output(on);
+        }
+    }
 }
 
 /// The UI's handle to an editor on the host thread. Open, close and parameter echoes are sent and

@@ -317,7 +317,7 @@ mod tests {
             inst.plugin = &vt;
             let frames = if case == 1 { 65 } else { 64 };
             let (failed, stats) = allocation_probe::measure(|| {
-                let result = inst.process(frames, 0, &mut inputs, &mut outputs, &[], 0, None, &mut notes, None);
+                let result = inst.process(frames, 0, &mut inputs, &mut outputs, &[], 0, None, Some(&mut notes), None);
                 result.is_err()
             });
             // Restore the genuine lifecycle state before any assertion can unwind.

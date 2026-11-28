@@ -23,6 +23,9 @@ pub(crate) struct LifeOut {
     dialect: AtomicU8,
     read: AtomicU32,
     declared: AtomicU32,
+    /// Note output collection asked for (control thread), and in force for this activation.
+    asked: AtomicBool,
+    collecting: AtomicBool,
 }
 
 impl Default for LifeOut {
@@ -33,6 +36,8 @@ impl Default for LifeOut {
             dialect: AtomicU8::new(0),
             read: AtomicU32::new(NONE),
             declared: AtomicU32::new(0),
+            asked: AtomicBool::new(false),
+            collecting: AtomicBool::new(false),
         }
     }
 }
@@ -51,6 +56,16 @@ impl LifeOut {
     pub(crate) fn lifecycle(&self) -> Lifecycle {
         let generation = self.generation();
         Lifecycle { generation, active: self.alive.load(Ordering::Relaxed) }
+    }
+
+    /// Asks for collection from the next activation on.
+    pub(crate) fn ask_collection(&self, on: bool) {
+        self.asked.store(on, Ordering::Relaxed);
+    }
+
+    /// Collection is in force for this activation (read under the core).
+    pub(crate) fn collecting(&self) -> bool {
+        self.collecting.load(Ordering::Relaxed)
     }
 
     pub(crate) fn read_port(&self) -> Option<u32> {
@@ -80,6 +95,7 @@ impl Shared {
         lo.dialect.store(mode | midi, Ordering::Relaxed);
         lo.declared.store(declared, Ordering::Relaxed);
         lo.read.store(read.unwrap_or(NONE), Ordering::Relaxed);
+        lo.collecting.store(lo.asked.load(Ordering::Relaxed), Ordering::Relaxed);
         lo.next_generation(activated && core.inst.is_active());
     }
 }
@@ -100,4 +116,11 @@ impl ClapPlugin {
     pub(super) fn skip_calls(&mut self, frames: usize) {
         self.note_out.skipped(calls_due(frames, self.block));
     }
+}
+
+/// Test seam: the parameter values every live instance's host state has queued for the edit path.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn queued_edits() -> Vec<(u32, f64)> {
+    let all: Vec<std::sync::Arc<Shared>> = super::lock(super::live()).iter().filter_map(std::sync::Weak::upgrade).collect();
+    all.iter().flat_map(|s| super::lock(&s.host.edits).clone()).collect()
 }

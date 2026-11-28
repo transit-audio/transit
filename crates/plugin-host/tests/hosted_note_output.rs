@@ -58,6 +58,9 @@ impl Plugin for Notes {
     fn restart_processing(&mut self) {
         self.resets.fetch_add(1, Ordering::SeqCst);
     }
+    fn collect_note_output(&mut self, on: bool) {
+        self.resets.fetch_add(if on { 10 } else { 100 }, Ordering::SeqCst);
+    }
 }
 
 #[test]
@@ -74,9 +77,15 @@ fn the_wrapper_forwards_the_note_output_seam() {
         true
     });
     assert_eq!(got, vec![EVENT]);
-    assert_eq!(report.calls(), &[CallRecord { generation: 9, reset_before: true, error: false }], "the call report, through the wrapper");
+    assert_eq!(
+        report.calls().collect::<Vec<_>>(),
+        [CallRecord { generation: 9, reset_before: true, error: false }],
+        "the call report, through the wrapper"
+    );
     p.restart_processing();
     assert_eq!(resets.load(Ordering::SeqCst), 1, "the stage reset reached the instance");
+    p.collect_note_output(true);
+    assert_eq!(resets.load(Ordering::SeqCst), 11, "the collection switch reached the instance");
     drop(p);
     assert!(host.shutdown(Duration::from_secs(10)));
 }

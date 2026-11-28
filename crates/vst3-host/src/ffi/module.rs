@@ -602,6 +602,8 @@ impl Bundle {
             // SAFETY: `ProcessContext` is plain data (numbers and small structs); all-zero is valid.
             context: unsafe { std::mem::zeroed() },
             event_in: false,
+            collect_notes: false,
+            notes_out: false,
             editor: Arc::new(EditorLink::default()),
             component,
             host,

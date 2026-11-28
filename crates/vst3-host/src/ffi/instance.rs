@@ -73,6 +73,11 @@ pub(crate) struct Instance {
     pub(super) out_events: ComWrapper<EventList>,
     pub(super) context: sv::ProcessContext,
     pub(super) event_in: bool,
+    /// Note output collection asked for (ADR 0064, decision 3): event output bus 0 is activated
+    /// and read from the next configuration on. Off, the output list behaves as before HM1.
+    pub(super) collect_notes: bool,
+    /// Collection in force for the current configuration (asked for, and an event output bus).
+    pub(super) notes_out: bool,
     pub(super) editor: Arc<EditorLink>,
     // Field order matters for drop: `Drop::drop` shuts the plugin down first; then the component
     // and host objects are released, and the bundle (which keeps the code mapped) goes last.
@@ -387,7 +392,8 @@ impl Instance {
             // SAFETY: valid component; event input bus 0 exists.
             unsafe { self.component.activateBus(event as sv::MediaType, din as sv::BusDirection, 0, 1) };
         }
-        if layout.event_outputs > 0 {
+        self.notes_out = self.collect_notes && layout.event_outputs > 0;
+        if self.notes_out {
             self.activate_event_output();
         }
         self.event_in = layout.event_input;
