@@ -357,6 +357,26 @@ pub(super) fn hand(p: &mut dyn Plugin, offset: u32, ev: &PluginEvent, refused: &
 }
 
 impl super::MidiFxHost {
+    /// The block's check of every hosted stage among the first `n` (the first `n_rack` the
+    /// rack's), with the instances `cells` of the track's own chain: true when a barrier must run.
+    pub(super) fn check_hosted(&mut self, cells: &[Option<crate::PluginSlot>], n: usize, n_rack: usize) -> bool {
+        let mut barrier = false;
+        for (i, s) in self.stages.iter_mut().enumerate().take(n) {
+            let Some(s) = s.as_mut().filter(|s| !s.bypass) else { continue };
+            let uid = s.uid;
+            let Some(h) = s.hosted.as_mut() else { continue };
+            let cell = i
+                .checked_sub(n_rack)
+                .filter(|_| !h.on_rack)
+                .and_then(|k| cells.get(k))
+                .and_then(Option::as_ref)
+                .filter(|c| c.midi_stage.as_ref().is_some_and(|m| m.uid == uid))
+                .map(|c| (&*c.plugin, c.generation.get()));
+            barrier |= h.check(cell);
+        }
+        barrier
+    }
+
     /// Stage `i` of the chain, a hosted one that is not bypassed, in `run` (see the module
     /// documentation): between blocks its input waits; in a block it is handed to the instance
     /// with what waited, the block is processed, and the stage's output replaces `a`.

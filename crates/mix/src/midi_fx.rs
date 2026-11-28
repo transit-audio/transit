@@ -418,20 +418,7 @@ impl MidiFxHost {
         }
         // The hosted stages' check (ADR 0064, decision 6's table): after an edit it only records
         // what it found (the edit was the barrier).
-        let mut barrier = false;
-        for (i, s) in self.stages.iter_mut().enumerate().take(n) {
-            let Some(s) = s.as_mut().filter(|s| !s.bypass) else { continue };
-            let uid = s.uid;
-            let Some(h) = s.hosted.as_mut() else { continue };
-            let cell = i
-                .checked_sub(n_rack)
-                .filter(|_| !h.on_rack)
-                .and_then(|k| cells.get(k))
-                .and_then(Option::as_ref)
-                .filter(|c| c.midi_stage.as_ref().is_some_and(|m| m.uid == uid))
-                .map(|c| (&*c.plugin, c.generation.get()));
-            barrier |= h.check(cell);
-        }
+        let barrier = self.check_hosted(cells, n, n_rack);
         if barrier && edit.is_none() {
             self.end_notes(plugin);
             edit = Some(ChainEdit { first: false });
