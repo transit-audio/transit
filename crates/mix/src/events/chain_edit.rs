@@ -13,12 +13,14 @@ use transit_model::Track;
 use transit_time::Samples;
 
 impl InstrumentEvents {
-    /// Start of a block for the track's MIDI effects ([`crate::midi_fx::MidiFxHost::begin`]),
-    /// with a chain edit's steps when the chain changed.
+    /// Start of a block for the track's MIDI effects ([`crate::midi_fx::MidiFxHost::begin_with`],
+    /// `cells` the instances of its hosted stages), with a chain edit's steps when the chain
+    /// changed or a hosted stage's barrier ran.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn begin_fx(
         &mut self,
         plugin: &mut dyn Plugin,
+        cells: &mut [Option<crate::PluginSlot>],
         t: &Track,
         rack: Option<&Track>,
         pos: Samples,
@@ -27,12 +29,21 @@ impl InstrumentEvents {
         frame: u64,
         frames: usize,
     ) {
-        let Some(edit) = self.fx.begin(plugin, t, rack, pos, transport, sample_rate, frame, frames) else { return };
+        let Some(edit) = self.fx.begin_with(plugin, cells, t, rack, pos, transport, sample_rate, frame, frames) else { return };
         if edit.first {
             self.end_direct_voices(plugin);
         }
         self.fx.release_pedals(plugin);
         self.press_nothing_again();
+    }
+
+    /// End of the block's collection for the track's MIDI effects
+    /// ([`crate::midi_fx::MidiFxHost::flush_with`]): a hosted stage's barrier in the block is an
+    /// edit, so the mix presses nothing again (the host gave its note-offs and pedal-ups).
+    pub(crate) fn flush_fx(&mut self, plugin: &mut dyn Plugin, cells: &mut [Option<crate::PluginSlot>]) {
+        if self.fx.flush_with(plugin, cells) {
+            self.press_nothing_again();
+        }
     }
 
     /// The first insertion's end through the mix's own table: a note-off by `give` for every voice

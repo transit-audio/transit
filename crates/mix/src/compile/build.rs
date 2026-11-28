@@ -103,7 +103,7 @@ impl PlanCompiler {
         let mut strip_moves = Vec::new();
         let mut key_caps: Vec<usize> = Vec::new();
         desc.strips.clear();
-        for (si, (ti, layout, _, clips)) in per_strip.iter().enumerate() {
+        for (si, (ti, layout, planned, clips)) in per_strip.iter().enumerate() {
             let Some(t) = s.tracks.get(*ti) else { continue };
             let ch = strip_channels(t, main_ch);
             let ch16 = u16::try_from(ch).unwrap_or(u16::MAX);
@@ -114,6 +114,9 @@ impl PlanCompiler {
             st.scratch = vec![0.0; block];
             st.mode_bypass = t.mixer.inserts.iter().map(|ins| ins.as_ref().is_some_and(|ins| desc.bypass.contains(&ins.uid.get()))).collect();
             st.plugins = (0..t.mixer.inserts.len()).map(|_| None).collect();
+            // A cell per chain position up to the last hosted MIDI effect stage (ADR 0064, 8.2).
+            let stages = planned.iter().filter(|p| p.kind == CellKind::MidiFx).map(|p| usize::from(p.index) + 1).max().unwrap_or(0);
+            st.midi_fx = (0..stages).map(|_| None).collect();
             st.hw = desc.hardware.iter().filter(|(id, _)| *id == t.id).map(|(_, sp)| crate::hardware::HwSlot::new(sp.clone(), block)).collect();
             st.ext = desc.external.iter().find(|(id, _)| *id == t.id).map(|(_, sp)| crate::external::ExtSlot::new(sp.clone()));
             st.clipbuf = vec![vec![0.0; block]; ch];

@@ -115,6 +115,8 @@ pub(crate) enum CellKind {
     Instrument,
     ClipEq,
     ClipComp,
+    /// A hosted MIDI effect stage's instance (ADR 0064, 8.2), by chain position.
+    MidiFx,
 }
 
 /// A cell's kind, channel count and channel-format code. A move needs equal shapes.
@@ -205,6 +207,7 @@ impl PlanTables {
             CellKind::Instrument => Some(&st.instrument),
             CellKind::ClipEq => st.clip_fx.0.get(i).map(|(_, fx)| &fx.eq),
             CellKind::ClipComp => st.clip_fx.0.get(i).map(|(_, fx)| &fx.comp),
+            CellKind::MidiFx => st.midi_fx.get(i),
         }
     }
 
@@ -217,13 +220,19 @@ impl PlanTables {
             CellKind::Instrument => Some(&mut st.instrument),
             CellKind::ClipEq => st.clip_fx.0.get_mut(i).map(|(_, fx)| &mut fx.eq),
             CellKind::ClipComp => st.clip_fx.0.get_mut(i).map(|(_, fx)| &mut fx.comp),
+            CellKind::MidiFx => st.midi_fx.get_mut(i),
         }
     }
 
     /// Every plug-in instance in the tables.
     pub(crate) fn plugins(&self) -> impl Iterator<Item = &PluginSlot> {
         self.strips.iter().flat_map(|st| {
-            st.plugins.iter().flatten().chain(st.instrument.iter()).chain(st.clip_fx.0.iter().flat_map(|(_, fx)| fx.eq.iter().chain(fx.comp.iter())))
+            st.plugins
+                .iter()
+                .flatten()
+                .chain(st.instrument.iter())
+                .chain(st.clip_fx.0.iter().flat_map(|(_, fx)| fx.eq.iter().chain(fx.comp.iter())))
+                .chain(st.midi_fx.iter().flatten())
         })
     }
 
@@ -244,6 +253,11 @@ impl PlanTables {
                     if let (Some(p), Some(k)) = (m, crate::clip_fx_slot(*clip, comp)) {
                         out.push((st.id, k, p.generation));
                     }
+                }
+            }
+            for (i, p) in st.midi_fx.iter().enumerate() {
+                if let (Some(p), Some(k)) = (p, crate::midi_fx_slot(i)) {
+                    out.push((st.id, k, p.generation));
                 }
             }
         }

@@ -239,6 +239,7 @@ fn slot_state(s: &PluginSlot, w: &mut Writer<'_>) {
         // The midi part (canonical pending form).
         events: _,
         note_delay,
+        midi_stage,
         // Output only: the panels' scope and analysis rings.
         tap: _,
         sample_tap: _,
@@ -253,13 +254,14 @@ fn slot_state(s: &PluginSlot, w: &mut Writer<'_>) {
     w.bool(*woken);
     w.bool(*parameter_pass);
     w.present(note_delay.as_ref(), |w, d| d.record_state(w));
+    w.present(midi_stage.as_deref(), |w, m| m.record_state(w));
 }
 
 /// Every slot of a strip, in order: the inserts, the instrument, then each clip's modules.
 fn slots(st: &Strip) -> impl Iterator<Item = Option<&PluginSlot>> {
     let ClipFxTable(chains) = &st.clip_fx;
     let clips = chains.iter().flat_map(|(_, fx)| [fx.eq.as_ref(), fx.comp.as_ref()]);
-    st.plugins.iter().map(Option::as_ref).chain(std::iter::once(st.instrument.as_ref())).chain(clips)
+    st.plugins.iter().map(Option::as_ref).chain(std::iter::once(st.instrument.as_ref())).chain(clips).chain(st.midi_fx.iter().map(Option::as_ref))
 }
 
 /// The digest of the record `f` writes.
@@ -295,6 +297,9 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
         scratch: _,
         plugins,
         instrument,
+        // Hosted MIDI effect stages: their slots are in `slots` (the plugins part and each slot's
+        // state), their count in the strip's configuration.
+        midi_fx,
         chase,
         edited,
         muted,
@@ -371,6 +376,7 @@ fn strip_print(st: &Strip, i: usize, keys: &key::KeyBank, cx: &MidiContext<'_>) 
             mode_bypass.iter().for_each(|&b| w.bool(b));
             w.bool(*key_pre);
             w.usize(plugins.len());
+            w.usize(midi_fx.len());
             w.usize(chains.len());
             for (clip, fx) in chains {
                 w.u64(*clip);

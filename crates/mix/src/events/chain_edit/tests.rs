@@ -274,7 +274,7 @@ impl Rig {
         let start = self.frame;
         let end = start + frames as u64;
         let (e, m) = (&mut self.e, &mut self.m);
-        e.begin_fx(m, t, None, 0, &Transport::default(), 48_000.0, start, frames);
+        e.begin_fx(m, &mut [], t, None, 0, &Transport::default(), 48_000.0, start, frames);
         e.retry_releases(m);
         for &(at, value) in self.clip.iter().filter(|(at, _)| (start..end).contains(at)) {
             e.clip_ctrl(m, u32::try_from(at - start).unwrap(), [0xB0, 64, value], false);

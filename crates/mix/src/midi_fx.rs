@@ -66,8 +66,12 @@ use crate::note_view::NoteView;
 
 mod delivery;
 mod edit;
+mod hosted;
+mod ledger;
 mod output;
 use delivery::{NO_NOTE, Note, Trigger, oldest};
+pub(crate) use hosted::{HostedStore, hosts_stages};
+use hosted::Hosted;
 use output::Output;
 
 /// Events one block takes into the chain, and each effect writes, at most.
@@ -119,6 +123,18 @@ pub struct MidiFxCounts {
     /// Events the instrument accepted that a full note view (#242, [`crate::note_view`]) could
     /// not keep for the track's inserts that read notes; the view ended with an all-notes-off.
     pub note_view_dropped: u64,
+    /// Hosted stages (ADR 0064): releases and pressures their ledger matched to nothing (5.3).
+    pub unmatched_releases: u64,
+    /// Hosted stages: rejected note-ons a full record table could not keep (5.6).
+    pub rejected_unrecorded: u64,
+    /// Hosted stages: output events dropped by the record's table, or a note-on with an invalid
+    /// address (decision 3).
+    pub hosted_dropped: u64,
+    /// Hosted stages: output events discarded, from a call the epoch did not accept or a failing
+    /// block (decisions 6 and 7.4).
+    pub hosted_discarded: u64,
+    /// Hosted stages: input events the plug-in's own queue refused.
+    pub hosted_refused: u64,
 }
 
 impl MidiFxCounts {
@@ -137,6 +153,11 @@ impl MidiFxCounts {
         add(&mut self.refused, o.refused);
         add(&mut self.retry_overflow, o.retry_overflow);
         add(&mut self.note_view_dropped, o.note_view_dropped);
+        add(&mut self.unmatched_releases, o.unmatched_releases);
+        add(&mut self.rejected_unrecorded, o.rejected_unrecorded);
+        add(&mut self.hosted_dropped, o.hosted_dropped);
+        add(&mut self.hosted_discarded, o.hosted_discarded);
+        add(&mut self.hosted_refused, o.hosted_refused);
     }
 }
 
@@ -155,6 +176,9 @@ struct Stage {
     bypass: bool,
     /// `None`: an id this build does not know, which passes events through.
     fx: Option<Builtin>,
+    /// A hosted plug-in's stage (ADR 0064 HM2): its instance is a plan cell of the strip
+    /// ([`hosted`]). Its carry holds the events that wait between blocks (4.6).
+    hosted: Option<Hosted>,
     carry: [Carried; MIDI_FX_CARRY],
     carry_len: usize,
 }
@@ -174,6 +198,11 @@ pub(crate) struct MidiFxHost {
     stages: [Option<Stage>; 2 * MAX_MIDI_EFFECTS],
     /// Effects in the chain (the first `len` stages).
     len: usize,
+    /// How many of them are the rack's (a member runs its rack's chain first).
+    n_rack: usize,
+    /// The next host note id a hosted stage gives (31 bits; ADR 0064, 5.1): one counter for the
+    /// chain, running on across barriers and instances.
+    next_host: u32,
     /// Within a block: events are collected, not run at once.
     capturing: bool,
     frames: u32,
@@ -263,6 +292,8 @@ impl MidiFxHost {
         Box::new(MidiFxHost {
             stages: std::array::from_fn(|_| None),
             len: 0,
+            n_rack: 0,
+            next_host: 0,
             capturing: false,
             frames: 0,
             clock: 0,
@@ -303,9 +334,29 @@ impl MidiFxHost {
     /// parameter values at `pos`, the transport and the sample rate, and events are collected until
     /// [`MidiFxHost::flush`]. Returns the edit when the chain changed: the caller completes its
     /// steps (ADR 0057, 2.13; [`crate::events`]), before any of the block's events.
+    #[cfg(test)]
     pub(crate) fn begin(
         &mut self,
         plugin: &mut dyn Plugin,
+        t: &Track,
+        rack: Option<&Track>,
+        pos: Samples,
+        transport: &Transport,
+        sample_rate: f64,
+        frame: u64,
+        frames: usize,
+    ) -> Option<ChainEdit> {
+        self.begin_with(plugin, &mut [], t, rack, pos, transport, sample_rate, frame, frames)
+    }
+
+    /// [`MidiFxHost::begin`] with the instances of the track's hosted stages (`cells`, by position
+    /// in its own chain, ADR 0064 HM2): a hosted stage's instance arriving or leaving, a state the
+    /// user did not ask for entered or left, or a new lifecycle generation is a barrier with an
+    /// edit's steps, before the block's events ([`hosted`]).
+    pub(crate) fn begin_with(
+        &mut self,
+        plugin: &mut dyn Plugin,
+        cells: &mut [Option<crate::PluginSlot>],
         t: &Track,
         rack: Option<&Track>,
         pos: Samples,
@@ -328,7 +379,7 @@ impl MidiFxHost {
                 entry(i)
                     .is_some_and(|(_, _, w)| s.as_ref().is_some_and(|s| s.uid == w.uid.get() && s.bypass == w.bypass && s.plugin == fnv(&w.plugin)))
             });
-        let edit = (!same).then(|| ChainEdit { first: !self.active() });
+        let mut edit = (!same).then(|| ChainEdit { first: !self.active() });
         if !same {
             self.end_notes(plugin);
             for (i, slot) in self.stages.iter_mut().enumerate() {
@@ -337,12 +388,16 @@ impl MidiFxHost {
                     continue;
                 };
                 let fx = Builtin::new(&w.plugin);
+                let hosted = crate::is_third_party(&w.plugin).then(|| Hosted::new(&w.plugin, i < n_rack));
                 match slot {
                     Some(s) => {
+                        // A stage that stays failed through an edit stays failed until Stop (7.4).
+                        let failed = s.uid == w.uid.get() && s.hosted.is_some_and(|h| h.failed);
                         s.uid = w.uid.get();
                         s.plugin = fnv(&w.plugin);
                         s.bypass = w.bypass;
                         s.fx = fx;
+                        s.hosted = hosted.map(|h| Hosted { failed, ..h });
                         s.carry_len = 0;
                     }
                     None => {
@@ -351,6 +406,7 @@ impl MidiFxHost {
                             plugin: fnv(&w.plugin),
                             bypass: w.bypass,
                             fx,
+                            hosted,
                             carry: [NO_CARRY; MIDI_FX_CARRY],
                             carry_len: 0,
                         });
@@ -358,6 +414,27 @@ impl MidiFxHost {
                 }
             }
             self.len = n;
+            self.n_rack = n_rack;
+        }
+        // The hosted stages' check (ADR 0064, decision 6's table): after an edit it only records
+        // what it found (the edit was the barrier).
+        let mut barrier = false;
+        for (i, s) in self.stages.iter_mut().enumerate().take(n) {
+            let Some(s) = s.as_mut().filter(|s| !s.bypass) else { continue };
+            let uid = s.uid;
+            let Some(h) = s.hosted.as_mut() else { continue };
+            let cell = i
+                .checked_sub(n_rack)
+                .filter(|_| !h.on_rack)
+                .and_then(|k| cells.get(k))
+                .and_then(Option::as_ref)
+                .filter(|c| c.midi_stage.as_ref().is_some_and(|m| m.uid == uid))
+                .map(|c| (&*c.plugin, c.generation.get()));
+            barrier |= h.check(cell);
+        }
+        if barrier && edit.is_none() {
+            self.end_notes(plugin);
+            edit = Some(ChainEdit { first: false });
         }
         for (i, s) in self.stages.iter_mut().enumerate().take(n) {
             let Some((owner, index, w)) = entry(i) else { continue };
@@ -417,7 +494,7 @@ impl MidiFxHost {
             let Some(slot) = self.a.first_mut() else { return false };
             *slot = TimedEvent { offset: 0, event: *ev };
             self.a_len = 1;
-            self.run(plugin, 1, false);
+            self.run(plugin, &mut [], 1, false);
         }
         if let Some(n) = known.filter(|_| off) {
             self.forget_given(n);
@@ -446,20 +523,35 @@ impl MidiFxHost {
 
     /// End of the block's collection: the block's events through the chain, then to `plugin`,
     /// right before it processes.
+    #[cfg(test)]
     pub(crate) fn flush(&mut self, plugin: &mut dyn Plugin) {
+        let _ = self.flush_with(plugin, &mut []);
+    }
+
+    /// [`MidiFxHost::flush`] with the instances of the track's hosted stages (as `begin_with`).
+    /// True when a hosted stage's barrier ran in the block (an edit: the caller makes the mix
+    /// press nothing again, [`crate::events`]).
+    pub(crate) fn flush_with(&mut self, plugin: &mut dyn Plugin, cells: &mut [Option<crate::PluginSlot>]) -> bool {
         if !self.capturing {
-            return;
+            return false;
         }
         self.capturing = false;
         let frames = self.frames;
-        self.run(plugin, frames, true);
+        let edit = self.run(plugin, cells, frames, true);
         self.clock = self.clock.saturating_add(u64::from(frames));
+        edit
     }
 
     /// Stop or panic: ends every note the chain started and forgets what it carries and holds;
-    /// the releases the mix sends next for the chain's input are swallowed.
+    /// the releases the mix sends next for the chain's input are swallowed. A hosted stage failed
+    /// by a processing error runs again from the next block (ADR 0064, 7.4: Stop ends a failure,
+    /// and this barrier is the one that ends it).
     pub(crate) fn panic(&mut self, plugin: &mut dyn Plugin) {
         if self.active() {
+            for h in self.stages.iter_mut().flatten().filter_map(|s| s.hosted.as_mut()).filter(|h| h.failed) {
+                h.failed = false;
+                h.state = None;
+            }
             self.end_notes(plugin);
         }
     }
@@ -467,7 +559,8 @@ impl MidiFxHost {
     /// Runs `a` (`a_len` events at offsets below `frames`) through the chain and gives the result
     /// to `plugin`. `block`: a rendered block, whose carried events come due (else an event run
     /// between blocks through each effect's no-time call, which only adds to the carries).
-    fn run(&mut self, plugin: &mut dyn Plugin, frames: u32, block: bool) {
+    fn run(&mut self, plugin: &mut dyn Plugin, cells: &mut [Option<crate::PluginSlot>], frames: u32, block: bool) -> bool {
+        let mut edit = false;
         if block {
             // Last block's refused releases first, at offset 0, directly (P3b).
             self.give_retries(plugin);
@@ -477,7 +570,12 @@ impl MidiFxHost {
             sort_by_offset(a);
         }
         let end = self.clock.saturating_add(u64::from(frames));
-        for stage in self.stages.iter_mut().take(self.len).flatten() {
+        for i in 0..self.len {
+            if self.stages.get(i).and_then(Option::as_ref).is_some_and(|s| !s.bypass && s.hosted.is_some()) {
+                edit |= self.run_hosted(plugin, cells, i, frames, block);
+                continue;
+            }
+            let Some(stage) = self.stages.get_mut(i).and_then(Option::as_mut) else { continue };
             let Some(fx) = stage.fx.as_mut().filter(|_| !stage.bypass) else { continue };
             // The effect's buffer: this block's carried events first, then what the effect writes
             // (P3b: they enter the buffer before it writes, ahead of its events at their offset).
@@ -583,6 +681,7 @@ impl MidiFxHost {
             // without CC mappings can ignore channel-mode messages), then the safety controllers.
             self.end_notes_at(plugin, frames - 1, true);
         }
+        edit
     }
 
     /// Gives one event to the instrument and, when it accepts it, keeps it in the note view (#242).
@@ -617,6 +716,8 @@ impl MidiFxHost {
         let MidiFxHost {
             stages,
             len,
+            n_rack,
+            next_host,
             capturing,
             frames,
             clock,
@@ -644,7 +745,7 @@ impl MidiFxHost {
         );
         w.usize(stages.len());
         for s in stages {
-            w.present(s.as_ref(), |w, Stage { uid, plugin, bypass, fx, carry, carry_len }| {
+            w.present(s.as_ref(), |w, Stage { uid, plugin, bypass, fx, hosted, carry, carry_len }| {
                 w.u64(*uid);
                 w.u64(*plugin);
                 w.bool(*bypass);
@@ -652,6 +753,18 @@ impl MidiFxHost {
                     let e = fx.effect_ref();
                     w.bytes(e.info().id.as_bytes());
                     e.fingerprint(w);
+                });
+                w.present(hosted.as_ref(), |w, h| {
+                    let Hosted { vst3, on_rack, inst, epoch, reset_done, reset_request, clear_ledger, state, failed } = h;
+                    w.bool(*vst3);
+                    w.bool(*on_rack);
+                    w.u64(*inst);
+                    w.present(*epoch, |w, g| w.u64(g));
+                    w.bool(*reset_done);
+                    w.bool(*reset_request);
+                    w.bool(*clear_ledger);
+                    w.present(*state, |w, s| w.u8(s as u8));
+                    w.bool(*failed);
                 });
                 w.usize(*carry_len);
                 for Carried { due, event } in carry.get(..*carry_len).unwrap_or(carry) {
@@ -661,6 +774,8 @@ impl MidiFxHost {
             });
         }
         w.usize(*len);
+        w.usize(*n_rack);
+        w.u32(*next_host);
         w.u32(*frames);
         w.u64(*clock);
         let note = |w: &mut transit_state_record::Writer<'_>, n: &Note| {

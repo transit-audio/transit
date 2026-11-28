@@ -142,7 +142,7 @@ impl RangeRender {
     fn build(s: &Session, bus: Option<BusId>, range: Range, block: usize, io: Option<&IoMap>) -> Result<Self, CompileError> {
         let target = Self::target_for(s, block, io.map_or(0, |m| m.outputs));
         let (sr, max_block) = (target.sample_rate as f32, target.block());
-        let mut make = |spec: &InstanceSpec, _: SlotGen| create_instance(&spec.id, spec.state.as_deref(), sr, max_block, spec.ch);
+        let mut make = |spec: &InstanceSpec, _: SlotGen| crate::create_instance_for(spec, sr, max_block, || {});
         Self::build_with(s, bus, range, block, io, &mut make)
     }
 

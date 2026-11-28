@@ -200,7 +200,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                     // A member of a rack runs the rack's MIDI effects ahead of its own (ADR 0036).
                     let rack = t.folder.and_then(|_| s.rack_of(t)).map(|(r, _)| r);
                     // A chain edit ends the track's voices and releases its pedals here (ADR 0057, P3a).
-                    e.begin_fx(&mut *inst.plugin, t, rack, pos, transport, s.sample_rate.as_f64(), live.frame, frames);
+                    e.begin_fx(&mut *inst.plugin, &mut strip.midi_fx, t, rack, pos, transport, s.sample_rate.as_f64(), live.frame, frames);
                     e.retry_releases(&mut *inst.plugin);
                     // A member that left its rack lets go of what the rack held (ADR 0034).
                     e.rack_membership(&mut *inst.plugin, rack.is_some());
@@ -223,7 +223,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 // Deliver the remaining live events, including when stopped (F10).
                 if let Some(e) = inst.events.as_deref_mut() {
                     e.deliver(&mut *inst.plugin, live.frame, frames);
-                    e.fx.flush(&mut *inst.plugin);
+                    e.flush_fx(&mut *inst.plugin, &mut strip.midi_fx);
                 }
                 if strip.buf.len() >= 2 {
                     inst.plugin.process(&mut strip.buf, frames);

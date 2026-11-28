@@ -93,7 +93,7 @@ fn a_bypassed_chain_gives_the_instrument_exactly_what_no_chain_does() {
     let plain = play(&[]);
     let bypassed = play(&[("midi_transpose", &[("semitones", 12.0)], true), ("midi_velocity", &[("scale", 0.0)], true)]);
     assert_eq!(bypassed, plain);
-    let unknown = play(&[("clap:not.a.midi.effect", &[], false)]);
+    let unknown = play(&[("midi_not_a_builtin", &[], false)]);
     assert_eq!(unknown, plain, "an effect this build does not know passes events through");
 }
 

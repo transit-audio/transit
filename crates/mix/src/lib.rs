@@ -188,7 +188,7 @@ pub use fingerprint::{AudioFact, MidiFact, Nudge, Poison, PrintHasher, StripFact
 pub use graph::TailWhy;
 pub use hardware::{HardwareReport, HardwareState, hardware_report};
 pub use instance::{
-    InstanceSpec, NewInstance, create_instance, create_instance_with, creating_instance, creation_line, instance_specs, realtime_instance_specs,
+    InstanceSpec, NewInstance, create_instance, create_instance_for, create_instance_with, creating_instance, creation_line, instance_specs, realtime_instance_specs,
 };
 use key::{KeyBank, KeyEnd, KeyIn, KeySpec};
 use matrix::{PanSpec, apply_matrix, apply_matrix_span, build_matrix, identity_matrix};
@@ -245,6 +245,26 @@ pub fn main_channels(s: &Session) -> usize {
 /// Slot index used for a track's instrument plugin in [`InstanceSpec`]
 /// (insert slots use their index).
 pub const INSTRUMENT_SLOT: usize = usize::MAX;
+
+/// First slot index of a track's hosted MIDI effect stages in [`InstanceSpec`] (ADR 0064, 8.2):
+/// chain position `i` of the track's own MIDI effects is `MIDI_FX_SLOT + i`, for the
+/// [`transit_model::MAX_MIDI_EFFECTS`] positions. The range has its top bit clear, so it is no
+/// clip-effect slot, and it is far above every insert index and below [`INSTRUMENT_SLOT`] and
+/// [`RACK_SLOT`].
+pub const MIDI_FX_SLOT: usize = 1 << (usize::BITS - 2);
+
+/// The slot index of the hosted MIDI effect stage at chain position `index` of a track's own
+/// chain ([`MIDI_FX_SLOT`]); `None` past [`transit_model::MAX_MIDI_EFFECTS`].
+#[must_use]
+pub fn midi_fx_slot(index: usize) -> Option<usize> {
+    (index < transit_model::MAX_MIDI_EFFECTS).then_some(MIDI_FX_SLOT + index)
+}
+
+/// The chain position a hosted MIDI effect stage's slot index names ([`midi_fx_slot`]).
+#[must_use]
+pub fn midi_fx_of_slot(slot: usize) -> Option<usize> {
+    slot.checked_sub(MIDI_FX_SLOT).filter(|i| *i < transit_model::MAX_MIDI_EFFECTS)
+}
 
 /// Hosted third-party plugin ids (CLAP or VST3): created off the audio thread in realtime use.
 pub fn is_third_party(id: &str) -> bool {
@@ -525,6 +545,9 @@ struct PluginSlot {
     events: Option<Box<events::InstrumentEvents>>,
     /// Fixed pending note storage for this reading insert, prepared on the control thread.
     note_delay: Option<note_delay::NoteDelay>,
+    /// Plan mode, hosted MIDI effect stages (ADR 0064 HM2): the stage's scratch audio and ledger,
+    /// prepared by the compiler. They travel with the instance and retire with it.
+    midi_stage: Option<Box<midi_fx::HostedStore>>,
     /// Plan mode, inserts and instruments: the scope ring the panel reads (see [`ScopeTap`]).
     tap: Option<Arc<ScopeTap>>,
     /// Plan mode, inserts whose plug-in asks for it (`Plugin::wants_sample_tap`): the input ring a
@@ -537,7 +560,8 @@ impl PluginSlot {
     /// [`clip_fx_slot`]). Hosted plug-ins start `fresh`; hosted effect inserts are suspendable.
     fn new(plugin: Box<dyn Plugin>, id: String, ch: usize, slot: usize) -> Self {
         let third = is_third_party(&id);
-        let note_delay = (slot != INSTRUMENT_SLOT && plugin.reads_track_notes()).then(note_delay::NoteDelay::new);
+        let stage = midi_fx_of_slot(slot).is_some();
+        let note_delay = (slot != INSTRUMENT_SLOT && !stage && plugin.reads_track_notes()).then(note_delay::NoteDelay::new);
         PluginSlot {
             raw_latency: Arc::new(std::sync::atomic::AtomicUsize::new(plugin.latency())),
             #[cfg(feature = "testing")]
@@ -548,7 +572,9 @@ impl PluginSlot {
             failed: false,
             errors_seen: 0,
             fresh: third,
-            suspendable: third && slot != INSTRUMENT_SLOT && clip_fx_of_slot(slot).is_none(),
+            // A hosted MIDI effect stage is never suspended (ADR 0064, 4.5): a generator writes notes
+            // with silent input.
+            suspendable: third && slot != INSTRUMENT_SLOT && !stage && clip_fx_of_slot(slot).is_none(),
             quiet: 0,
             output_silent: true,
             woken: false,
@@ -557,6 +583,7 @@ impl PluginSlot {
             layout: 0,
             events: None,
             note_delay,
+            midi_stage: None,
             tap: None,
             sample_tap: None,
         }
@@ -573,6 +600,9 @@ struct Strip {
     scratch: Vec<f32>,
     plugins: Vec<Option<PluginSlot>>,
     instrument: Option<PluginSlot>,
+    /// Plan mode, an instrument track: the instances of its hosted MIDI effect stages, by chain
+    /// position of its own chain (ADR 0064, 8.2); empty when it has none.
+    midi_fx: Vec<Option<PluginSlot>>,
     /// The instrument's next block starts somewhere new: send it the controllers in effect there.
     chase: bool,
     /// An edit was adopted since the instrument's last block: its clip notes are checked against
@@ -859,6 +889,7 @@ impl Strip {
             scratch: Vec::new(),
             plugins: Vec::new(),
             instrument: None,
+            midi_fx: Vec::new(),
             chase: true,
             edited: false,
             muted: false,

@@ -4,6 +4,9 @@ use super::*;
 use transit_model::{ChannelFormat, TRACK_COLORS, TrackId, TrackKind};
 
 mod between;
+mod hosted;
+mod hosted_barriers;
+mod hosted_fake;
 mod overflow;
 mod ownership;
 
@@ -254,7 +257,7 @@ fn between_blocks_an_event_runs_through_at_once() {
 
 #[test]
 fn an_unknown_effect_passes_events_through() {
-    let t = track(&[("clap:some.note.effect", &[]), ("midi_transpose", &[("semitones", 1.0)])]);
+    let t = track(&[("midi_not_a_builtin", &[]), ("midi_transpose", &[("semitones", 1.0)])]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
     block(&mut host, &mut rec, &t, &[(5, on(1, 60, 100))]);
     assert_eq!(notes(&rec), vec![(0, 5, "on", 61, 100)]);

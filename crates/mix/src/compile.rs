@@ -886,11 +886,12 @@ impl PlanCompiler {
         // The instance of an insert follows it to another slot of its track (a reorder).
         let old_key = match self.active.slots.get(&p.key) {
             Some(o) if o.spec.uid == p.spec.uid => p.key,
-            _ if p.kind == CellKind::Insert && p.spec.uid != 0 => self
+            // So does a hosted MIDI effect stage's (ADR 0064, 8.2: its uid is the slot's).
+            _ if matches!(p.kind, CellKind::Insert | CellKind::MidiFx) && p.spec.uid != 0 => self
                 .active
                 .slots
                 .iter()
-                .find(|(k, o)| k.0 == p.key.0 && o.kind == CellKind::Insert && o.spec.uid == p.spec.uid)
+                .find(|(k, o)| k.0 == p.key.0 && o.kind == p.kind && o.spec.uid == p.spec.uid)
                 .map_or(p.key, |(k, _)| *k),
             _ => p.key,
         };
@@ -961,6 +962,10 @@ impl PlanCompiler {
         if p.kind == CellKind::Instrument && slot.events.is_none() {
             slot.events = Some(crate::events::InstrumentEvents::new());
         }
+        // A hosted MIDI effect stage: its scratch audio and ledger (ADR 0064 HM2), sized here.
+        if p.kind == CellKind::MidiFx && slot.midi_stage.is_none() {
+            slot.midi_stage = Some(crate::midi_fx::HostedStore::new(p.spec.uid, self.target.block()));
+        }
         // Fresh instances have no audio owner yet. Apply their saved values before reading
         // latency, including built-in lookahead settings that are not in opaque state.
         if self.low_latency_limit.is_some()
@@ -1008,6 +1013,7 @@ impl PlanCompiler {
                     CellKind::ClipEq | CellKind::ClipComp => {
                         clip_fx_of_slot(key.1).and_then(|(c, _)| clips.iter().position(|(x, _, _)| *x == c)).unwrap_or(0)
                     }
+                    CellKind::MidiFx => midi_fx_of_slot(key.1).unwrap_or(0),
                     _ => 0,
                 };
                 let p = PlannedSlot {
@@ -1015,7 +1021,7 @@ impl PlanCompiler {
                     kind,
                     index: u16::try_from(index).unwrap_or(u16::MAX),
                     spec: spec.clone(),
-                    params: ins.map_or(0, |i| crate::automation::applied_len(t, crate::automation::lane_slot(key.1), i)),
+                    params: ins.filter(|_| kind != CellKind::MidiFx).map_or(0, |i| crate::automation::applied_len(t, crate::automation::lane_slot(key.1), i)),
                     plan: SlotPlan::Absent,
                     latency: 0,
                 };
@@ -1104,6 +1110,11 @@ impl PlanCompiler {
                     cells.push((k, &mut fx.comp));
                 }
             }
+            for (i, fx) in st.midi_fx.iter_mut().enumerate() {
+                if let Some(k) = midi_fx_slot(i) {
+                    cells.push((k, fx));
+                }
+            }
             for (k, cell) in cells {
                 let key = (id, k);
                 if self.pool.len() >= bound {
@@ -1188,6 +1199,14 @@ fn slot_keys<'a>(
     }
     if let Some(ins) = &t.instrument {
         out.push(((t.id, INSTRUMENT_SLOT), CellKind::Instrument, Some(ins)));
+    }
+    // The hosted MIDI effect stages of an instrument track's own chain (ADR 0064, 8.2).
+    if crate::midi_fx::hosts_stages(t) {
+        for (i, _) in t.midi_effects.iter().enumerate().filter(|(_, fx)| is_third_party(&fx.plugin)) {
+            if let Some(k) = midi_fx_slot(i) {
+                out.push(((t.id, k), CellKind::MidiFx, None));
+            }
+        }
     }
     for (clip, eq, comp) in clips {
         if eq.is_some()

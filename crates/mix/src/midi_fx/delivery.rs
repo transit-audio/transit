@@ -242,6 +242,10 @@ impl MidiFxHost {
             if let Some(fx) = s.fx.as_mut() {
                 fx.effect().reset();
             }
+            // A hosted stage: a new epoch with its reset pending, its ledger cleared (ADR 0064, 6).
+            if let Some(h) = s.hosted.as_mut() {
+                h.barrier();
+            }
         }
         // A refusal recorded for a note of the old chain would outlive its device: its note-off
         // never comes, and oldest-first matching would consume a new note's against it.

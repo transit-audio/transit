@@ -76,6 +76,16 @@ pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
                 sampler_core: sampler_core(ins),
             });
         }
+        // Hosted MIDI effect stages of an instrument track's own chain (ADR 0064, 8.2): one
+        // instance per stage, prepared with two channels for its scratch audio (4.4). A rack's chain
+        // takes none (10.2). State save and restore are HM3's.
+        if crate::midi_fx::hosts_stages(t) {
+            for (i, fx) in t.midi_effects.iter().enumerate().filter(|(_, fx)| is_third_party(&fx.plugin)) {
+                if let Some(slot) = midi_fx_slot(i) {
+                    out.push(InstanceSpec { track: t.id, slot, id: fx.plugin.clone(), ch: 2, state: None, uid: fx.uid.get(), sampler_core: None });
+                }
+            }
+        }
         if t.kind == TrackKind::Audio {
             for clip in t.clips().iter().filter(|c| c.is_audio()) {
                 let (eq, comp) = clip_fx_modules(s, clip.id.0);
@@ -165,6 +175,14 @@ pub fn create_instance(id: &str, state: Option<&[u8]>, sample_rate: f32, max_blo
     create_instance_with(id, state, sample_rate, max_block, ch, || {})
 }
 
+/// [`create_instance_with`] for the slot `spec` names: an instance for a hosted MIDI effect
+/// stage ([`midi_fx_slot`]) enables note-output collection before it is prepared (ADR 0064,
+/// decision 3); every other slot is made exactly as [`create_instance_with`] makes it.
+pub fn create_instance_for(spec: &InstanceSpec, sample_rate: f32, max_block: usize, restoring: impl FnOnce()) -> Option<NewInstance> {
+    let collect = midi_fx_of_slot(spec.slot).is_some();
+    create(&spec.id, spec.state.as_deref(), sample_rate, max_block, spec.ch, collect, restoring)
+}
+
 /// [`create_instance`] that calls `restoring` once the plugin exists and its stored state is
 /// about to be restored and it prepared (the second phase of a load, issue #67).
 pub fn create_instance_with(
@@ -175,6 +193,11 @@ pub fn create_instance_with(
     ch: usize,
     restoring: impl FnOnce(),
 ) -> Option<NewInstance> {
+    create(id, state, sample_rate, max_block, ch, false, restoring)
+}
+
+/// The one creation path: `collect` enables note-output collection before `prepare`.
+fn create(id: &str, state: Option<&[u8]>, sample_rate: f32, max_block: usize, ch: usize, collect: bool, restoring: impl FnOnce()) -> Option<NewInstance> {
     let _creating = CreatingGuard::enter();
     let started = std::time::Instant::now();
     let Some(mut plugin) = create_plugin(id) else {
@@ -185,6 +208,9 @@ pub fn create_instance_with(
     let refused_state = state.is_some_and(|st| !plugin.load_state(st));
     if refused_state {
         log::warn!("{id}: the plugin did not accept its stored state");
+    }
+    if collect {
+        plugin.collect_note_output(true);
     }
     plugin.prepare(sample_rate, max_block, ch);
     log::info!("{}", creation_line(id, started.elapsed(), true, state.is_some()));

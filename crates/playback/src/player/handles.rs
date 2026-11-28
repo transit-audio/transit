@@ -291,14 +291,7 @@ impl Handles {
         let target = control.sessions.target;
         let factory: Factory = Arc::new(move |spec: &InstanceSpec| {
             let restoring = || transit_plugin_host::report_phase(LoadPhase::Restoring);
-            transit_mix::create_instance_with(
-                &spec.id,
-                spec.state.as_deref(),
-                target.sample_rate as f32,
-                target.max_block as usize,
-                spec.ch,
-                restoring,
-            )
+            transit_mix::create_instance_for(spec, target.sample_rate as f32, target.max_block as usize, restoring)
         });
         // The test seam makes only the ids it sends to the host thread; the rest as always.
         #[cfg(any(test, feature = "test-hooks"))]
